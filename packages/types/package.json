@@ -1,0 +1,11 @@
+{
+  "name": "@dms/types",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "index.ts",
+  "private": true,
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "zod": "^3.25.76"
+  }
+}

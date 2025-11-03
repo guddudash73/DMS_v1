@@ -1,0 +1,10 @@
+{
+  "css.validate": false, // turn off stock CSS validator
+  "scss.validate": false, // if you use SCSS too
+  "less.validate": false, // if you use Less
+  "tailwindCSS.emmetCompletions": true,
+  "tailwindCSS.includeLanguages": {
+    "css": "css",
+    "postcss": "css"
+  }
+}

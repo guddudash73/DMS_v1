@@ -1,0 +1,53 @@
+# Node / package managers
+node_modules/
+npm-debug.log*
+*.log
+.pnpm-debug.log*
+.yarn-integrity
+.eslintcache
+
+# Build output
+dist/
+.out/
+.next/
+.next/cache/
+.turbo/
+
+# Coverage & test artifacts
+coverage/
+.nyc_output/
+playwright-report/
+test-results/
+cypress/videos/
+cypress/screenshots/
+
+# Env & secrets (commit an .env.example instead)
+.env
+.env.*
+!.env.example
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors/IDEs
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+!.vscode/tasks.json
+.idea/
+.history/
+
+# Docker / local dev
+docker-data/
+.docker/
+*.pid
+
+# SST / Infra (when we add SST on Day 4)
+.sst/
+.aws-sam/
+serverless/.serverless/
+
+# Misc caches
+.cache/
