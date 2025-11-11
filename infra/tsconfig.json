@@ -1,0 +1,11 @@
+{
+  "compilerOptions": {
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["sst.config.ts", "stacks/**/*.ts", "ambient-sst.d.ts"]
+}

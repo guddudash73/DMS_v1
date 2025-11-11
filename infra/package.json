@@ -1,0 +1,11 @@
+{
+  "name": "@dms/infra",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "sst": "^3.17.23",
+    "typescript": "^5.9.3"
+  }
+}

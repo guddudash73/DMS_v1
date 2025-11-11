@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { VisitId } from './visit';
+import { VisitId } from './visit.js';
 
 export const XrayId = z.string().min(1);
 export type XrayId = z.infer<typeof XrayId>;

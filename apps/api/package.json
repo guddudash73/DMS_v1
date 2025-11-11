@@ -9,9 +9,13 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\"",
-    "test": "echo \"(tests start Day 6)\" && exit 0"
+    "test": "echo \"(tests start Day 6)\" && exit 0",
+    "clean": "rimraf dist || rm -rf dist"
   },
   "dependencies": {
+    "@aws-sdk/client-dynamodb": "^3.927.0",
+    "@aws-sdk/client-s3": "^3.927.0",
+    "@aws-sdk/lib-dynamodb": "^3.927.0",
     "@dms/config": "file:../../packages/config",
     "@dms/types": "file:../../packages/types",
     "cors": "^2.8.5",

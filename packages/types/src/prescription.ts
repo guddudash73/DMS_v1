@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { VisitId } from './visit';
+import { VisitId } from './visit.js';
 
 const Frequency = z.enum(['QD', 'BID', 'TID', 'QID', 'HS', 'PRN']);
 const Timing = z.enum(['BEFORE_MEAL', 'AFTER_MEAL', 'ANY']);
