@@ -9,4 +9,4 @@ Windows note: prefer `127.0.0.1` over `localhost` for emulator endpoints.
 S3 dev uses path-style addressing.
 
 Express v5.1, Zod v4 contracts. JWT lib planned: `jsonwebtoken@^9` (+ `@types/jsonwebtoken`).
-Bcrypt planned: `bcrypt@^5` (native).
+Bcrypt: `bcrypt@^6` (native).

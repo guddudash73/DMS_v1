@@ -33,7 +33,7 @@ export const LoginResponse = z.object({
   role: Role,
   tokens: TokenPair,
 });
-export type LoginResponse = z.infer<typeof LoginRequest>;
+export type LoginResponse = z.infer<typeof LoginResponse>;
 
 export const RefreshResponse = z.object({
   tokens: TokenPair,
