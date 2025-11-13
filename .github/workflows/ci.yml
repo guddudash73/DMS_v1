@@ -20,6 +20,11 @@ jobs:
       contents: read
       actions: read
       checks: write
+    env:
+      NODE_ENV: test
+      DDB_TABLE_NAME: dms-dev-table
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
     steps:
       - name: Checkout
         uses: actions/checkout@v4

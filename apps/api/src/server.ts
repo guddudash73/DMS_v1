@@ -3,6 +3,7 @@ import cors from 'cors';
 import { parseEnv } from '@dms/config/env';
 import type { HealthResponse } from '@dms/types';
 import authRoutes from './routes/auth';
+import patientRoutes from './routes/patients';
 
 const env = parseEnv(process.env);
 
@@ -25,6 +26,7 @@ export const createApp = () => {
   });
 
   app.use('/auth', authRoutes);
+  app.use('/patients', patientRoutes);
 
   return app;
 };

@@ -11,4 +11,5 @@ export const {
   S3_ENDPOINT,
   ACCESS_TOKEN_TTL_SEC,
   REFRESH_TOKEN_TTL_SEC,
+  DDB_TABLE_NAME,
 } = env;
