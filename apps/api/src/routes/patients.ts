@@ -1,6 +1,7 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { PatientCreate, PatientUpdate, PatientSearchQuery, PatientId } from '@dms/types';
 import { patientRepository } from '../repositories/patientRepository';
+import { visitRepository } from '../repositories/visitRepository';
 
 const router = express.Router();
 
@@ -95,6 +96,22 @@ router.patch(
       return res.status(404).json({ error: 'NOT_FOUND' });
     }
     return res.status(200).json(updated);
+  }),
+);
+
+router.get(
+  '/:patientId/visits',
+  asyncHandler(async (req, res) => {
+    const parsedId = PatientId.safeParse(req.params.patientId);
+    if (!parsedId.success) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'Invalid patient id',
+      });
+    }
+
+    const visits = await visitRepository.listByPatientId(parsedId.data);
+    return res.status(200).json({ items: visits });
   }),
 );
 
