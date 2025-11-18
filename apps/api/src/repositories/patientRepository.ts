@@ -152,9 +152,20 @@ export class DynamoDBPatientRepository implements PatientRepository {
     let filterExpression = '#entityType = :patient';
 
     if (query && query.trim().length > 0) {
-      expressionNames['#searchText'] = 'searchText';
-      expressionValues[':query'] = query.trim().toLowerCase();
-      filterExpression += ' AND contains(#searchText, :query)';
+      const trimmed = query.trim();
+      const digitsOnly = trimmed.replace(/\D/g, '');
+      const looksLikePhone = digitsOnly.length >= 7 && /^[+0-9][0-9\s\-()+]*$/.test(trimmed);
+
+      if (looksLikePhone) {
+        expressionNames['#phone'] = 'phone';
+        expressionValues[':phoneDigits'] = digitsOnly;
+        filterExpression += ' AND contains(#phone, :phoneDigits)';
+      } else {
+        expressionNames['#searchText'] = 'searchText';
+        const normalizeQuery = trimmed.toLowerCase().replace(/\s+/g, '');
+        expressionValues[':query'] = normalizeQuery;
+        filterExpression += ' AND contains(#searchText, :query)';
+      }
     }
 
     const { Items } = await docClient.send(

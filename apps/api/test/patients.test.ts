@@ -36,3 +36,30 @@ describe('Patients API', () => {
     expect(res.body.error).toBe('VALIDATION_ERROR');
   });
 });
+
+it('searches patient by phone using GET /patients?query=', async () => {
+  const phone = '+919876543210';
+  const digitsOnly = phone.replace(/\D/g, '');
+
+  const createRes = await request(app)
+    .post('/patients')
+    .send({
+      name: 'Phone Search Patient',
+      dob: '2001-02-23',
+      gender: 'male',
+      phone,
+    })
+    .expect(201);
+
+  const patientId = createRes.body.patientId as string;
+
+  const searchRes = await request(app).get('/patients').query({ query: digitsOnly }).expect(200);
+
+  expect(Array.isArray(searchRes.body.items)).toBe(true);
+
+  const found = searchRes.body.items.find((p: any) => p.patientId === patientId);
+
+  expect(found).toBeDefined();
+  expect(found.phone).toBe(phone);
+  expect(found.name).toBe('Phone Search Patient');
+});
