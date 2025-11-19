@@ -1,6 +1,14 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
-import { VisitCreate, VisitStatusUpdate, VisitId, VisitQueueQuery } from '@dms/types';
+import {
+  VisitCreate,
+  VisitStatusUpdate,
+  VisitId,
+  VisitQueueQuery,
+  FollowUpUpsert,
+  FollowUpStatusUpdate,
+} from '@dms/types';
 import { visitRepository, InvalidStatusTransitionError } from '../repositories/visitRepository';
+import { followupRepository, FollowUpRuleViolationError } from '../repositories/followupRepository';
 
 const router = express.Router();
 
@@ -93,6 +101,82 @@ router.patch(
       }
       throw err;
     }
+  }),
+);
+
+router.get(
+  '/:visitId/followup',
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    if (!id.success) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'Invalid visit id',
+      });
+    }
+
+    const followup = await followupRepository.getByVisitId(id.data);
+    if (!followup) {
+      return res.status(404).json({ error: 'NOT_FOUND' });
+    }
+
+    return res.status(200).json(followup);
+  }),
+);
+
+router.put(
+  '/:visitId/followup',
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    if (!id.success) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'Invalid visit id',
+      });
+    }
+
+    const parsedBody = FollowUpUpsert.safeParse(req.body);
+    if (!parsedBody.success) {
+      return handleValidationError(res, parsedBody.error.issues);
+    }
+
+    try {
+      const followup = await followupRepository.upsertForVisit(id.data, parsedBody.data);
+      return res.status(200).json(followup);
+    } catch (err) {
+      if (err instanceof FollowUpRuleViolationError) {
+        return res.status(400).json({
+          error: err.code,
+          message: err.message,
+        });
+      }
+      throw err;
+    }
+  }),
+);
+
+router.patch(
+  '/:visitId/followup/status',
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    if (!id.success) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'Invalid visit id',
+      });
+    }
+
+    const parsedBody = FollowUpStatusUpdate.safeParse(req.body);
+    if (!parsedBody.success) {
+      return handleValidationError(res, parsedBody.error.issues);
+    }
+
+    const updated = await followupRepository.updateStatus(id.data, parsedBody.data);
+    if (!updated) {
+      return res.status(404).json({ error: 'NOT_FOUND' });
+    }
+
+    return res.status(200).json(updated);
   }),
 );
 

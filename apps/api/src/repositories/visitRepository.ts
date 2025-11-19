@@ -42,7 +42,7 @@ const buildPatientVisitKeys = (patientId: string, visitId: string) => ({
 
 const buildVisitMetaKeys = (visitId: string) => ({
   PK: `VISIT#${visitId}`,
-  SK: `META`,
+  SK: 'META',
 });
 
 const toDateString = (timestampMs: number): string => {
@@ -65,6 +65,7 @@ export interface VisitRepository {
   listByPatientId(patientId: string): Promise<Visit[]>;
   updateStatus(visitId: string, nextStatus: VisitStatus): Promise<Visit | null>;
   getDoctorQueue(params: VisitQueueQuery): Promise<Visit[]>;
+  listByDate(date: string): Promise<Visit[]>;
 }
 
 export class DynamoDBVisitRepository implements VisitRepository {
@@ -83,9 +84,10 @@ export class DynamoDBVisitRepository implements VisitRepository {
       visitDate,
       createdAt: now,
       updatedAt: now,
+      // billingAmount: undefined initially; filled after checkout.
     };
 
-    const patientItems = {
+    const patientItem = {
       ...buildPatientVisitKeys(input.patientId, visitId),
       entityType: 'PATIENT_VISIT',
       ...base,
@@ -105,7 +107,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
           {
             Put: {
               TableName: TABLE_NAME,
-              Item: patientItems,
+              Item: patientItem,
               ConditionExpression: 'attribute_not_exists(PK)',
             },
           },
@@ -119,6 +121,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
         ],
       }),
     );
+
     return base;
   }
 
@@ -239,6 +242,24 @@ export class DynamoDBVisitRepository implements VisitRepository {
         IndexName: 'GSI2',
         KeyConditionExpression: keyCondition,
         ExpressionAttributeValues: exprValues,
+        ScanIndexForward: true,
+      }),
+    );
+
+    if (!Items || Items.length === 0) return [];
+    return Items as Visit[];
+  }
+
+  async listByDate(date: string): Promise<Visit[]> {
+    const { Items } = await docClient.send(
+      new QueryCommand({
+        TableName: TABLE_NAME,
+        IndexName: 'GSI3',
+        KeyConditionExpression: 'GSI3PK = :pk AND begins_with(GSI3SK, :skPrefix)',
+        ExpressionAttributeValues: {
+          ':pk': `DATE#${date}`,
+          ':skPrefix': 'TYPE#VISIT#ID#',
+        },
         ScanIndexForward: true,
       }),
     );

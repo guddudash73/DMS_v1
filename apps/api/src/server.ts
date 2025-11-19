@@ -5,6 +5,7 @@ import type { HealthResponse } from '@dms/types';
 import authRoutes from './routes/auth';
 import patientRoutes from './routes/patients';
 import visitRoutes from './routes/visits';
+import reportsRoutes from './routes/reports';
 
 const env = parseEnv(process.env);
 
@@ -29,11 +30,11 @@ export const createApp = () => {
   app.use('/auth', authRoutes);
   app.use('/patients', patientRoutes);
   app.use('/visits', visitRoutes);
+  app.use('/reports', reportsRoutes);
 
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
       if (res.headersSent) {
-        // Response already going out, don't try to write again
         return next(err);
       }
 

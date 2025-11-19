@@ -28,7 +28,7 @@ if (!TABLE_NAME) {
 
 const buildPatientKeys = (patientId: string) => ({
   PK: `PATIENT#${patientId}`,
-  SK: `PROFILE`,
+  SK: 'PROFILE',
 });
 
 const normalizeSearchText = (name: string, phone?: string) =>
@@ -171,14 +171,19 @@ export class DynamoDBPatientRepository implements PatientRepository {
     const { Items } = await docClient.send(
       new ScanCommand({
         TableName: TABLE_NAME,
-        Limit: limit,
+        // IMPORTANT: do NOT use Limit here with FilterExpression, or we may never scan
+        // the matching items. Instead, scan and then apply the limit in memory.
         FilterExpression: filterExpression,
         ExpressionAttributeNames: expressionNames,
         ExpressionAttributeValues: expressionValues,
       }),
     );
 
-    return (Items ?? []) as Patient[];
+    const all = (Items ?? []) as Patient[];
+    if (all.length <= limit) {
+      return all;
+    }
+    return all.slice(0, limit);
   }
 }
 

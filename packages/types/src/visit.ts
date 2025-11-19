@@ -17,6 +17,7 @@ export const Visit = z.object({
   visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
+  billingAmount: z.number().nonnegative().optional(),
 });
 
 export type Visit = z.infer<typeof Visit>;
@@ -42,3 +43,32 @@ export const VisitQueueQuery = z.object({
   status: VisitStatus.optional(),
 });
 export type VisitQueueQuery = z.infer<typeof VisitQueueQuery>;
+
+export const FollowUpContactMethod = z.enum(['CALL', 'SMS', 'WHATSAPP', 'OTHER']);
+export type FollowUpContactMethod = z.infer<typeof FollowUpContactMethod>;
+
+export const FollowUpStatus = z.enum(['ACTIVE', 'COMPLETED', 'CANCELLED']);
+export type FollowUpStatus = z.infer<typeof FollowUpStatus>;
+
+export const FollowUp = z.object({
+  visitId: VisitId,
+  followUpDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reason: z.string().min(1).max(500).optional(),
+  contactMethod: FollowUpContactMethod,
+  status: FollowUpStatus,
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+});
+export type FollowUp = z.infer<typeof FollowUp>;
+
+export const FollowUpUpsert = z.object({
+  followUpDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reason: z.string().min(1).max(500).optional(),
+  contactMethod: FollowUpContactMethod.optional(),
+});
+export type FollowUpUpsert = z.infer<typeof FollowUpUpsert>;
+
+export const FollowUpStatusUpdate = z.object({
+  status: FollowUpStatus,
+});
+export type FollowUpStatusUpdate = z.infer<typeof FollowUpStatusUpdate>;
