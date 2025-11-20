@@ -6,6 +6,7 @@ import authRoutes from './routes/auth';
 import patientRoutes from './routes/patients';
 import visitRoutes from './routes/visits';
 import reportsRoutes from './routes/reports';
+import xrayRouter from './routes/xray';
 
 const env = parseEnv(process.env);
 
@@ -31,6 +32,7 @@ export const createApp = () => {
   app.use('/patients', patientRoutes);
   app.use('/visits', visitRoutes);
   app.use('/reports', reportsRoutes);
+  app.use('/xrays', xrayRouter);
 
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {

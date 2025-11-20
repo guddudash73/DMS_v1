@@ -12,4 +12,5 @@ export const {
   ACCESS_TOKEN_TTL_SEC,
   REFRESH_TOKEN_TTL_SEC,
   DDB_TABLE_NAME,
+  XRAY_BUCKET_NAME,
 } = env;

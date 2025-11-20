@@ -38,9 +38,12 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .turbo
-          key: turbo-${{runner.os}}-${{hashFiles('**/packages-lock.json')}}
+          key: turbo-${{runner.os}}-${{hashFiles('**/package-lock.json')}}
           restore-keys: |
             turbo-${{runner.os}} -
+
+      - name: Install dependencies
+        run: npm ci
 
       - name: Lint
         run: npm run lint

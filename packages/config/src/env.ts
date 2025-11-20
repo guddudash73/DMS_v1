@@ -9,6 +9,8 @@ export const EnvSchema = z.object({
   DYNAMO_ENDPOINT: z.string().url().default('http://localhost:8000'),
   S3_ENDPOINT: z.string().url().default('http://localhost:4566'),
 
+  XRAY_BUCKET_NAME: z.string().min(1),
+
   ACCESS_TOKEN_TTL_SEC: z.coerce.number().default(900),
   REFRESH_TOKEN_TTL_SEC: z.coerce.number().default(1209600),
   DDB_TABLE_NAME: z.string().min(1),
