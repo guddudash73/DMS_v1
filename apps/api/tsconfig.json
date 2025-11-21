@@ -5,7 +5,14 @@
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "baseUrl": ".",
+    "paths": {
+      "@dms/config": ["../../packages/config/src/env.ts"],
+      "@dms/config/env": ["../../packages/config/src/env.ts"],
+      "@dms/types": ["../../packages/types/src/index.ts"],
+      "@dms/types/*": ["../../packages/types/src/*"]
+    }
   },
   "include": ["src"],
   "references": [{ "path": "../../packages/types" }, { "path": "../../packages/config" }]
