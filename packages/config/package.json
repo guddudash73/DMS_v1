@@ -10,10 +10,12 @@
   "exports": {
     ".": {
       "types": "./dist/env.d.ts",
+      "import": "./dist/env.js",
       "default": "./dist/env.js"
     },
     "./env": {
       "types": "./dist/env.d.ts",
+      "import": "./dist/env.js",
       "default": "./dist/env.js"
     }
   },
