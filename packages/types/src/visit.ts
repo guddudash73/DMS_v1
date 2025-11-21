@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { PatientId } from './patient.js';
-import { UserId } from './user.js';
+import { PatientId } from './patient';
+import { UserId } from './user';
 
 export const VisitId = z.string().min(1);
 export type VisitId = z.infer<typeof VisitId>;

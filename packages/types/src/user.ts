@@ -8,7 +8,7 @@ export type UserId = z.infer<typeof UserId>;
 
 export const User = z.object({
   userId: UserId,
-  email: z.email(),
+  email: z.email(), // ✅ This is correct!
   displayName: z.string().min(1),
   role: Role,
   createdAt: z.number().int().nonnegative(),

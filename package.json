@@ -19,7 +19,7 @@
     "dev:smoke:aws": "npx -w @dms/api tsx src/dev/smoke-aws.ts",
     "dev:smoke:types": "npx -w @dms/api tsx src/dev/smoke-types.ts",
     "typecheck:clean": "tsc --build --clean",
-    "clean:all": "rimraf --glob .turbo .eslintcache \"apps/**/dist\" \"packages/**/dist\""
+    "clean:all": "rimraf --glob .turbo .eslintcache \"apps/**/dist\" \"packages/**/dist\" \"**/tsconfig.tsbuildinfo\""
   },
   "keywords": [],
   "author": "",

@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { Role, UserId } from './user.js';
+import { Role, UserId } from './user';
 
 export const LoginRequest = z.object({
   email: z.string().email(),

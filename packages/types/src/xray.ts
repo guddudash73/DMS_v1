@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { VisitId } from './visit.js';
-import { UserId } from './user.js';
+import { VisitId } from './visit';
+import { UserId } from './user';
 
 export const XrayId = z.string().min(1);
 export type XrayId = z.infer<typeof XrayId>;
