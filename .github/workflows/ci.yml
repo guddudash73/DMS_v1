@@ -54,5 +54,21 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: test
+      - name: Start emulators (DynamoDB Local / S3)
+        run: npm run dev:emulators:up
+
+      - name: Wait for DynamoDB Local on 8000
+        run: |
+          for i in {1..30}; do
+            nc -z localhost 8000 && echo "DynamoDB Local is up" && exit 0
+            sleep 2
+          done
+          echo "DynamoDB Local did not start in time" >&2
+          exit 1
+
+      - name: Run tests
         run: npm run test
+
+      - name: Stop emulators
+        if: always()
+        run: npm run dev:emulators:down
