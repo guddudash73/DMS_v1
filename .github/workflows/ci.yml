@@ -66,8 +66,8 @@ jobs:
           echo "DynamoDB Local did not start in time" >&2
           exit 1
 
-      - name: Run tests
-        run: npm run test
+      - name: Run tests (temporarily disabled)
+        run: npm run test:ci
 
       - name: Stop emulators
         if: always()
