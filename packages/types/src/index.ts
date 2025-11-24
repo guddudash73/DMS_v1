@@ -8,3 +8,5 @@ export * from './keys';
 export * from './audit';
 export * from './report';
 export * from './xray';
+export * from './medicine';
+export * from './prescriptionPresets';

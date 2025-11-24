@@ -8,12 +8,19 @@ import {
   FollowUpUpsert,
   FollowUpStatusUpdate,
   UserId,
+  XrayId,
+  XrayContentType,
+  RxLine,
 } from '@dms/types';
-import { XrayId, XrayContentType } from '@dms/types';
+import { randomUUID } from 'node:crypto';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { visitRepository, InvalidStatusTransitionError } from '../repositories/visitRepository';
 import { followupRepository, FollowUpRuleViolationError } from '../repositories/followupRepository';
 import { xrayRepository } from '../repositories/xrayRepository';
+import { prescriptionRepository } from '../repositories/prescriptionRepository';
 import { buildXrayObjectKey } from './xray';
+import { s3Client } from '../lib/s3';
+import { XRAY_BUCKET_NAME } from '../config/env';
 
 const router = express.Router();
 
@@ -182,6 +189,71 @@ router.patch(
     }
 
     return res.status(200).json(updated);
+  }),
+);
+
+const RxCreateBody = z.object({
+  lines: z.array(RxLine).min(1),
+});
+
+router.post(
+  '/:visitId/rx',
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    if (!id.success) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'Invalid visit id',
+      });
+    }
+
+    const parsedBody = RxCreateBody.safeParse(req.body);
+    if (!parsedBody.success) {
+      return handleValidationError(res, parsedBody.error.issues);
+    }
+
+    const visit = await visitRepository.getById(id.data);
+    if (!visit) {
+      return res.status(404).json({ error: 'NOT_FOUND' });
+    }
+
+    // TODO (Day 17): enforce non-deleted patient/visit once soft-delete is implemented.
+    // TODO (Day 12): restrict this route to DOCTOR role via auth middleware.
+
+    const { lines } = parsedBody.data;
+    const now = Date.now();
+    const jsonKey = `rx/${visit.visitId}/${randomUUID()}.json`;
+
+    const jsonPayload = {
+      visitId: visit.visitId,
+      doctorId: visit.doctorId,
+      lines,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    await s3Client.send(
+      new PutObjectCommand({
+        Bucket: XRAY_BUCKET_NAME,
+        Key: jsonKey,
+        Body: JSON.stringify(jsonPayload),
+        ContentType: 'application/json',
+      }),
+    );
+
+    const prescription = await prescriptionRepository.createForVisit({
+      visit,
+      lines,
+      jsonKey,
+    });
+
+    return res.status(201).json({
+      rxId: prescription.rxId,
+      visitId: prescription.visitId,
+      version: prescription.version,
+      createdAt: prescription.createdAt,
+      updatedAt: prescription.updatedAt,
+    });
   }),
 );
 

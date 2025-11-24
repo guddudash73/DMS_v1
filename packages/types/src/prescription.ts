@@ -8,17 +8,19 @@ export const RxLine = z.object({
   medicine: z.string().min(1),
   dose: z.string().min(1),
   frequency: Frequency,
-  durationDays: z.number().int().min(1).max(365),
+  duration: z.number().int().min(1).max(365),
+  sig: z.string().max(500).optional(),
   timing: Timing.optional(),
   notes: z.string().max(500).optional(),
 });
 
 export const RxId = z.string().min(1);
-export type RXId = z.infer<typeof RxId>;
+export type RxId = z.infer<typeof RxId>;
 
 export const Prescription = z.object({
   rxId: RxId,
   visitId: VisitId,
+  doctorId: z.string().min(1),
   lines: z.array(RxLine).min(1),
   version: z.number().int().min(1).default(1),
   jsonKey: z.string().min(1),
@@ -27,4 +29,4 @@ export const Prescription = z.object({
 });
 
 export type Prescription = z.infer<typeof Prescription>;
-export type RxLine = z.infer<typeof RxLine>;
+export type RxLineType = z.infer<typeof RxLine>;
