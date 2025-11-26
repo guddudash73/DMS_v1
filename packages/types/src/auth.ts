@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { Role, UserId } from './user';
 
 export const LoginRequest = z.object({
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(8).max(128),
 });
 export type LoginRequest = z.infer<typeof LoginRequest>;
@@ -19,6 +19,12 @@ export const JwtClaims = z.object({
   exp: z.number().int().nonnegative(),
 });
 export type JwtClaims = z.infer<typeof JwtClaims>;
+
+export const RefreshTokenClaims = JwtClaims.extend({
+  jti: z.string().min(10),
+  type: z.literal('refresh'),
+});
+export type RefreshTokenClaims = z.infer<typeof RefreshTokenClaims>;
 
 export const TokenPair = z.object({
   accessToken: z.string(),

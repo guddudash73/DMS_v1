@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
+import { asDoctor, asReception } from './helpers/auth';
 
 const app = createApp();
 
 async function createPatient() {
   const res = await request(app)
     .post('/patients')
+    .set('Authorization', asReception())
     .send({
       name: 'Queue Test Patient',
       dob: '1995-01-01',
@@ -24,6 +26,7 @@ describe('Visits API', () => {
 
     const createVisitRes = await request(app)
       .post('/visits')
+      .set('Authorization', asReception())
       .send({
         patientId,
         doctorId: 'DOCTOR#001',
@@ -34,12 +37,18 @@ describe('Visits API', () => {
     expect(createVisitRes.body).toHaveProperty('visitId');
     const visitId = createVisitRes.body.visitId as string;
 
-    const getRes = await request(app).get(`/visits/${visitId}`).expect(200);
+    const getRes = await request(app)
+      .get(`/visits/${visitId}`)
+      .set('Authorization', asReception())
+      .expect(200);
     expect(getRes.body.visitId).toBe(visitId);
     expect(getRes.body.patientId).toBe(patientId);
     expect(getRes.body.status).toBe('QUEUED');
 
-    const listRes = await request(app).get(`/patients/${patientId}/visits`).expect(200);
+    const listRes = await request(app)
+      .get(`/patients/${patientId}/visits`)
+      .set('Authorization', asReception())
+      .expect(200);
 
     expect(Array.isArray(listRes.body.items)).toBe(true);
     const found = listRes.body.items.find((v: any) => v.visitId === visitId);
@@ -51,6 +60,7 @@ describe('Visits API', () => {
 
     const createVisitRes = await request(app)
       .post('/visits')
+      .set('Authorization', asReception())
       .send({
         patientId,
         doctorId: 'DOCTOR#002',
@@ -62,6 +72,7 @@ describe('Visits API', () => {
 
     const inProgressRes = await request(app)
       .patch(`/visits/${visitId}/status`)
+      .set('Authorization', asReception())
       .send({ status: 'IN_PROGRESS' })
       .expect(200);
 
@@ -69,6 +80,7 @@ describe('Visits API', () => {
 
     const doneRes = await request(app)
       .patch(`/visits/${visitId}/status`)
+      .set('Authorization', asReception())
       .send({ status: 'DONE' })
       .expect(200);
 
@@ -76,6 +88,7 @@ describe('Visits API', () => {
 
     const invalidRes = await request(app)
       .patch(`/visits/${visitId}/status`)
+      .set('Authorization', asReception())
       .send({ status: 'IN_PROGRESS' })
       .expect(409);
 
@@ -83,7 +96,10 @@ describe('Visits API', () => {
   });
 
   it('returns 404 for missing visit id', async () => {
-    await request(app).get('/visits/non-existing-id').expect(404);
+    await request(app)
+      .get('/visits/non-existing-id')
+      .set('Authorization', asReception())
+      .expect(404);
   });
 
   it('returns doctor queue for a given date and doctor', async () => {
@@ -91,6 +107,7 @@ describe('Visits API', () => {
 
     const createVisitRes = await request(app)
       .post('/visits')
+      .set('Authorization', asReception())
       .send({
         patientId,
         doctorId: 'DOCTOR#003',
@@ -103,6 +120,7 @@ describe('Visits API', () => {
 
     const queueRes = await request(app)
       .get('/visits/queue')
+      .set('Authorization', asDoctor())
       .query({ doctorId: 'DOCTOR#003', date: visitDate })
       .expect(200);
 

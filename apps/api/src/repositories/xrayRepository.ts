@@ -117,6 +117,10 @@ export class DynamoDBXrayRepository implements XrayRepository {
       return null;
     }
 
+    if (Item.patientIsDeleted === true || Item.visitIsDeleted === true) {
+      return null;
+    }
+
     return Item as Xray;
   }
 }

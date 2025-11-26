@@ -1,12 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
+import { asReception } from './helpers/auth';
 
 const app = createApp();
 
 async function createPatient() {
   const res = await request(app)
     .post('/patients')
+    .set('Authorization', asReception())
     .send({
       name: 'Followup Test Patient',
       dob: '1995-01-01',
@@ -21,6 +23,7 @@ async function createPatient() {
 async function createVisit(patientId: string) {
   const res = await request(app)
     .post('/visits')
+    .set('Authorization', asReception())
     .send({
       patientId,
       doctorId: 'DOCTOR#FOLLOWUP',
@@ -47,6 +50,7 @@ describe('Follow-up API', () => {
 
     const res = await request(app)
       .put(`/visits/${visitId}/followup`)
+      .set('Authorization', asReception())
       .send({
         followUpDate,
         reason: 'Call patient tomorrow',
@@ -58,7 +62,10 @@ describe('Follow-up API', () => {
     expect(res.body.followUpDate).toBe(followUpDate);
     expect(res.body.status).toBe('ACTIVE');
 
-    const getRes = await request(app).get(`/visits/${visitId}/followup`).expect(200);
+    const getRes = await request(app)
+      .get(`/visits/${visitId}/followup`)
+      .set('Authorization', asReception())
+      .expect(200);
     expect(getRes.body.followUpDate).toBe(followUpDate);
     expect(getRes.body.status).toBe('ACTIVE');
   });
@@ -71,6 +78,7 @@ describe('Follow-up API', () => {
 
     const res = await request(app)
       .put(`/visits/${visitId}/followup`)
+      .set('Authorization', asReception())
       .send({
         followUpDate: earlierDate,
         reason: 'Invalid past follow-up',
@@ -90,6 +98,7 @@ describe('Follow-up API', () => {
 
     await request(app)
       .put(`/visits/${visitId}/followup`)
+      .set('Authorization', asReception())
       .send({
         followUpDate,
         reason: 'Check healing',
@@ -98,6 +107,7 @@ describe('Follow-up API', () => {
 
     const res = await request(app)
       .patch(`/visits/${visitId}/followup/status`)
+      .set('Authorization', asReception())
       .send({ status: 'COMPLETED' })
       .expect(200);
 

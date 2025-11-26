@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import cookieParser from 'cookie-parser';
 import { parseEnv } from '@dms/config/env';
 import type { HealthResponse } from '@dms/types';
 import authRoutes from './routes/auth';
@@ -10,6 +11,9 @@ import xrayRouter from './routes/xray';
 import rxRouter from './routes/rx';
 import medicinesRouter from './routes/medicines';
 import rxPresetsRouter from './routes/rx-presets';
+import adminDoctorsRouter from './routes/admin-doctors';
+import adminRxPresetsRouter from './routes/admin-rx-presets';
+import { authMiddleware, requireRole, AuthError } from './middlewares/auth';
 
 const env = parseEnv(process.env);
 
@@ -17,6 +21,7 @@ export const createApp = () => {
   const app = express();
 
   app.use(express.json({ limit: '1mb' }));
+  app.use(cookieParser());
   app.use(
     cors({
       origin: env.CORS_ORIGIN ?? 'http://localhost:3000',
@@ -32,18 +37,27 @@ export const createApp = () => {
   });
 
   app.use('/auth', authRoutes);
-  app.use('/patients', patientRoutes);
-  app.use('/visits', visitRoutes);
-  app.use('/reports', reportsRoutes);
-  app.use('/xrays', xrayRouter);
-  app.use('/rx', rxRouter);
-  app.use('/medicines', medicinesRouter);
-  app.use('/rx-presets', rxPresetsRouter);
+
+  app.use('/patients', authMiddleware, requireRole('RECEPTION', 'DOCTOR', 'ADMIN'), patientRoutes);
+  app.use('/visits', authMiddleware, requireRole('RECEPTION', 'DOCTOR', 'ADMIN'), visitRoutes);
+  app.use('/reports', authMiddleware, requireRole('ADMIN'), reportsRoutes);
+  app.use('/xrays', authMiddleware, requireRole('DOCTOR', 'ADMIN'), xrayRouter);
+  app.use('/rx', authMiddleware, requireRole('DOCTOR', 'ADMIN'), rxRouter);
+  app.use('/medicines', authMiddleware, requireRole('DOCTOR', 'ADMIN'), medicinesRouter);
+  app.use('/rx-presets', authMiddleware, requireRole('DOCTOR', 'ADMIN'), rxPresetsRouter);
+
+  app.use('/admin/doctors', authMiddleware, requireRole('ADMIN'), adminDoctorsRouter);
+  app.use('/admin/rx-presets', authMiddleware, requireRole('ADMIN'), adminRxPresetsRouter);
 
   app.use(
     (err: unknown, _req: express.Request, res: express.Response, next: express.NextFunction) => {
-      if (res.headersSent) {
-        return next(err);
+      if (res.headersSent) return next(err);
+
+      if (err instanceof AuthError) {
+        return res.status(err.statusCode).json({
+          error: err.code,
+          message: err.message,
+        });
       }
 
       if (err instanceof Error) {

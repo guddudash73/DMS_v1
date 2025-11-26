@@ -56,6 +56,8 @@ export class DynamoDBPatientRepository implements PatientRepository {
       gender: input.gender,
       createdAt: now,
       updatedAt: now,
+      isDeleted: false,
+      deletedAt: undefined,
       searchText: normalizeSearchText(input.name, input.phone),
     };
 
@@ -80,7 +82,12 @@ export class DynamoDBPatientRepository implements PatientRepository {
     );
 
     if (!Item || Item.entityType !== 'PATIENT') return null;
-    return Item as Patient;
+
+    const { isDeleted = false, ...rest } = Item as Partial<Patient>;
+
+    if (isDeleted) return null;
+
+    return { ...rest, isDeleted } as Patient;
   }
 
   async update(patientId: string, patch: PatientUpdate): Promise<Patient | null> {

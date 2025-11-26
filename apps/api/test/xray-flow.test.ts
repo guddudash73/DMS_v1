@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
+import { asDoctor, asReception } from './helpers/auth';
 
 const app = createApp();
 
@@ -10,6 +11,7 @@ const hasFetch = typeof (globalThis as any).fetch === 'function';
   async function createPatient(name: string, phone: string) {
     const res = await request(app)
       .post('/patients')
+      .set('Authorization', asReception())
       .send({
         name,
         dob: '1990-01-01',
@@ -24,6 +26,7 @@ const hasFetch = typeof (globalThis as any).fetch === 'function';
   async function createVisit(patientId: string, doctorId: string, reason: string) {
     const res = await request(app)
       .post('/visits')
+      .set('Authorization', asReception())
       .send({
         patientId,
         doctorId,
@@ -40,6 +43,7 @@ const hasFetch = typeof (globalThis as any).fetch === 'function';
 
     const presignRes = await request(app)
       .post('/xrays/presign')
+      .set('Authorization', asDoctor())
       .send({
         visitId: visit.visitId,
         contentType: 'image/jpeg',
@@ -70,6 +74,7 @@ const hasFetch = typeof (globalThis as any).fetch === 'function';
     const takenAt = Date.now();
     const metaRes = await request(app)
       .post(`/visits/${visit.visitId}/xrays`)
+      .set('Authorization', asDoctor())
       .send({
         xrayId,
         contentType: 'image/jpeg',
@@ -82,7 +87,10 @@ const hasFetch = typeof (globalThis as any).fetch === 'function';
     expect(metaRes.body.xrayId).toBe(xrayId);
     expect(metaRes.body.visitId).toBe(visit.visitId);
 
-    const urlRes = await request(app).get(`/xrays/${xrayId}/url`).expect(200);
+    const urlRes = await request(app)
+      .get(`/xrays/${xrayId}/url`)
+      .set('Authorization', asDoctor())
+      .expect(200);
 
     expect(urlRes.body.variant).toBe('original');
     expect(typeof urlRes.body.url).toBe('string');

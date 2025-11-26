@@ -1,29 +1,27 @@
 import { z } from 'zod';
 
-export const EnvSchema = z.object({
-  NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
-  PORT: z.string().default('4000'),
-  CORS_ORIGIN: z.string().url().optional(),
+const EnvSchema = z.object({
+  NODE_ENV: z.enum(['development', 'test', 'production']),
+  PORT: z.string().optional(),
 
-  AWS_REGION: z.string().default('us-east-1'),
-  DYNAMO_ENDPOINT: z.string().url().default('http://localhost:8000'),
-  S3_ENDPOINT: z.string().url().default('http://localhost:4566'),
-
+  AWS_REGION: z.string().min(1),
+  DYNAMO_ENDPOINT: z.string().min(1),
+  S3_ENDPOINT: z.string().min(1),
+  DDB_TABLE_NAME: z.string().min(1),
   XRAY_BUCKET_NAME: z.string().min(1),
 
-  ACCESS_TOKEN_TTL_SEC: z.coerce.number().default(900),
-  REFRESH_TOKEN_TTL_SEC: z.coerce.number().default(1209600),
-  DDB_TABLE_NAME: z.string().min(1),
+  CORS_ORIGIN: z.string().optional(),
+
+  ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().positive().default(900),
+  REFRESH_TOKEN_TTL_SEC: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60 * 60 * 24 * 14),
+
+  JWT_ACCESS_SECRET: z.string().min(32),
+  JWT_REFRESH_SECRET: z.string().min(32),
 });
 
+export const parseEnv = (raw: NodeJS.ProcessEnv) => EnvSchema.parse(raw);
 export type Env = z.infer<typeof EnvSchema>;
-
-export const parseEnv = (raw: NodeJS.ProcessEnv): Env => {
-  const parsed = EnvSchema.safeParse(raw);
-  if (!parsed.success) {
-    const flattened = parsed.error.flatten((issue) => issue.message);
-    console.error('Invalid environment:', flattened.fieldErrors);
-    process.exit(1);
-  }
-  return parsed.data;
-};

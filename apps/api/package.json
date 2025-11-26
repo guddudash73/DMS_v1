@@ -10,7 +10,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "vitest run --reporter=default",
-    "clean": "rimraf dist || rm -rf dist"
+    "clean": "rimraf dist || rm -rf dist",
+    "seed:test-users": "tsx scripts/seed-test-users.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.927.0",
@@ -20,6 +21,7 @@
     "@dms/config": "file:../../packages/config",
     "@dms/types": "file:../../packages/types",
     "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
@@ -28,6 +30,8 @@
   },
   "devDependencies": {
     "@dms/eslint-config": "file:../../packages/eslint-config",
+    "@types/bcrypt": "^5.0.2",
+    "@types/cookie-parser": "^1.4.7",
     "@types/express": "^5.0.5",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.19.0",

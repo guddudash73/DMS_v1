@@ -6,6 +6,7 @@ import { visitRepository } from '../repositories/visitRepository';
 import { xrayRepository } from '../repositories/xrayRepository';
 import { XRAY_BUCKET_NAME } from '../config/env';
 import { getPresignedUploadUrl, getPresignedDownloadUrl } from '../lib/s3';
+import { patientRepository } from '../repositories/patientRepository';
 
 const router = express.Router();
 
@@ -71,6 +72,14 @@ router.post(
       });
     }
 
+    const patient = await patientRepository.getById(visit.patientId);
+    if (!patient || patient.isDeleted) {
+      return res.status(404).json({
+        error: 'PATIENT_NOT_FOUND',
+        message: 'Cannot upload X-rays for a deleted or missing patient',
+      });
+    }
+
     const xrayId = (await import('node:crypto')).randomUUID();
     const contentKey = buildXrayObjectKey(visit.visitId, xrayId, 'original', contentType);
 
@@ -87,7 +96,7 @@ router.post(
       key: contentKey,
       uploadUrl,
       Headers: {
-        'Content-Type': contentKey,
+        'Content-Type': contentType,
       },
       expiresInSeconds: 90,
     });
@@ -115,6 +124,22 @@ router.get(
     const meta = await xrayRepository.getById(idResult.data);
     if (!meta) {
       return res.status(404).json({ error: 'NOT_FOUND' });
+    }
+
+    const visit = await visitRepository.getById(meta.visitId);
+    if (!visit) {
+      return res.status(404).json({
+        error: 'VISIT_NOT_FOUND',
+        message: 'Visit not found for this X-ray',
+      });
+    }
+
+    const patient = await patientRepository.getById(visit.patientId);
+    if (!patient || patient.isDeleted) {
+      return res.status(404).json({
+        error: 'PATIENT_NOT_FOUND',
+        message: 'Patient not found or has been deleted',
+      });
     }
 
     const keyToUse = size === 'thumb' && meta.thumbKey != null ? meta.thumbKey : meta.contentKey;

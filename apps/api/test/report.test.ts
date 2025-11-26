@@ -9,6 +9,7 @@ import {
   DeleteCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { AWS_REGION, DDB_TABLE_NAME, DYNAMO_ENDPOINT } from '../src/config/env';
+import { asReception, asAdmin } from './helpers/auth';
 
 const app = createApp();
 
@@ -26,6 +27,7 @@ const docClient = DynamoDBDocumentClient.from(ddbClient, {
 async function createPatient(name: string, phone: string) {
   const res = await request(app)
     .post('/patients')
+    .set('Authorization', asReception())
     .send({
       name,
       dob: '1990-01-01',
@@ -40,6 +42,7 @@ async function createPatient(name: string, phone: string) {
 async function createVisit(patientId: string, doctorId: string, reason: string) {
   const res = await request(app)
     .post('/visits')
+    .set('Authorization', asReception())
     .send({
       patientId,
       doctorId,
@@ -135,7 +138,6 @@ async function clearVisitsForDate(date: string) {
     const patientId = item.patientId as string | undefined;
     if (!visitId || !patientId) continue;
 
-    // Delete VISIT meta item
     await docClient.send(
       new DeleteCommand({
         TableName: DDB_TABLE_NAME,
@@ -143,7 +145,6 @@ async function clearVisitsForDate(date: string) {
       }),
     );
 
-    // Delete PATIENT_VISIT item
     await docClient.send(
       new DeleteCommand({
         TableName: DDB_TABLE_NAME,
@@ -158,7 +159,11 @@ describe('Daily Reports API', () => {
     const date = '2000-01-01';
     await clearVisitsForDate(date);
 
-    const res = await request(app).get('/reports/daily').query({ date }).expect(200);
+    const res = await request(app)
+      .get('/reports/daily')
+      .set('Authorization', asAdmin())
+      .query({ date })
+      .expect(200);
 
     expect(res.body).toEqual({
       date,
@@ -185,7 +190,11 @@ describe('Daily Reports API', () => {
     await setVisitDateAndBilling(v1.visitId, v1.patientId, date);
     await setVisitDateAndBilling(v2.visitId, v2.patientId, date);
 
-    const res = await request(app).get('/reports/daily').query({ date }).expect(200);
+    const res = await request(app)
+      .get('/reports/daily')
+      .set('Authorization', asAdmin())
+      .query({ date })
+      .expect(200);
 
     expect(res.body.date).toBe(date);
     expect(res.body.visitCountsByStatus).toEqual({
@@ -210,38 +219,45 @@ describe('Daily Reports API', () => {
     const p3 = await createPatient('Revenue Patient 3', '+919999000103');
     const v3 = await createVisit(p3, 'DOCTOR#REV', 'Queued with bill');
 
-    // v1 -> DONE + billed 1000
     await request(app)
       .patch(`/visits/${v1.visitId}/status`)
+      .set('Authorization', asReception())
       .send({ status: 'IN_PROGRESS' })
       .expect(200);
-    await request(app).patch(`/visits/${v1.visitId}/status`).send({ status: 'DONE' }).expect(200);
+    await request(app)
+      .patch(`/visits/${v1.visitId}/status`)
+      .set('Authorization', asReception())
+      .send({ status: 'DONE' })
+      .expect(200);
 
-    // v2 -> DONE, no billingAmount
     await request(app)
       .patch(`/visits/${v2.visitId}/status`)
+      .set('Authorization', asReception())
       .send({ status: 'IN_PROGRESS' })
       .expect(200);
-    await request(app).patch(`/visits/${v2.visitId}/status`).send({ status: 'DONE' }).expect(200);
-
-    // v3 stays QUEUED
+    await request(app)
+      .patch(`/visits/${v2.visitId}/status`)
+      .set('Authorization', asReception())
+      .send({ status: 'DONE' })
+      .expect(200);
 
     await setVisitDateAndBilling(v1.visitId, v1.patientId, date, 1000);
     await setVisitDateAndBilling(v2.visitId, v2.patientId, date);
     await setVisitDateAndBilling(v3.visitId, v3.patientId, date, 500);
 
-    const res = await request(app).get('/reports/daily').query({ date }).expect(200);
+    const res = await request(app)
+      .get('/reports/daily')
+      .set('Authorization', asAdmin())
+      .query({ date })
+      .expect(200);
 
     expect(res.body.date).toBe(date);
-    // Status counts should include all 3 visits.
     expect(res.body.visitCountsByStatus).toEqual({
       QUEUED: 1,
       IN_PROGRESS: 0,
       DONE: 2,
     });
 
-    // Revenue sums all non-negative billingAmount values.
-    // Here: v1 = 1000, v3 = 500, v2 has no billingAmount.
     expect(res.body.totalRevenue).toBe(1500);
     expect(res.body.procedureCounts).toEqual({});
   });
@@ -249,6 +265,7 @@ describe('Daily Reports API', () => {
   it('rejects invalid date input', async () => {
     const res = await request(app)
       .get('/reports/daily')
+      .set('Authorization', asAdmin())
       .query({ date: 'invalid-date' })
       .expect(400);
 

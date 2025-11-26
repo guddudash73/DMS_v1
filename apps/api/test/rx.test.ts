@@ -3,12 +3,14 @@ import request from 'supertest';
 import { createApp } from '../src/server';
 import { prescriptionRepository } from '../src/repositories/prescriptionRepository';
 import type { Prescription } from '@dms/types';
+import { asDoctor, asReception } from './helpers/auth';
 
 const app = createApp();
 
 async function createPatient(name: string, phone: string) {
   const res = await request(app)
     .post('/patients')
+    .set('Authorization', asReception())
     .send({
       name,
       dob: '1990-01-01',
@@ -23,6 +25,7 @@ async function createPatient(name: string, phone: string) {
 async function createVisit(patientId: string, doctorId: string, reason: string) {
   const res = await request(app)
     .post('/visits')
+    .set('Authorization', asReception())
     .send({
       patientId,
       doctorId,
@@ -40,6 +43,7 @@ describe('Prescription API', () => {
 
     const createRes = await request(app)
       .post(`/visits/${visit.visitId}/rx`)
+      .set('Authorization', asDoctor())
       .send({
         lines: [
           {
@@ -68,9 +72,9 @@ describe('Prescription API', () => {
     const patientId = await createPatient('Rx Versioning Patient', '+910000000202');
     const visit = await createVisit(patientId, 'DOCTOR#RX2', 'Rx versioning visit');
 
-    // v1
     const v1Res = await request(app)
       .post(`/visits/${visit.visitId}/rx`)
+      .set('Authorization', asDoctor())
       .send({
         lines: [
           {
@@ -86,9 +90,9 @@ describe('Prescription API', () => {
     const v1Id = v1Res.body.rxId as string;
     expect(v1Res.body.version).toBe(1);
 
-    // v2
     const v2Res = await request(app)
       .post(`/visits/${visit.visitId}/rx`)
+      .set('Authorization', asDoctor())
       .send({
         lines: [
           {
@@ -132,6 +136,7 @@ describe('Prescription API', () => {
 
     const createRes = await request(app)
       .post(`/visits/${visit.visitId}/rx`)
+      .set('Authorization', asDoctor())
       .send({
         lines: [
           {
@@ -146,7 +151,10 @@ describe('Prescription API', () => {
 
     const rxId = createRes.body.rxId as string;
 
-    const urlRes = await request(app).get(`/rx/${rxId}/json-url`).expect(200);
+    const urlRes = await request(app)
+      .get(`/rx/${rxId}/json-url`)
+      .set('Authorization', asDoctor())
+      .expect(200);
 
     expect(urlRes.body.rxId).toBe(rxId);
     expect(typeof urlRes.body.url).toBe('string');
@@ -157,12 +165,17 @@ describe('Prescription API', () => {
     const patientId = await createPatient('Rx Invalid Patient', '+910000000204');
     const visit = await createVisit(patientId, 'DOCTOR#RX4', 'Rx invalid visit');
 
-    const res1 = await request(app).post(`/visits/${visit.visitId}/rx`).send({}).expect(400);
+    const res1 = await request(app)
+      .post(`/visits/${visit.visitId}/rx`)
+      .set('Authorization', asDoctor())
+      .send({})
+      .expect(400);
 
     expect(res1.body.error).toBe('VALIDATION_ERROR');
 
     const res2 = await request(app)
       .post(`/visits/${visit.visitId}/rx`)
+      .set('Authorization', asDoctor())
       .send({
         lines: [],
       })
@@ -172,6 +185,7 @@ describe('Prescription API', () => {
 
     const res3 = await request(app)
       .post(`/visits/${visit.visitId}/rx`)
+      .set('Authorization', asDoctor())
       .send({
         lines: [
           {

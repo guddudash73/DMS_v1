@@ -6,16 +6,14 @@ export type PatientId = z.infer<typeof PatientId>;
 export const Patient = z.object({
   patientId: PatientId,
   name: z.string().min(1),
-  phone: z.string().min(7).max(20).optional(),
-  dob: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
-  gender: z.enum(['male', 'female', 'other']).optional(),
+  phone: z.string().min(5).max(32).optional(),
+  dob: z.string().optional(),
+  gender: z.enum(['MALE', 'FEMALE', 'OTHER', 'UNKNOWN']).optional(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
+  isDeleted: z.boolean().default(false),
+  deletedAt: z.number().int().nonnegative().optional(),
 });
-
 export type Patient = z.infer<typeof Patient>;
 
 export const PatientCreate = z.object({

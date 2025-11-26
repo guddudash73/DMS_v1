@@ -21,6 +21,8 @@ import { prescriptionRepository } from '../repositories/prescriptionRepository';
 import { buildXrayObjectKey } from './xray';
 import { s3Client } from '../lib/s3';
 import { XRAY_BUCKET_NAME } from '../config/env';
+import { requireRole } from '../middlewares/auth';
+import { patientRepository } from '../repositories/patientRepository';
 
 const router = express.Router();
 
@@ -198,6 +200,7 @@ const RxCreateBody = z.object({
 
 router.post(
   '/:visitId/rx',
+  requireRole('DOCTOR', 'ADMIN'),
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) {
@@ -217,6 +220,16 @@ router.post(
       return res.status(404).json({ error: 'NOT_FOUND' });
     }
 
+    const patient = await patientRepository.getById(visit.patientId);
+    if (!patient || patient.isDeleted) {
+      return res.status(404).json({
+        error: 'PATIENT_NOT_FOUND',
+        message: 'Cannot create prescriptions for deleted or missing patient',
+      });
+    }
+
+    // If in future the Visit model gets an `isDeleted` flag, add a similar check:
+    // if (visit.isDeleted) { ... 404 VISIT_NOT_FOUND ... }
     // TODO (Day 17): enforce non-deleted patient/visit once soft-delete is implemented.
     // TODO (Day 12): restrict this route to DOCTOR role via auth middleware.
 
@@ -288,6 +301,14 @@ router.post(
     const visit = await visitRepository.getById(id.data);
     if (!visit) {
       return res.status(404).json({ error: 'NOT_FOUND' });
+    }
+
+    const patient = await patientRepository.getById(visit.patientId);
+    if (!patient || patient.isDeleted) {
+      return res.status(404).json({
+        error: 'PATIENT_NOT_FOUND',
+        message: 'Cannot attach X-rays to deleted or missing patient',
+      });
     }
 
     const { xrayId, contentType, size, takenAt, takenByUserId } = parsedBody.data;

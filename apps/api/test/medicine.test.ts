@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
 import type { MedicinePreset } from '@dms/types';
+import { asDoctor } from './helpers/auth';
 
 const app = createApp();
 
@@ -11,6 +12,7 @@ describe('Medicines API', () => {
 
     const res = await request(app)
       .post('/medicines/quick-add')
+      .set('Authorization', asDoctor())
       .send({
         displayName,
         defaultDose: '1 tab',
@@ -38,6 +40,7 @@ describe('Medicines API', () => {
 
     const firstRes = await request(app)
       .post('/medicines/quick-add')
+      .set('Authorization', asDoctor())
       .send({
         displayName: variant1,
         defaultDose: '1 cap',
@@ -51,6 +54,7 @@ describe('Medicines API', () => {
 
     const secondRes = await request(app)
       .post('/medicines/quick-add')
+      .set('Authorization', asDoctor())
       .send({
         displayName: variant2,
         defaultDose: '1 cap',
@@ -71,6 +75,7 @@ describe('Medicines API', () => {
 
     await request(app)
       .post('/medicines/quick-add')
+      .set('Authorization', asDoctor())
       .send({
         displayName: uniqueName,
         defaultDose: '1 tab',
@@ -80,9 +85,11 @@ describe('Medicines API', () => {
       })
       .expect(201);
 
+    // Use the full unique name as the query so it behaves well with prefix-based search.
     const searchRes = await request(app)
       .get('/medicines')
-      .query({ query: 'metronidazole', limit: '10' })
+      .set('Authorization', asDoctor())
+      .query({ query: uniqueName, limit: '10' })
       .expect(200);
 
     expect(Array.isArray(searchRes.body.items)).toBe(true);

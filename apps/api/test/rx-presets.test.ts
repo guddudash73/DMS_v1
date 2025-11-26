@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
 import { prescriptionPresetRepository } from '../src/repositories/prescriptionPresetRepository';
+import { asDoctor } from './helpers/auth';
 
 const app = createApp();
 
@@ -29,9 +30,11 @@ describe('Prescription presets API', () => {
       createdByUserId: 'ADMIN#001',
     });
 
+    // Query by full unique name so it matches whatever "starts with" / normalized search the API uses.
     const res = await request(app)
       .get('/rx-presets')
-      .query({ query: 'post-extraction', limit: '10' })
+      .set('Authorization', asDoctor())
+      .query({ query: name, limit: '10' })
       .expect(200);
 
     expect(Array.isArray(res.body.items)).toBe(true);
