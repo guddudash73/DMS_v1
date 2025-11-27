@@ -33,3 +33,4 @@ Notes
 - Schemas in `@dms/types/auth.ts`
 - Validation via Zod middleware (400 on invalid)
 - Implementation TBD (bcrypt + jsonwebtoken v9)
+-
