@@ -3,6 +3,7 @@ import { DailyReportQuery } from '@dms/types';
 import type { Patient } from '@dms/types';
 import { visitRepository } from '../repositories/visitRepository';
 import { patientRepository } from '../repositories/patientRepository';
+import { billingRepository } from '../repositories/billingRepository';
 
 const router = express.Router();
 
@@ -30,7 +31,6 @@ router.get(
 
     const visits = await visitRepository.listByDate(date);
 
-    // Filter to non-deleted patients (once soft-delete exists).
     const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
     const patientResults = await Promise.all(
       uniquePatientIds.map((id) => patientRepository.getById(id)),
@@ -41,6 +41,10 @@ router.get(
 
     const filteredVisits = visits.filter((v) => allowedPatientIds.has(v.patientId));
 
+    const billingResults = await Promise.all(
+      filteredVisits.map((visit) => billingRepository.getByVisitId(visit.visitId)),
+    );
+
     const visitCountsByStatus: { QUEUED: number; IN_PROGRESS: number; DONE: number } = {
       QUEUED: 0,
       IN_PROGRESS: 0,
@@ -50,7 +54,10 @@ router.get(
     let totalRevenue = 0;
     const procedureCounts: Record<string, number> = {};
 
-    for (const visit of filteredVisits) {
+    for (let i = 0; i < filteredVisits.length; i++) {
+      const visit = filteredVisits[i]!;
+      const billing = billingResults[i] ?? null;
+
       if (visit.status in visitCountsByStatus) {
         visitCountsByStatus[visit.status]++;
       }
@@ -59,7 +66,15 @@ router.get(
         totalRevenue += visit.billingAmount;
       }
 
-      // Future: update procedureCounts once a procedure model exists.
+      if (billing && Array.isArray(billing.items)) {
+        for (const line of billing.items) {
+          const key = line.code ?? line.description;
+          if (!key) continue;
+
+          const current = procedureCounts[key] ?? 0;
+          procedureCounts[key] = current + line.quantity;
+        }
+      }
     }
 
     return res.status(200).json({

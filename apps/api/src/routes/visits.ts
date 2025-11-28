@@ -11,6 +11,7 @@ import {
   XrayId,
   XrayContentType,
   RxLine,
+  BillingCheckoutInput,
 } from '@dms/types';
 import { randomUUID } from 'node:crypto';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
@@ -23,6 +24,12 @@ import { s3Client } from '../lib/s3';
 import { XRAY_BUCKET_NAME } from '../config/env';
 import { requireRole } from '../middlewares/auth';
 import { patientRepository } from '../repositories/patientRepository';
+import {
+  billingRepository,
+  BillingRuleViolationError,
+  DuplicateCheckoutError,
+  VisitNotDoneError,
+} from '../repositories/billingRepository';
 
 const router = express.Router();
 
@@ -231,7 +238,6 @@ router.post(
     // If in future the Visit model gets an `isDeleted` flag, add a similar check:
     // if (visit.isDeleted) { ... 404 VISIT_NOT_FOUND ... }
     // TODO (Day 17): enforce non-deleted patient/visit once soft-delete is implemented.
-    // TODO (Day 12): restrict this route to DOCTOR role via auth middleware.
 
     const { lines } = parsedBody.data;
     const now = Date.now();
@@ -326,6 +332,77 @@ router.post(
     });
 
     return res.status(201).json(xray);
+  }),
+);
+
+router.post(
+  '/:visitId/checkout',
+  requireRole('RECEPTION', 'ADMIN'),
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    if (!id.success) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'Invalid visit id',
+      });
+    }
+
+    const parsedBody = BillingCheckoutInput.safeParse(req.body);
+    if (!parsedBody.success) {
+      return handleValidationError(res, parsedBody.error.issues);
+    }
+
+    try {
+      const billing = await billingRepository.checkout(id.data, parsedBody.data);
+      return res.status(201).json(billing);
+    } catch (err) {
+      if (err instanceof VisitNotDoneError) {
+        return res.status(409).json({
+          error: err.code,
+          message: err.message,
+        });
+      }
+      if (err instanceof DuplicateCheckoutError) {
+        return res.status(409).json({
+          error: err.code,
+          message: err.message,
+        });
+      }
+      if (err instanceof BillingRuleViolationError) {
+        return res.status(400).json({
+          error: err.code,
+          message: err.message,
+        });
+      }
+      if (err instanceof FollowUpRuleViolationError) {
+        return res.status(400).json({
+          error: err.code,
+          message: err.message,
+        });
+      }
+      throw err;
+    }
+  }),
+);
+
+router.get(
+  '/:visitId/bill',
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    if (!id.success) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'Invalid visit id',
+      });
+    }
+
+    const billing = await billingRepository.getByVisitId(id.data);
+    if (!billing) {
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+      });
+    }
+    return res.status(200).json(billing);
   }),
 );
 
