@@ -9,6 +9,7 @@ declare module 'express-serve-static-core' {
       role: Role;
       token: string;
     };
+    requestId?: string;
   }
 }
 

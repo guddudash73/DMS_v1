@@ -7,6 +7,7 @@ import { xrayRepository } from '../repositories/xrayRepository';
 import { XRAY_BUCKET_NAME } from '../config/env';
 import { getPresignedUploadUrl, getPresignedDownloadUrl } from '../lib/s3';
 import { patientRepository } from '../repositories/patientRepository';
+import { logAudit } from '../lib/logger';
 
 const router = express.Router();
 
@@ -91,6 +92,22 @@ router.post(
       expiresInSeconds: 90,
     });
 
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'XRAY_PRESIGN_UPLOAD',
+        entity: {
+          type: 'VISIT',
+          id: visit.visitId,
+        },
+        meta: {
+          xrayId,
+          contentType,
+          size,
+        },
+      });
+    }
+
     return res.status(201).json({
       xrayId,
       key: contentKey,
@@ -149,6 +166,22 @@ router.get(
       key: keyToUse,
       expiresInSeconds: 90,
     });
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'XRAY_URL_REQUEST',
+        entity: {
+          type: 'XRAY',
+          id: meta.xrayId,
+        },
+        meta: {
+          visitId: meta.visitId,
+          variant: size,
+          hasThumb: !!meta.thumbKey,
+        },
+      });
+    }
 
     return res.status(200).json({
       url,

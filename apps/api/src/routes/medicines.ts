@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { MedicineSearchQuery, QuickAddMedicineInput } from '@dms/types';
 import type { MedicineTypeaheadItem } from '@dms/types';
 import { medicinePresetRepository } from '../repositories/medicinePresetRepository';
+import { logAudit } from '../lib/logger';
 
 const router = express.Router();
 
@@ -76,14 +77,31 @@ router.post(
       return handleValidationError(res, parsed.error.issues);
     }
 
-    // TODO (Day 12): derive createdByUserId from req.user (doctor).
-    const createdByUserId = 'INLINE_DOCTOR_PLACEHOLDER';
+    // Router is mounted behind authMiddleware + requireRole('DOCTOR' | 'ADMIN'),
+    // so req.auth should be present for real usage.
+    const createdByUserId = req.auth?.userId ?? 'INLINE_DOCTOR_PLACEHOLDER';
 
     const preset = await medicinePresetRepository.quickAdd({
       input: parsed.data,
       createdByUserId,
       source: 'INLINE_DOCTOR',
     });
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'MEDICINE_QUICK_ADD',
+        entity: {
+          type: 'MEDICINE',
+          id: preset.id,
+        },
+        meta: {
+          normalizedName: preset.normalizedName,
+          source: preset.source,
+          verified: preset.verified,
+        },
+      });
+    }
 
     return res.status(201).json(preset);
   }),

@@ -1,3 +1,4 @@
+// apps/api/src/routes/auth.ts
 import { Router, type Response } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';
@@ -8,6 +9,7 @@ import { refreshTokenRepository } from '../repositories/refreshTokenRepository';
 import { ACCESS_TOKEN_TTL_SEC, REFRESH_TOKEN_TTL_SEC, NODE_ENV } from '../config/env';
 import { buildTokenPair, verifyRefreshToken } from '../lib/authTokens';
 import { AuthError } from '../middlewares/auth';
+import { logInfo, logAudit } from '../lib/logger';
 
 const r = Router();
 const MAX_LOGIN_ATTEMPTS = 5;
@@ -29,11 +31,22 @@ r.post('/login', validate(LoginRequest), async (req, res, next) => {
 
     const user = await userRepository.getByEmail(email);
     if (!user) {
+      logInfo('auth_login_invalid_user', {
+        reqId: req.requestId,
+        email,
+        // no password, no tokens
+      });
       return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid credentials' });
     }
 
     const now = Date.now();
     if (user.lockUntil && user.lockUntil > now) {
+      logInfo('auth_login_locked', {
+        reqId: req.requestId,
+        userId: user.userId,
+        lockUntil: user.lockUntil,
+      });
+
       return res.status(423).json({
         error: 'ACCOUNT_LOCKED',
         message: 'Too many failed attempts. Please try again later.',
@@ -44,6 +57,12 @@ r.post('/login', validate(LoginRequest), async (req, res, next) => {
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) {
       await userRepository.recordFailedLogin(user.userId, MAX_LOGIN_ATTEMPTS, LOCK_WINDOW_MS);
+
+      logInfo('auth_login_bad_password', {
+        reqId: req.requestId,
+        userId: user.userId,
+      });
+
       return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid credentials' });
     }
 
@@ -69,6 +88,19 @@ r.post('/login', validate(LoginRequest), async (req, res, next) => {
         refreshExpiresInSec: REFRESH_TOKEN_TTL_SEC,
       },
     };
+
+    logAudit({
+      actorUserId: user.userId,
+      action: 'AUTH_LOGIN_SUCCESS',
+      entity: {
+        type: 'USER',
+        id: user.userId,
+      },
+      meta: {
+        ip: req.ip,
+        userAgent: req.get('user-agent') ?? undefined,
+      },
+    });
 
     return res.status(200).json(response);
   } catch (err) {
@@ -123,6 +155,20 @@ r.post('/refresh', validate(RefreshRequest), async (req, res, next) => {
         refreshExpiresInSec: REFRESH_TOKEN_TTL_SEC,
       },
     };
+
+    logAudit({
+      actorUserId: user.userId,
+      action: 'AUTH_REFRESH_SUCCESS',
+      entity: {
+        type: 'USER',
+        id: user.userId,
+      },
+      meta: {
+        ip: req.ip,
+        userAgent: req.get('user-agent') ?? undefined,
+      },
+    });
+
     return res.status(200).json(response);
   } catch (err) {
     return next(err);

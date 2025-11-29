@@ -9,7 +9,7 @@ export const AuditEvent = z.object({
   actorUserId: UserId,
   action: z.string().min(1),
   entity: z.object({
-    type: z.enum(['PATIENT', 'VISIT', 'XRAY', 'RX', 'USER']),
+    type: z.enum(['PATIENT', 'VISIT', 'XRAY', 'RX', 'USER', 'MEDICINE', 'RX_PRESET']),
     id: z.string().min(1),
   }),
   meta: z.record(z.string(), z.unknown()).optional(),

@@ -1,15 +1,17 @@
-// apps/api/src/routes/admin-rx-presets.ts
 import { Router } from 'express';
 import { validate } from '../middlewares/zod';
 import { AdminCreateRxPresetRequest, AdminUpdateRxPresetRequest } from '@dms/types';
 import type { PrescriptionPresetId, RxLineType } from '@dms/types';
 import { prescriptionPresetRepository } from '../repositories/prescriptionPresetRepository';
+import { logAudit } from '../lib/logger';
 
 const r = Router();
 
 r.post('/', validate(AdminCreateRxPresetRequest), async (req, res, next) => {
   try {
     const input = req.body as AdminCreateRxPresetRequest;
+
+    const createdByUserId = req.auth?.userId ?? 'ADMIN';
 
     const createParams: {
       name: string;
@@ -19,7 +21,7 @@ r.post('/', validate(AdminCreateRxPresetRequest), async (req, res, next) => {
     } = {
       name: input.name,
       lines: input.lines,
-      createdByUserId: 'ADMIN', // TODO: replace with req.auth.userId once wired
+      createdByUserId,
     };
 
     if (input.tags !== undefined) {
@@ -27,6 +29,21 @@ r.post('/', validate(AdminCreateRxPresetRequest), async (req, res, next) => {
     }
 
     const created = await prescriptionPresetRepository.create(createParams);
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'ADMIN_CREATE_RX_PRESET',
+        entity: {
+          type: 'RX_PRESET',
+          id: created.id as string,
+        },
+        meta: {
+          name: created.name,
+          tags: created.tags ?? [],
+        },
+      });
+    }
 
     return res.status(201).json(created);
   } catch (err) {
@@ -58,6 +75,21 @@ r.patch('/:id', validate(AdminUpdateRxPresetRequest), async (req, res, next) => 
     const updated = await prescriptionPresetRepository.update(id as PrescriptionPresetId, patch);
     if (!updated) {
       return res.status(404).json({ error: 'RX_PRESET_NOT_FOUND' });
+    }
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'ADMIN_UPDATE_RX_PRESET',
+        entity: {
+          type: 'RX_PRESET',
+          id,
+        },
+        meta: {
+          name: updated.name,
+          tags: updated.tags ?? [],
+        },
+      });
     }
 
     return res.status(200).json(updated);

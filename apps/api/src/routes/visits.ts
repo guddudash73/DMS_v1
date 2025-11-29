@@ -30,6 +30,7 @@ import {
   DuplicateCheckoutError,
   VisitNotDoneError,
 } from '../repositories/billingRepository';
+import { logAudit } from '../lib/logger';
 
 const router = express.Router();
 
@@ -163,6 +164,22 @@ router.put(
 
     try {
       const followup = await followupRepository.upsertForVisit(id.data, parsedBody.data);
+
+      if (req.auth) {
+        logAudit({
+          actorUserId: req.auth.userId,
+          action: 'FOLLOWUP_UPSERT',
+          entity: {
+            type: 'VISIT',
+            id: id.data,
+          },
+          meta: {
+            followUpDate: followup.followUpDate,
+            status: followup.status,
+          },
+        });
+      }
+
       return res.status(200).json(followup);
     } catch (err) {
       if (err instanceof FollowUpRuleViolationError) {
@@ -195,6 +212,20 @@ router.patch(
     const updated = await followupRepository.updateStatus(id.data, parsedBody.data);
     if (!updated) {
       return res.status(404).json({ error: 'NOT_FOUND' });
+    }
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'FOLLOWUP_STATUS_UPDATE',
+        entity: {
+          type: 'VISIT',
+          id: id.data,
+        },
+        meta: {
+          status: updated.status,
+        },
+      });
     }
 
     return res.status(200).json(updated);
@@ -235,10 +266,6 @@ router.post(
       });
     }
 
-    // If in future the Visit model gets an `isDeleted` flag, add a similar check:
-    // if (visit.isDeleted) { ... 404 VISIT_NOT_FOUND ... }
-    // TODO (Day 17): enforce non-deleted patient/visit once soft-delete is implemented.
-
     const { lines } = parsedBody.data;
     const now = Date.now();
     const jsonKey = `rx/${visit.visitId}/${randomUUID()}.json`;
@@ -265,6 +292,21 @@ router.post(
       lines,
       jsonKey,
     });
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'RX_CREATED',
+        entity: {
+          type: 'RX',
+          id: prescription.rxId,
+        },
+        meta: {
+          visitId: prescription.visitId,
+          version: prescription.version,
+        },
+      });
+    }
 
     return res.status(201).json({
       rxId: prescription.rxId,
@@ -331,6 +373,22 @@ router.post(
       contentKey,
     });
 
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'XRAY_METADATA_CREATED',
+        entity: {
+          type: 'XRAY',
+          id: xray.xrayId,
+        },
+        meta: {
+          visitId: xray.visitId,
+          contentType: xray.contentType,
+          size: xray.size,
+        },
+      });
+    }
+
     return res.status(201).json(xray);
   }),
 );
@@ -354,6 +412,22 @@ router.post(
 
     try {
       const billing = await billingRepository.checkout(id.data, parsedBody.data);
+
+      if (req.auth) {
+        logAudit({
+          actorUserId: req.auth.userId,
+          action: 'VISIT_CHECKOUT',
+          entity: {
+            type: 'VISIT',
+            id: id.data,
+          },
+          meta: {
+            total: billing.total,
+            hasFollowUp: !!parsedBody.data.followUp,
+          },
+        });
+      }
+
       return res.status(201).json(billing);
     } catch (err) {
       if (err instanceof VisitNotDoneError) {

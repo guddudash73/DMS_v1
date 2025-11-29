@@ -4,6 +4,7 @@ import { validate } from '../middlewares/zod';
 import { AdminCreateDoctorRequest, AdminUpdateDoctorRequest } from '@dms/types';
 import type { AdminDoctorListItem, DoctorProfile } from '@dms/types';
 import { userRepository } from '../repositories/userRepository';
+import { logAudit } from '../lib/logger';
 
 const r = Router();
 
@@ -41,6 +42,21 @@ r.post('/', validate(AdminCreateDoctorRequest), async (req, res, next) => {
       email: user.email,
       displayName: user.displayName,
     };
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'ADMIN_CREATE_DOCTOR',
+        entity: {
+          type: 'USER',
+          id: doctor.doctorId,
+        },
+        meta: {
+          email: user.email,
+          registrationNumber: doctor.registrationNumber,
+        },
+      });
+    }
 
     return res.status(201).json(result);
   } catch (err) {
@@ -113,6 +129,21 @@ r.patch('/:doctorId', validate(AdminUpdateDoctorRequest), async (req, res, next)
       email: user.email,
       displayName: user.displayName,
     };
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'ADMIN_UPDATE_DOCTOR',
+        entity: {
+          type: 'USER',
+          id: doctorId,
+        },
+        meta: {
+          active: updated.active,
+          specialization: updated.specialization,
+        },
+      });
+    }
 
     return res.status(200).json(result);
   } catch (err) {
