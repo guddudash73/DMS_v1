@@ -7,6 +7,7 @@ import { xrayRepository } from '../repositories/xrayRepository';
 import { XRAY_BUCKET_NAME } from '../config/env';
 import { getPresignedUploadUrl, getPresignedDownloadUrl } from '../lib/s3';
 import { patientRepository } from '../repositories/patientRepository';
+import { v4 as randomUUID } from 'uuid';
 import { logAudit } from '../lib/logger';
 
 const router = express.Router();
@@ -81,7 +82,7 @@ router.post(
       });
     }
 
-    const xrayId = (await import('node:crypto')).randomUUID();
+    const xrayId = randomUUID();
     const contentKey = buildXrayObjectKey(visit.visitId, xrayId, 'original', contentType);
 
     const uploadUrl = await getPresignedUploadUrl({
@@ -90,6 +91,7 @@ router.post(
       contentType,
       contentLength: size,
       expiresInSeconds: 90,
+      serverSideEncryption: 'AES256',
     });
 
     if (req.auth) {

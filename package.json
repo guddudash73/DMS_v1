@@ -3,8 +3,7 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*",
-    "infra"
+    "packages/*"
   ],
   "scripts": {
     "dev": "turbo run dev --parallel",
@@ -32,6 +31,7 @@
     "@eslint/js": "^9.39.0",
     "@next/eslint-plugin-next": "^16.0.1",
     "@types/cors": "^2.8.19",
+    "@types/node": "^24.10.1",
     "eslint": "^9.39.0",
     "eslint-config-next": "^16.0.1",
     "eslint-import-resolver-typescript": "^4.4.4",

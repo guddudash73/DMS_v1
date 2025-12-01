@@ -13,7 +13,7 @@ import {
   RxLine,
   BillingCheckoutInput,
 } from '@dms/types';
-import { randomUUID } from 'node:crypto';
+import { v4 as randomUUID } from 'uuid';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { visitRepository, InvalidStatusTransitionError } from '../repositories/visitRepository';
 import { followupRepository, FollowUpRuleViolationError } from '../repositories/followupRepository';
@@ -284,6 +284,7 @@ router.post(
         Key: jsonKey,
         Body: JSON.stringify(jsonPayload),
         ContentType: 'application/json',
+        ServerSideEncryption: 'AES256',
       }),
     );
 

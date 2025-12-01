@@ -5,7 +5,8 @@
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["node", "vitest"]
   },
   "include": ["src"],
   "references": [{ "path": "../../packages/types" }, { "path": "../../packages/config" }]

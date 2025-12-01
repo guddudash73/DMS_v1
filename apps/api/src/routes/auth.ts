@@ -1,4 +1,3 @@
-// apps/api/src/routes/auth.ts
 import { Router, type Response } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';
@@ -10,6 +9,7 @@ import { ACCESS_TOKEN_TTL_SEC, REFRESH_TOKEN_TTL_SEC, NODE_ENV } from '../config
 import { buildTokenPair, verifyRefreshToken } from '../lib/authTokens';
 import { AuthError } from '../middlewares/auth';
 import { logInfo, logAudit } from '../lib/logger';
+import { loginRateLimiter } from '../middlewares/rateLimit';
 
 const r = Router();
 const MAX_LOGIN_ATTEMPTS = 5;
@@ -25,7 +25,7 @@ const setRefreshCookie = (res: Response, refreshToken: string) => {
   });
 };
 
-r.post('/login', validate(LoginRequest), async (req, res, next) => {
+r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next) => {
   try {
     const { email, password } = req.body as LoginRequest;
 
@@ -34,7 +34,6 @@ r.post('/login', validate(LoginRequest), async (req, res, next) => {
       logInfo('auth_login_invalid_user', {
         reqId: req.requestId,
         email,
-        // no password, no tokens
       });
       return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid credentials' });
     }

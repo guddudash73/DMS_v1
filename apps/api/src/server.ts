@@ -15,6 +15,7 @@ import rxPresetsRouter from './routes/rx-presets';
 import adminDoctorsRouter from './routes/admin-doctors';
 import adminRxPresetsRouter from './routes/admin-rx-presets';
 import { authMiddleware, requireRole, AuthError } from './middlewares/auth';
+import { genericSensitiveRateLimiter } from './middlewares/rateLimit';
 import { logInfo, logError } from './lib/logger';
 
 const env = parseEnv(process.env);
@@ -22,13 +23,15 @@ const env = parseEnv(process.env);
 export const createApp = () => {
   const app = express();
 
+  app.set('trust proxy', 1);
+
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
   app.use(
     cors({
       origin: env.CORS_ORIGIN ?? 'http://localhost:3000',
       methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
       credentials: false,
     }),
   );
@@ -62,18 +65,72 @@ export const createApp = () => {
     res.status(200).json(payload);
   });
 
-  app.use('/auth', authRoutes);
+  app.use('/auth', genericSensitiveRateLimiter, authRoutes);
 
-  app.use('/patients', authMiddleware, requireRole('RECEPTION', 'DOCTOR', 'ADMIN'), patientRoutes);
-  app.use('/visits', authMiddleware, requireRole('RECEPTION', 'DOCTOR', 'ADMIN'), visitRoutes);
-  app.use('/reports', authMiddleware, requireRole('ADMIN'), reportsRoutes);
-  app.use('/xrays', authMiddleware, requireRole('DOCTOR', 'ADMIN'), xrayRouter);
-  app.use('/rx', authMiddleware, requireRole('DOCTOR', 'ADMIN'), rxRouter);
-  app.use('/medicines', authMiddleware, requireRole('DOCTOR', 'ADMIN'), medicinesRouter);
-  app.use('/rx-presets', authMiddleware, requireRole('DOCTOR', 'ADMIN'), rxPresetsRouter);
+  app.use(
+    '/patients',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('RECEPTION', 'DOCTOR', 'ADMIN'),
+    patientRoutes,
+  );
+  app.use(
+    '/visits',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('RECEPTION', 'DOCTOR', 'ADMIN'),
+    visitRoutes,
+  );
+  app.use(
+    '/reports',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('ADMIN'),
+    reportsRoutes,
+  );
+  app.use(
+    '/xrays',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('DOCTOR', 'ADMIN'),
+    xrayRouter,
+  );
+  app.use(
+    '/rx',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('DOCTOR', 'ADMIN'),
+    rxRouter,
+  );
+  app.use(
+    '/medicines',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('DOCTOR', 'ADMIN'),
+    medicinesRouter,
+  );
+  app.use(
+    '/rx-presets',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('DOCTOR', 'ADMIN'),
+    rxPresetsRouter,
+  );
 
-  app.use('/admin/doctors', authMiddleware, requireRole('ADMIN'), adminDoctorsRouter);
-  app.use('/admin/rx-presets', authMiddleware, requireRole('ADMIN'), adminRxPresetsRouter);
+  app.use(
+    '/admin/doctors',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('ADMIN'),
+    adminDoctorsRouter,
+  );
+  app.use(
+    '/admin/rx-presets',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('ADMIN'),
+    adminRxPresetsRouter,
+  );
 
   app.use(
     (err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
