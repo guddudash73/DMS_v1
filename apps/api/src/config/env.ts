@@ -1,4 +1,4 @@
-import { parseEnv } from '@dms/config/env';
+import { parseEnv } from '@dms/config';
 
 export const env = parseEnv(process.env);
 

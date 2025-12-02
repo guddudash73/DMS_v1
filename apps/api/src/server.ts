@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { randomUUID } from 'node:crypto';
-import { parseEnv } from '@dms/config/env';
+import { parseEnv } from '@dms/config';
 import type { HealthResponse } from '@dms/types';
 import authRoutes from './routes/auth';
 import patientRoutes from './routes/patients';

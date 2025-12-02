@@ -5,19 +5,13 @@
   "type": "module",
   "sideEffects": false,
   "main": "./dist/env.js",
-  "module": "./dist/env.js",
   "types": "./dist/env.d.ts",
   "exports": {
     ".": {
       "types": "./dist/env.d.ts",
-      "import": "./dist/env.js",
-      "default": "./dist/env.js"
+      "import": "./dist/env.js"
     },
-    "./env": {
-      "types": "./dist/env.d.ts",
-      "import": "./dist/env.js",
-      "default": "./dist/env.js"
-    }
+    "./package.json": "./package.json"
   },
   "files": [
     "dist"
