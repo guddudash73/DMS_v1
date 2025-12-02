@@ -1,0 +1,32 @@
+FROM node:20-alpine AS base
+
+# Work from repo root
+WORKDIR /app
+
+# Install basic tools (optional but handy)
+RUN apk add --no-cache bash
+
+# Copy package manifests first for better caching
+COPY package.json package-lock.json* turbo.json ./
+COPY apps/api/package.json ./apps/api/package.json
+COPY packages/config/package.json ./packages/config/package.json
+COPY packages/types/package.json ./packages/types/package.json
+
+# Install all deps (including dev), ignoring husky's prepare script
+RUN npm ci --ignore-scripts
+
+# Copy the rest of the repo (source, tsconfig, etc.)
+COPY . .
+
+# Build shared workspace packages so their dist/ exists
+RUN npm run build -w @dms/config && npm run build -w @dms/types
+
+# API will run from apps/api
+WORKDIR /app/apps/api
+
+# Expose API port (matches your .env.example)
+EXPOSE 4000
+
+# Run the API using tsx directly on TypeScript source.
+# This matches your local dev style and lets you keep your current imports.
+CMD ["npx", "tsx", "src/index.ts"]

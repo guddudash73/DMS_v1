@@ -6,22 +6,21 @@
   "sideEffects": false,
   "main": "./dist/env.js",
   "module": "./dist/env.js",
-  "types": "./env.d.ts",
+  "types": "./dist/env.d.ts",
   "exports": {
     ".": {
-      "types": "./env.d.ts",
+      "types": "./dist/env.d.ts",
       "import": "./dist/env.js",
       "default": "./dist/env.js"
     },
     "./env": {
-      "types": "./env.d.ts",
+      "types": "./dist/env.d.ts",
       "import": "./dist/env.js",
       "default": "./dist/env.js"
     }
   },
   "files": [
-    "dist",
-    "env.d.ts"
+    "dist"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",

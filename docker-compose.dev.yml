@@ -4,11 +4,6 @@ services:
     command: ['-jar', 'DynamoDBLocal.jar', '-sharedDb', '-inMemory', '-port', '8000']
     ports:
       - '8000:8000'
-    healthcheck:
-      test: ['CMD-SHELL', 'curl -sf http://localhost:8000 || exit 1']
-      interval: 5s
-      timeout: 2s
-      retries: 10
     volumes:
       - ddbdata:/home/dynamodblocal/data
 
@@ -20,18 +15,47 @@ services:
       - AWS_DEFAULT_REGION=us-east-1
     ports:
       - '4566:4566'
-    healthcheck:
-      test:
-        [
-          'CMD-SHELL',
-          'curl -sf http://localhost:4566/_localstack/health | grep ''"initialized": true'' >/dev/null',
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 30
     volumes:
       - '/var/run/docker.sock:/var/run/docker.sock'
       - localstackdata:/var/lib/localstack
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      # Runtime mode
+      NODE_ENV: development
+      PORT: 4000
+
+      # AWS + local emulators
+      AWS_REGION: us-east-1
+      DYNAMO_ENDPOINT: http://dynamodb-local:8000
+      S3_ENDPOINT: http://localstack:4566
+
+      # Table / bucket naming for local dev
+      DDB_TABLE_NAME: dms-test-table
+      XRAY_BUCKET_NAME: dms-xray-test
+
+      # Local dev credentials for LocalStack / DDB Local
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+
+      # Token lifetimes
+      ACCESS_TOKEN_TTL_SEC: 900
+      REFRESH_TOKEN_TTL_SEC: 1209600
+
+      # CORS for web app on localhost:3000
+      CORS_ORIGIN: http://localhost:3000
+
+      # Dev-only secrets (override via real env in stage/prod)
+      JWT_ACCESS_SECRET: dev-only-access-secret-change-me
+      JWT_REFRESH_SECRET: dev-only-refresh-secret-change-me
+    ports:
+      - '4000:4000'
+    depends_on:
+      - dynamodb-local
+      - localstack
 
 volumes:
   ddbdata:
