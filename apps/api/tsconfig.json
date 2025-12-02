@@ -6,7 +6,10 @@
     "rootDir": "src",
     "strict": true,
     "skipLibCheck": true,
-    "types": ["node", "vitest"]
+    "types": ["node", "vitest"],
+    "paths": {
+      "@dms/config": ["../../packages/config/dist/index.d.ts"]
+    }
   },
   "include": ["src"]
 }
