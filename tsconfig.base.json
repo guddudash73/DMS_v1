@@ -4,11 +4,6 @@
     "lib": ["ES2022", "DOM"],
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "paths": {
-      "@dms/config": ["./packages/config/src"],
-      "@dms/types": ["./packages/types/src"],
-      "@dms/*": ["./packages/*/src"]
-    },
 
     "esModuleInterop": true,
     "strict": true,
