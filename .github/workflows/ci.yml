@@ -40,6 +40,40 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Debug - Direct comparison between packages
+        run: |
+          echo "=== Build types package manually ==="
+          cd packages/types
+          rm -rf dist
+          npx tsc -p tsconfig.json --listEmittedFiles 2>&1 | grep "TSFILE" | head -20
+          echo ""
+          echo "=== Check types dist ==="
+          ls -la dist/ | head -20
+          echo ""
+          echo "=== Now build config package manually ==="
+          cd ../config
+          rm -rf dist
+          npx tsc -p tsconfig.json --listEmittedFiles 2>&1 | grep "TSFILE" | head -20
+          echo ""
+          echo "=== Check config dist ==="
+          ls -la dist/ | head -20
+          echo ""
+          echo "=== Check directory permissions ==="
+          ls -ld packages/config packages/types
+          echo ""
+          echo "=== Check for hidden files in config ==="
+          ls -la packages/config/ | grep "^\." || echo "No hidden files"
+          echo ""
+          echo "=== Check for hidden files in types ==="
+          ls -la packages/types/ | grep "^\." || echo "No hidden files"
+          echo ""
+          echo "=== Check source file byte content ==="
+          echo "Config env.ts first 10 lines in hex:"
+          hexdump -C packages/config/src/env.ts | head -10
+          echo ""
+          echo "Types auth.ts first 10 lines in hex:"
+          hexdump -C packages/types/src/auth.ts | head -10
+
       - name: Debug - Check actual build command
         run: |
           cd packages/config
@@ -71,35 +105,6 @@ jobs:
           echo "=== Diff between configs ==="
           diff /tmp/config-resolved.json /tmp/types-resolved.json || echo "Configs differ"
 
-      - name: Debug - Strace TypeScript file operations
-        run: |
-          cd packages/config
-          rm -rf dist
-          echo "=== Running with strace to track file operations ==="
-          strace -e trace=open,openat,write,unlink,rename -o /tmp/tsc.trace npx tsc -p tsconfig.json 2>&1 || true
-          echo ""
-          echo "=== Check for .d.ts operations in trace ==="
-          grep "\.d\.ts" /tmp/tsc.trace | head -50 || echo "No .d.ts operations found"
-          echo ""
-          echo "=== Check what files exist ==="
-          ls -la dist/ || echo "dist doesn't exist"
-          echo ""
-          echo "=== Full trace summary ==="
-          grep -E "(env|index)\.(js|d\.ts)" /tmp/tsc.trace | tail -100 || echo "No relevant operations"
-
-      - name: Debug - Watch TypeScript compilation
-        run: |
-          cd packages/config
-          rm -rf dist
-          echo "=== Running tsc with extended diagnostics ==="
-          npx tsc -p tsconfig.json --listEmittedFiles --extendedDiagnostics 2>&1 | tee build.log
-          echo ""
-          echo "=== Immediately check what exists ==="
-          ls -la dist/ || echo "dist doesn't exist"
-          echo ""
-          echo "=== Find all .d.ts files ==="
-          find . -name "*.d.ts" -type f 2>/dev/null || echo "No .d.ts files found anywhere"
-
       - name: Debug - TypeScript version and configs
         run: |
           echo "=== TypeScript version ==="
@@ -115,16 +120,6 @@ jobs:
           cat packages/tsconfig/base.json
           echo ""
           cat tsconfig.base.json
-
-      - name: Debug - Check package.json type field
-        run: |
-          echo "=== Config package.json ==="
-          grep -A2 '"name"' packages/config/package.json | head -5
-          grep '"type"' packages/config/package.json || echo "No type field found"
-          echo ""
-          echo "=== Types package.json ==="
-          grep -A2 '"name"' packages/types/package.json | head -5
-          grep '"type"' packages/types/package.json || echo "No type field found"
 
       - name: Build packages
         run: npm run build:packages
