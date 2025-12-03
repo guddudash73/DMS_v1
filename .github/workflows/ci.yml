@@ -40,6 +40,22 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Debug - Check actual build command
+        run: |
+          cd packages/config
+          echo "=== package.json build script ==="
+          cat package.json | grep -A2 '"build"'
+          echo ""
+          echo "=== Check if tsconfig has noEmit ==="
+          cat tsconfig.json | grep -i emit || echo "No emit settings found"
+          echo ""
+          echo "=== Run with explicit emit settings ==="
+          rm -rf dist
+          npx tsc -p tsconfig.json --noEmit false --declaration true --emitDeclarationOnly false --listEmittedFiles 2>&1
+          echo ""
+          echo "=== Check what was created ==="
+          ls -la dist/ || echo "dist doesn't exist"
+
       - name: Debug - Compare resolved configs
         run: |
           echo "=== Config resolved tsconfig ==="
@@ -66,7 +82,7 @@ jobs:
           grep "\.d\.ts" /tmp/tsc.trace | head -50 || echo "No .d.ts operations found"
           echo ""
           echo "=== Check what files exist ==="
-          ls -la dist/
+          ls -la dist/ || echo "dist doesn't exist"
           echo ""
           echo "=== Full trace summary ==="
           grep -E "(env|index)\.(js|d\.ts)" /tmp/tsc.trace | tail -100 || echo "No relevant operations"
@@ -79,16 +95,10 @@ jobs:
           npx tsc -p tsconfig.json --listEmittedFiles --extendedDiagnostics 2>&1 | tee build.log
           echo ""
           echo "=== Immediately check what exists ==="
-          ls -la dist/
+          ls -la dist/ || echo "dist doesn't exist"
           echo ""
           echo "=== Find all .d.ts files ==="
-          find dist -name "*.d.ts" -type f || echo "No .d.ts files found"
-          echo ""
-          echo "=== Check tsbuildinfo ==="
-          if [ -f "tsconfig.tsbuildinfo" ]; then
-            echo "tsbuildinfo exists, first 100 lines:"
-            head -100 tsconfig.tsbuildinfo
-          fi
+          find . -name "*.d.ts" -type f 2>/dev/null || echo "No .d.ts files found anywhere"
 
       - name: Debug - TypeScript version and configs
         run: |
