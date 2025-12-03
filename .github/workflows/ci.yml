@@ -88,11 +88,17 @@ jobs:
 
       - name: Debug - Check generated d.ts content
         run: |
-          echo "=== index.d.ts ==="
+          echo "=== Config dist files ==="
+          ls -la packages/config/dist/
+          echo ""
+          echo "=== index.d.ts content ==="
           cat packages/config/dist/index.d.ts || echo "index.d.ts not found"
           echo ""
-          echo "=== env.d.ts ==="
+          echo "=== env.d.ts content ==="
           cat packages/config/dist/env.d.ts || echo "env.d.ts not found"
+          echo ""
+          echo "=== For comparison - types index.d.ts ==="
+          cat packages/types/dist/index.d.ts || echo "types index.d.ts not found"
 
       - name: Build apps
         run: npm run build:apps
