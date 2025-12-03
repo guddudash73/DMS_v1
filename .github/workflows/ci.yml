@@ -55,6 +55,22 @@ jobs:
           echo "=== Diff between configs ==="
           diff /tmp/config-resolved.json /tmp/types-resolved.json || echo "Configs differ"
 
+      - name: Debug - Strace TypeScript file operations
+        run: |
+          cd packages/config
+          rm -rf dist
+          echo "=== Running with strace to track file operations ==="
+          strace -e trace=open,openat,write,unlink,rename -o /tmp/tsc.trace npx tsc -p tsconfig.json 2>&1 || true
+          echo ""
+          echo "=== Check for .d.ts operations in trace ==="
+          grep "\.d\.ts" /tmp/tsc.trace | head -50 || echo "No .d.ts operations found"
+          echo ""
+          echo "=== Check what files exist ==="
+          ls -la dist/
+          echo ""
+          echo "=== Full trace summary ==="
+          grep -E "(env|index)\.(js|d\.ts)" /tmp/tsc.trace | tail -100 || echo "No relevant operations"
+
       - name: Debug - Watch TypeScript compilation
         run: |
           cd packages/config
