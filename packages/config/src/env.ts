@@ -1,5 +1,8 @@
 import { z } from 'zod';
 
+// Dummy comment to force TypeScript to treat this as a module
+export {};
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']),
   PORT: z.string().optional(),
