@@ -3,12 +3,12 @@
   "version": "0.0.3",
   "private": true,
   "sideEffects": false,
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./dist/env.js",
+  "types": "./dist/env.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
+      "types": "./dist/env.d.ts",
+      "import": "./dist/env.js"
     },
     "./package.json": "./package.json"
   },
