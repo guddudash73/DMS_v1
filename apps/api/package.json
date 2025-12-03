@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc --build tsconfig.json",
+    "build": "tsc --build ../../packages/config ../../packages/types tsconfig.json",
     "start": "node dist/index.js",
-    "typecheck": "tsc --build tsconfig.json",
+    "typecheck": "tsc --build ../../packages/config ../../packages/types tsconfig.json",
     "lint": "eslint \"src/**/*.ts\"",
     "test": "vitest run --reporter=default",
     "clean": "rimraf dist || rm -rf dist",
