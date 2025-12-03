@@ -1,5 +1,4 @@
 name: CI
-
 on:
   pull_request:
     branches: [main, develop]
@@ -8,11 +7,9 @@ on:
       - '**/*.drawio'
   push:
     branches: [main]
-
 concurrency:
   group: ci-${{github.ref}}
   cancel-in-progress: true
-
 jobs:
   build_test:
     runs-on: ubuntu-latest
@@ -28,7 +25,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -41,24 +37,39 @@ jobs:
           key: turbo-${{runner.os}}-${{hashFiles('**/package-lock.json')}}
           restore-keys: |
             turbo-${{runner.os}} -
-
       - name: Install dependencies
         run: npm install
 
-      - name: Build
+      - name: Debug - Check package.json type field
         run: |
-          npm run build:packages
-          npm run build:apps
+          echo "=== Config package.json ==="
+          grep -A2 '"name"' packages/config/package.json | head -5
+          grep '"type"' packages/config/package.json || echo "No type field found"
+          echo ""
+          echo "=== Types package.json ==="
+          grep -A2 '"name"' packages/types/package.json | head -5
+          grep '"type"' packages/types/package.json || echo "No type field found"
+
+      - name: Build packages
+        run: npm run build:packages
+
+      - name: Debug - Check build output
+        run: |
+          echo "=== Config dist contents ==="
+          ls -la packages/config/dist/
+          echo ""
+          echo "=== Types dist contents ==="
+          ls -la packages/types/dist/
+
+      - name: Build apps
+        run: npm run build:apps
 
       - name: Lint
         run: npm run lint
-
       - name: Typecheck
         run: npm run typecheck
-
       - name: Start emulators (DynamoDB Local / S3)
         run: npm run dev:emulators:up
-
       - name: Wait for DynamoDB Local on 8000
         run: |
           for i in {1..30}; do
@@ -67,10 +78,8 @@ jobs:
           done
           echo "DynamoDB Local did not start in time" >&2
           exit 1
-
       - name: Run tests (temporarily disabled)
         run: npm run test:ci
-
       - name: Stop emulators
         if: always()
         run: npm run dev:emulators:down
