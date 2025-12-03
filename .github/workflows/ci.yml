@@ -40,6 +40,22 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Debug - TypeScript version and configs
+        run: |
+          echo "=== TypeScript version ==="
+          npx tsc --version
+          echo ""
+          echo "=== Config tsconfig.json ==="
+          cat packages/config/tsconfig.json
+          echo ""
+          echo "=== Types tsconfig.json ==="
+          cat packages/types/tsconfig.json
+          echo ""
+          echo "=== Base tsconfig ==="
+          cat packages/tsconfig/base.json
+          echo ""
+          cat tsconfig.base.json
+
       - name: Debug - Check package.json type field
         run: |
           echo "=== Config package.json ==="
@@ -49,6 +65,15 @@ jobs:
           echo "=== Types package.json ==="
           grep -A2 '"name"' packages/types/package.json | head -5
           grep '"type"' packages/types/package.json || echo "No type field found"
+
+      - name: Debug - Manual config build with verbose
+        run: |
+          echo "=== Building config manually with listEmittedFiles ==="
+          cd packages/config
+          npx tsc -p tsconfig.json --listEmittedFiles
+          echo ""
+          echo "=== Check what was created ==="
+          ls -la dist/
 
       - name: Build packages
         run: npm run build:packages
