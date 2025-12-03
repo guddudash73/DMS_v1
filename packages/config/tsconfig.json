@@ -4,11 +4,12 @@
     "composite": true,
     "declaration": true,
     "declarationMap": true,
+    "emitDeclarationOnly": false, // Make sure this is false
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
-    "skipLibCheck": true,
-    "emitDeclarationOnly": false
+    "skipLibCheck": true
   },
-  "include": ["src"]
+  "include": ["src/**/*"], // Change from ["src"] to ["src/**/*"]
+  "exclude": ["node_modules", "dist", "**/*.test.ts", "**/*.spec.ts"]
 }
