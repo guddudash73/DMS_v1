@@ -6,7 +6,14 @@
     "rootDir": "src",
     "strict": true,
     "skipLibCheck": true,
-    "types": ["node", "vitest"]
+    "types": ["node", "vitest"],
+    "baseUrl": ".",
+    "paths": {
+      "@dms/config": ["../../packages/config/src"],
+      "@dms/config/*": ["../../packages/config/src/*"],
+      "@dms/types": ["../../packages/types/src"],
+      "@dms/types/*": ["../../packages/types/src/*"]
+    }
   },
   "include": ["src"],
   "references": [
