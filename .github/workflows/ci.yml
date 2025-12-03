@@ -86,6 +86,14 @@ jobs:
           echo "=== Types dist contents ==="
           ls -la packages/types/dist/
 
+      - name: Debug - Check generated d.ts content
+        run: |
+          echo "=== index.d.ts ==="
+          cat packages/config/dist/index.d.ts || echo "index.d.ts not found"
+          echo ""
+          echo "=== env.d.ts ==="
+          cat packages/config/dist/env.d.ts || echo "env.d.ts not found"
+
       - name: Build apps
         run: npm run build:apps
 
