@@ -8,6 +8,8 @@
   "scripts": {
     "dev": "turbo run dev --parallel",
     "build": "turbo run build",
+    "build:packages": "npm run build --workspace=@dms/config --workspace=@dms/types",
+    "build:apps": "npm run build --workspace=@dms/api --workspace=@dms/web",
     "start": "npm run start -w @dms/web",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",

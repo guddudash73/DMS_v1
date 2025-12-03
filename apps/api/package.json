@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc --build ../../packages/config ../../packages/types tsconfig.json",
+    "prebuild": "npm run build --workspace=@dms/config --workspace=@dms/types",
+    "build": "tsc",
     "start": "node dist/index.js",
     "typecheck": "tsc --build ../../packages/config ../../packages/types tsconfig.json",
     "lint": "eslint \"src/**/*.ts\"",
