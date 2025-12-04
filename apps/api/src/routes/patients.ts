@@ -1,6 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { PatientCreate, PatientUpdate, PatientSearchQuery, PatientId } from '@dms/types';
-import { patientRepository } from '../repositories/patientRepository';
+import { patientRepository, DuplicatePatientError } from '../repositories/patientRepository';
 import { visitRepository } from '../repositories/visitRepository';
 
 const router = express.Router();
@@ -25,8 +25,18 @@ router.post(
       return handleValidationError(res, parsed.error.issues);
     }
 
-    const patient = await patientRepository.create(parsed.data);
-    return res.status(201).json(patient);
+    try {
+      const patient = await patientRepository.create(parsed.data);
+      return res.status(201).json(patient);
+    } catch (err) {
+      if (err instanceof DuplicatePatientError) {
+        return res.status(409).json({
+          error: err.code,
+          message: err.message,
+        });
+      }
+      throw err;
+    }
   }),
 );
 
@@ -91,11 +101,21 @@ router.patch(
       return handleValidationError(res, parsedBody.error.issues);
     }
 
-    const updated = await patientRepository.update(parsedId.data, parsedBody.data);
-    if (!updated) {
-      return res.status(404).json({ error: 'NOT_FOUND' });
+    try {
+      const updated = await patientRepository.update(parsedId.data, parsedBody.data);
+      if (!updated) {
+        return res.status(404).json({ error: 'NOT_FOUND' });
+      }
+      return res.status(200).json(updated);
+    } catch (err) {
+      if (err instanceof DuplicatePatientError) {
+        return res.status(409).json({
+          error: err.code,
+          message: err.message,
+        });
+      }
+      throw err;
     }
-    return res.status(200).json(updated);
   }),
 );
 

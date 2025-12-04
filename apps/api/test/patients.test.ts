@@ -1,9 +1,24 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
 import { asReception } from './helpers/auth';
+import { deletePatientCompletely } from './helpers/patients';
 
 const app = createApp();
+
+const createdPatients: string[] = [];
+const registerPatient = (id: string) => {
+  createdPatients.push(id);
+};
+
+afterEach(async () => {
+  const ids = [...createdPatients];
+  createdPatients.length = 0;
+
+  for (const id of ids) {
+    await deletePatientCompletely(id);
+  }
+});
 
 describe('Patients API', () => {
   it('creates and fatches a patient', async () => {
@@ -14,12 +29,15 @@ describe('Patients API', () => {
         name: 'Guddu Dash',
         dob: '2001-03-23',
         gender: 'male',
-        phone: '+917749064894',
+        phone: `+9177490648${Math.floor(Math.random() * 100)
+          .toString()
+          .padStart(2, '0')}`,
       })
       .expect(201);
 
     expect(createRes.body).toHaveProperty('patientId');
     const patientId = createRes.body.patientId as string;
+    registerPatient(patientId);
 
     const getRes = await request(app)
       .get(`/patients/${patientId}`)
@@ -43,7 +61,10 @@ describe('Patients API', () => {
   });
 
   it('searches patient by phone using GET /patients?query=', async () => {
-    const phone = '+919876543210';
+    const phoneBase = '+9198765432';
+    const phone = `${phoneBase}${Math.floor(Math.random() * 100)
+      .toString()
+      .padStart(2, '0')}`;
     const digitsOnly = phone.replace(/\D/g, '');
 
     const createRes = await request(app)
@@ -58,6 +79,7 @@ describe('Patients API', () => {
       .expect(201);
 
     const patientId = createRes.body.patientId as string;
+    registerPatient(patientId);
 
     const searchRes = await request(app)
       .get('/patients')

@@ -1,30 +1,18 @@
-// apps/api/src/repositories/prescriptionRepository.ts
 import { randomUUID } from 'node:crypto';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
   GetCommand,
   QueryCommand,
   TransactWriteCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { AWS_REGION, DDB_TABLE_NAME, DYNAMO_ENDPOINT } from '../config/env';
+import { dynamoClient, TABLE_NAME } from '../config/aws';
 import type { Visit, Prescription, RxId, RxLineType } from '@dms/types';
 
-const ddbClient = new DynamoDBClient({
-  region: AWS_REGION,
-  endpoint: DYNAMO_ENDPOINT,
-});
-
-const docClient = DynamoDBDocumentClient.from(ddbClient, {
+const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: {
     removeUndefinedValues: true,
   },
 });
-
-const TABLE_NAME = DDB_TABLE_NAME;
-if (!TABLE_NAME) {
-  throw new Error('DDB_TABLE_NAME env var is required');
-}
 
 const buildVisitRxKey = (visitId: string, rxId: string) => ({
   PK: `VISIT#${visitId}`,
@@ -37,10 +25,6 @@ const buildRxMetaKey = (rxId: string) => ({
 });
 
 export interface PrescriptionRepository {
-  /**
-   * Create a new prescription version for a visit.
-   * This is append-only; previous versions are never mutated.
-   */
   createForVisit(params: {
     visit: Visit;
     lines: RxLineType[];
@@ -49,9 +33,6 @@ export interface PrescriptionRepository {
 
   getById(rxId: RxId): Promise<Prescription | null>;
 
-  /**
-   * List all prescription versions for a visit, sorted by version ascending.
-   */
   listByVisit(visitId: string): Promise<Prescription[]>;
 }
 
@@ -63,7 +44,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
   }): Promise<Prescription> {
     const { visit, lines, jsonKey } = params;
 
-    // Load existing RX items for this visit to determine next version number.
     const { Items } = await docClient.send(
       new QueryCommand({
         TableName: TABLE_NAME,
@@ -90,7 +70,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     const base: Prescription = {
       rxId,
       visitId: visit.visitId,
-      doctorId: visit.doctorId, // <- always from visit
+      doctorId: visit.doctorId,
       lines,
       version,
       jsonKey,
@@ -127,7 +107,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
             Put: {
               TableName: TABLE_NAME,
               Item: rxMetaItem,
-              // Ensure rxId uniqueness.
               ConditionExpression: 'attribute_not_exists(PK)',
             },
           },

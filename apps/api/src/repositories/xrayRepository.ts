@@ -1,26 +1,17 @@
-import { randomUUID } from 'node:crypto';
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import {
+  ConditionalCheckFailedException,
+  TransactionCanceledException,
+} from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
-import { AWS_REGION, DYNAMO_ENDPOINT, DDB_TABLE_NAME } from '../config/env';
-import type { Visit } from '@dms/types';
-import type { Xray, XrayContentType } from '@dms/types';
+import type { Visit, Xray, XrayContentType } from '@dms/types';
 import { key } from '@dms/types';
+import { dynamoClient, TABLE_NAME } from '../config/aws';
 
-const ddbClient = new DynamoDBClient({
-  region: AWS_REGION,
-  endpoint: DYNAMO_ENDPOINT,
-});
-
-const docClient = DynamoDBDocumentClient.from(ddbClient, {
+const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: {
     removeUndefinedValues: true,
   },
 });
-
-const TABLE_NAME = DDB_TABLE_NAME;
-if (!TABLE_NAME) {
-  throw new Error('DDB_TABLE_NAME env var is required');
-}
 
 export interface XrayMetaDataInput {
   visit: Visit;
@@ -38,10 +29,19 @@ export interface XrayRepository {
   getById(xrayId: string): Promise<Xray | null>;
 }
 
+export class XrayConflictError extends Error {
+  readonly code = 'XRAY_CONFLICT' as const;
+
+  constructor(message = 'X-ray metadata already exists for this ID') {
+    super(message);
+    this.name = 'XrayConflictError';
+  }
+}
+
 export class DynamoDBXrayRepository implements XrayRepository {
   async putMetadata(input: XrayMetaDataInput): Promise<Xray> {
     const now = Date.now();
-    const xrayId = input.xrayId ?? randomUUID;
+    const xrayId = input.xrayId;
 
     const base: Xray = {
       xrayId,
@@ -78,25 +78,36 @@ export class DynamoDBXrayRepository implements XrayRepository {
       visitDate: input.visit.visitDate,
     };
 
-    await docClient.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          {
-            Put: {
-              TableName: TABLE_NAME,
-              Item: visitScopedItem,
+    try {
+      await docClient.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Put: {
+                TableName: TABLE_NAME,
+                Item: visitScopedItem,
+              },
             },
-          },
-          {
-            Put: {
-              TableName: TABLE_NAME,
-              Item: xrayMetaItem,
-              ConditionExpression: 'attribute_not_exists(PK)',
+            {
+              Put: {
+                TableName: TABLE_NAME,
+                Item: xrayMetaItem,
+                ConditionExpression: 'attribute_not_exists(PK)',
+              },
             },
-          },
-        ],
-      }),
-    );
+          ],
+        }),
+      );
+    } catch (err) {
+      if (
+        err instanceof ConditionalCheckFailedException ||
+        err instanceof TransactionCanceledException
+      ) {
+        throw new XrayConflictError();
+      }
+      throw err;
+    }
+
     return base;
   }
 

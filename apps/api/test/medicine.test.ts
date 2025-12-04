@@ -85,7 +85,6 @@ describe('Medicines API', () => {
       })
       .expect(201);
 
-    // Use the full unique name as the query so it behaves well with prefix-based search.
     const searchRes = await request(app)
       .get('/medicines')
       .set('Authorization', asDoctor())

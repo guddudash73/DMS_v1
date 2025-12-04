@@ -1,11 +1,26 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
 import { asDoctor, asReception } from './helpers/auth';
+import { deletePatientCompletely } from './helpers/patients';
 
 const app = createApp();
 
 const hasFetch = typeof (globalThis as any).fetch === 'function';
+
+const createdPatients: string[] = [];
+const registerPatient = (id: string) => {
+  createdPatients.push(id);
+};
+
+afterEach(async () => {
+  const ids = [...createdPatients];
+  createdPatients.length = 0;
+
+  for (const id of ids) {
+    await deletePatientCompletely(id);
+  }
+});
 
 (hasFetch ? describe : describe.skip)('X-ray S3 flow (LocalStack)', () => {
   async function createPatient(name: string, phone: string) {
@@ -20,7 +35,9 @@ const hasFetch = typeof (globalThis as any).fetch === 'function';
       })
       .expect(201);
 
-    return res.body.patientId as string;
+    const patientId = res.body.patientId as string;
+    registerPatient(patientId);
+    return patientId;
   }
 
   async function createVisit(patientId: string, doctorId: string, reason: string) {

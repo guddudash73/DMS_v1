@@ -30,7 +30,6 @@ describe('Prescription presets API', () => {
       createdByUserId: 'ADMIN#001',
     });
 
-    // Query by full unique name so it matches whatever "starts with" / normalized search the API uses.
     const res = await request(app)
       .get('/rx-presets')
       .set('Authorization', asDoctor())

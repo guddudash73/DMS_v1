@@ -1,9 +1,24 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
 import { asDoctor, asReception } from './helpers/auth';
+import { deletePatientCompletely } from './helpers/patients';
 
 const app = createApp();
+
+const createdPatients: string[] = [];
+const registerPatient = (id: string) => {
+  createdPatients.push(id);
+};
+
+afterEach(async () => {
+  const ids = [...createdPatients];
+  createdPatients.length = 0;
+
+  for (const id of ids) {
+    await deletePatientCompletely(id);
+  }
+});
 
 async function createPatient() {
   const res = await request(app)
@@ -13,11 +28,15 @@ async function createPatient() {
       name: 'Queue Test Patient',
       dob: '1995-01-01',
       gender: 'female',
-      phone: '+910000000000',
+      phone: `+910000000${Math.floor(Math.random() * 1_000)
+        .toString()
+        .padStart(3, '0')}`,
     })
     .expect(201);
 
-  return res.body.patientId as string;
+  const patientId = res.body.patientId as string;
+  registerPatient(patientId);
+  return patientId;
 }
 
 describe('Visits API', () => {

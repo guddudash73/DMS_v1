@@ -1,11 +1,10 @@
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
-import { AWS_REGION, DDB_TABLE_NAME, DYNAMO_ENDPOINT } from '../config/env';
 import type { Billing, BillingCheckoutInput, Visit, VisitId } from '@dms/types';
 import { visitRepository } from './visitRepository';
 import { patientRepository } from './patientRepository';
 import { followupRepository, FollowUpRuleViolationError } from './followupRepository';
 import { log } from '../lib/logger';
+import { dynamoClient, TABLE_NAME } from '../config/aws';
 
 export class BillingRuleViolationError extends Error {
   readonly code = 'BILLING_RULE_VIOLATION' as const;
@@ -31,21 +30,11 @@ export class VisitNotDoneError extends Error {
   }
 }
 
-const ddbClient = new DynamoDBClient({
-  region: AWS_REGION,
-  endpoint: DYNAMO_ENDPOINT,
-});
-
-const docClient = DynamoDBDocumentClient.from(ddbClient, {
+const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: {
     removeUndefinedValues: true,
   },
 });
-
-const TABLE_NAME = DDB_TABLE_NAME;
-if (!TABLE_NAME) {
-  throw new Error('DDB_TABLE_NAME env var is required');
-}
 
 const buildVisitMetaKey = (visitId: string) => ({
   PK: `VISIT#${visitId}`,

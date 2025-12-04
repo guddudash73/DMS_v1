@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
@@ -10,6 +10,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { AWS_REGION, DDB_TABLE_NAME, DYNAMO_ENDPOINT } from '../src/config/env';
 import { asReception, asAdmin } from './helpers/auth';
+import { deletePatientCompletely } from './helpers/patients';
 
 const app = createApp();
 
@@ -24,6 +25,20 @@ const docClient = DynamoDBDocumentClient.from(ddbClient, {
   },
 });
 
+const createdPatients: string[] = [];
+const registerPatient = (id: string) => {
+  createdPatients.push(id);
+};
+
+afterEach(async () => {
+  const ids = [...createdPatients];
+  createdPatients.length = 0;
+
+  for (const id of ids) {
+    await deletePatientCompletely(id);
+  }
+});
+
 async function createPatient(name: string, phone: string) {
   const res = await request(app)
     .post('/patients')
@@ -36,7 +51,9 @@ async function createPatient(name: string, phone: string) {
     })
     .expect(201);
 
-  return res.body.patientId as string;
+  const patientId = res.body.patientId as string;
+  registerPatient(patientId);
+  return patientId;
 }
 
 async function createVisit(patientId: string, doctorId: string, reason: string) {

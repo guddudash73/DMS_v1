@@ -1,15 +1,15 @@
-import { beforeAll, describe, it, expect } from 'vitest';
+import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import bcrypt from 'bcrypt';
 import { createApp } from '../src/server';
 import { userRepository } from '../src/repositories/userRepository';
+import { deletePatientCompletely } from './helpers/patients';
 
 const app = createApp();
 
 type Role = 'RECEPTION' | 'DOCTOR' | 'ADMIN';
 
 const mkUser = async (role: Role) => {
-  // Make email unique per run so DynamoDB conditional checks never collide
   const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
   const email = `${role.toLowerCase()}-auth-roles-${suffix}@example.com`;
   const password = `${role}Pass123!`;
@@ -30,6 +30,20 @@ const mkUser = async (role: Role) => {
 let receptionToken: string;
 let doctorToken: string;
 let adminToken: string;
+
+const createdPatients: string[] = [];
+const registerPatient = (id: string) => {
+  createdPatients.push(id);
+};
+
+afterEach(async () => {
+  const ids = [...createdPatients];
+  createdPatients.length = 0;
+
+  for (const id of ids) {
+    await deletePatientCompletely(id);
+  }
+});
 
 beforeAll(async () => {
   [receptionToken, doctorToken, adminToken] = await Promise.all([
@@ -53,7 +67,9 @@ async function createPatient(token: string) {
     })
     .expect(201);
 
-  return res.body.patientId as string;
+  const patientId = res.body.patientId as string;
+  registerPatient(patientId);
+  return patientId;
 }
 
 async function createVisit(token: string, patientId: string, doctorId: string) {
@@ -72,7 +88,6 @@ async function createVisit(token: string, patientId: string, doctorId: string) {
 
 describe('Auth roles', () => {
   it('allows RECEPTION to access /patients and /visits but not /rx or /reports', async () => {
-    // /patients should be accessible (status 200 or 400 based on validation, but not 401/403)
     const patientsRes = await request(app)
       .get('/patients')
       .set('Authorization', `Bearer ${receptionToken}`)
@@ -80,7 +95,6 @@ describe('Auth roles', () => {
 
     expect([200, 400]).toContain(patientsRes.status);
 
-    // /visits (queue) should be accessible (again, 200/400 but not 401/403)
     const visitsRes = await request(app)
       .get('/visits/queue')
       .set('Authorization', `Bearer ${receptionToken}`)
@@ -88,7 +102,6 @@ describe('Auth roles', () => {
 
     expect([200, 400]).toContain(visitsRes.status);
 
-    // /rx routes should be forbidden for RECEPTION
     const rxRes = await request(app)
       .get('/rx/some-id/json-url')
       .set('Authorization', `Bearer ${receptionToken}`);
@@ -96,7 +109,6 @@ describe('Auth roles', () => {
     expect(rxRes.status).toBe(403);
     expect(rxRes.body.error).toBe('FORBIDDEN');
 
-    // /reports should be forbidden for RECEPTION
     const reportsRes = await request(app)
       .get('/reports/daily')
       .set('Authorization', `Bearer ${receptionToken}`)
@@ -107,7 +119,6 @@ describe('Auth roles', () => {
   });
 
   it('allows DOCTOR to access /visits, /rx, /medicines, /xrays but not /admin routes', async () => {
-    // /visits (queue) allowed
     const visitsRes = await request(app)
       .get('/visits/queue')
       .set('Authorization', `Bearer ${doctorToken}`)
@@ -115,7 +126,6 @@ describe('Auth roles', () => {
 
     expect([200, 400]).toContain(visitsRes.status);
 
-    // /rx allowed (we just expect not auth failure; route may return 404)
     const rxRes = await request(app)
       .get('/rx/non-existing-id/json-url')
       .set('Authorization', `Bearer ${doctorToken}`);
@@ -124,7 +134,6 @@ describe('Auth roles', () => {
     expect(rxRes.status).not.toBe(401);
     expect(rxRes.status).not.toBe(403);
 
-    // /medicines allowed
     const medsRes = await request(app)
       .get('/medicines')
       .set('Authorization', `Bearer ${doctorToken}`)
@@ -134,7 +143,6 @@ describe('Auth roles', () => {
     expect(medsRes.status).not.toBe(401);
     expect(medsRes.status).not.toBe(403);
 
-    // /xrays allowed (again, 404 is fine, just not 401/403)
     const xrayRes = await request(app)
       .get('/xrays/non-existing-id/url')
       .set('Authorization', `Bearer ${doctorToken}`);
@@ -143,7 +151,6 @@ describe('Auth roles', () => {
     expect(xrayRes.status).not.toBe(401);
     expect(xrayRes.status).not.toBe(403);
 
-    // /admin routes should be forbidden for DOCTOR
     const adminDoctorsRes = await request(app)
       .get('/admin/doctors')
       .set('Authorization', `Bearer ${doctorToken}`);
@@ -160,11 +167,9 @@ describe('Auth roles', () => {
   });
 
   it('restricts POST /visits/:visitId/rx to DOCTOR/ADMIN', async () => {
-    // Create patient + visit (reception can create)
     const patientId = await createPatient(receptionToken);
     const visitId = await createVisit(receptionToken, patientId, 'DOCTOR#AUTH_RX');
 
-    // DOCTOR can create Rx
     const okRes = await request(app)
       .post(`/visits/${visitId}/rx`)
       .set('Authorization', `Bearer ${doctorToken}`)
@@ -182,7 +187,6 @@ describe('Auth roles', () => {
     expect(okRes.status).toBe(201);
     expect(okRes.body.visitId).toBe(visitId);
 
-    // RECEPTION cannot create Rx
     const forbiddenRes = await request(app)
       .post(`/visits/${visitId}/rx`)
       .set('Authorization', `Bearer ${receptionToken}`)
@@ -202,7 +206,6 @@ describe('Auth roles', () => {
   });
 
   it('restricts POST /medicines/quick-add to DOCTOR/ADMIN', async () => {
-    // DOCTOR can quick-add
     const okRes = await request(app)
       .post('/medicines/quick-add')
       .set('Authorization', `Bearer ${doctorToken}`)
@@ -217,7 +220,6 @@ describe('Auth roles', () => {
     expect(okRes.status).toBe(201);
     expect(okRes.body.id).toBeDefined();
 
-    // RECEPTION cannot quick-add
     const forbiddenRes = await request(app)
       .post('/medicines/quick-add')
       .set('Authorization', `Bearer ${receptionToken}`)
@@ -236,7 +238,6 @@ describe('Auth roles', () => {
   it('restricts /reports to ADMIN only', async () => {
     const date = '2030-01-01';
 
-    // ADMIN can access reports
     const adminRes = await request(app)
       .get('/reports/daily')
       .set('Authorization', `Bearer ${adminToken}`)
@@ -247,7 +248,6 @@ describe('Auth roles', () => {
       expect(adminRes.body).toHaveProperty('date');
     }
 
-    // DOCTOR cannot
     const doctorRes = await request(app)
       .get('/reports/daily')
       .set('Authorization', `Bearer ${doctorToken}`)
@@ -256,7 +256,6 @@ describe('Auth roles', () => {
     expect(doctorRes.status).toBe(403);
     expect(doctorRes.body.error).toBe('FORBIDDEN');
 
-    // RECEPTION cannot
     const receptionRes = await request(app)
       .get('/reports/daily')
       .set('Authorization', `Bearer ${receptionToken}`)

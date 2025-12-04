@@ -1,9 +1,24 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
 import { asReception, asAdmin } from './helpers/auth';
+import { deletePatientCompletely } from './helpers/patients';
 
 const app = createApp();
+
+const createdPatients: string[] = [];
+const registerPatient = (id: string) => {
+  createdPatients.push(id);
+};
+
+afterEach(async () => {
+  const ids = [...createdPatients];
+  createdPatients.length = 0;
+
+  for (const id of ids) {
+    await deletePatientCompletely(id);
+  }
+});
 
 async function createPatient(name: string, phone: string) {
   const res = await request(app)
@@ -17,9 +32,10 @@ async function createPatient(name: string, phone: string) {
     })
     .expect(201);
 
-  return res.body.patientId as string;
+  const patientId = res.body.patientId as string;
+  registerPatient(patientId);
+  return patientId;
 }
-
 async function createVisitForPatient(patientId: string) {
   const res = await request(app)
     .post('/visits')

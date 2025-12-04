@@ -34,8 +34,8 @@ services:
       S3_ENDPOINT: http://localstack:4566
 
       # Table / bucket naming for local dev
-      DDB_TABLE_NAME: dms-test-table
-      XRAY_BUCKET_NAME: dms-xray-test
+      DDB_TABLE_NAME: dms-dev-table
+      XRAY_BUCKET_NAME: dms-xray-dev
 
       # Local dev credentials for LocalStack / DDB Local
       AWS_ACCESS_KEY_ID: test

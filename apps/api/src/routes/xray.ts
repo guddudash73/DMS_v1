@@ -1,7 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
-import { VisitId } from '@dms/types';
-import { XrayId, XrayContentType } from '@dms/types';
+import { VisitId, XrayId, XrayContentType } from '@dms/types';
 import { visitRepository } from '../repositories/visitRepository';
 import { xrayRepository } from '../repositories/xrayRepository';
 import { XRAY_BUCKET_NAME } from '../config/env';
@@ -23,6 +22,20 @@ const asyncHandler =
   (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
   (req: Request, res: Response, next: NextFunction) =>
     void fn(req, res, next).catch(next);
+
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 100): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (i === attempts - 1) break;
+      await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+    }
+  }
+  throw lastError;
+}
 
 const MIN_SIZE_BYTES = 1024;
 const MAX_SIZE_BYTES = 10 * 1024 * 1024;
@@ -85,14 +98,24 @@ router.post(
     const xrayId = randomUUID();
     const contentKey = buildXrayObjectKey(visit.visitId, xrayId, 'original', contentType);
 
-    const uploadUrl = await getPresignedUploadUrl({
-      bucket: XRAY_BUCKET_NAME,
-      key: contentKey,
-      contentType,
-      contentLength: size,
-      expiresInSeconds: 90,
-      serverSideEncryption: 'AES256',
-    });
+    let uploadUrl: string;
+    try {
+      uploadUrl = await withRetry(() =>
+        getPresignedUploadUrl({
+          bucket: XRAY_BUCKET_NAME,
+          key: contentKey,
+          contentType,
+          contentLength: size,
+          expiresInSeconds: 90,
+          serverSideEncryption: 'AES256',
+        }),
+      );
+    } catch (err) {
+      return res.status(503).json({
+        error: 'XRAY_PRESIGN_FAILED',
+        message: 'Unable to create X-ray upload URL, please retry.',
+      });
+    }
 
     if (req.auth) {
       logAudit({
@@ -163,11 +186,21 @@ router.get(
 
     const keyToUse = size === 'thumb' && meta.thumbKey != null ? meta.thumbKey : meta.contentKey;
 
-    const url = await getPresignedDownloadUrl({
-      bucket: XRAY_BUCKET_NAME,
-      key: keyToUse,
-      expiresInSeconds: 90,
-    });
+    let url: string;
+    try {
+      url = await withRetry(() =>
+        getPresignedDownloadUrl({
+          bucket: XRAY_BUCKET_NAME,
+          key: keyToUse,
+          expiresInSeconds: 90,
+        }),
+      );
+    } catch (err) {
+      return res.status(503).json({
+        error: 'XRAY_URL_FAILED',
+        message: 'Unable to create X-ray download URL, please retry.',
+      });
+    }
 
     if (req.auth) {
       logAudit({

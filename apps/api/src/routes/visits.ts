@@ -15,9 +15,13 @@ import {
 } from '@dms/types';
 import { v4 as randomUUID } from 'uuid';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
-import { visitRepository, InvalidStatusTransitionError } from '../repositories/visitRepository';
+import {
+  visitRepository,
+  InvalidStatusTransitionError,
+  DoctorBusyError,
+} from '../repositories/visitRepository';
 import { followupRepository, FollowUpRuleViolationError } from '../repositories/followupRepository';
-import { xrayRepository } from '../repositories/xrayRepository';
+import { xrayRepository, XrayConflictError } from '../repositories/xrayRepository';
 import { prescriptionRepository } from '../repositories/prescriptionRepository';
 import { buildXrayObjectKey } from './xray';
 import { s3Client } from '../lib/s3';
@@ -72,6 +76,43 @@ router.get(
   }),
 );
 
+// Dedicated "take seat" operation: doctor promotes a QUEUED visit into IN_PROGRESS
+const TakeSeatBody = z.object({
+  visitId: VisitId,
+});
+
+router.post(
+  '/queue/take-seat',
+  asyncHandler(async (req, res) => {
+    const parsed = TakeSeatBody.safeParse(req.body);
+    if (!parsed.success) {
+      return handleValidationError(res, parsed.error.issues);
+    }
+
+    try {
+      const updated = await visitRepository.updateStatus(parsed.data.visitId, 'IN_PROGRESS');
+      if (!updated) {
+        return res.status(404).json({ error: 'NOT_FOUND' });
+      }
+      return res.status(200).json(updated);
+    } catch (err) {
+      if (err instanceof DoctorBusyError) {
+        return res.status(409).json({
+          error: err.code,
+          message: err.message,
+        });
+      }
+      if (err instanceof InvalidStatusTransitionError) {
+        return res.status(409).json({
+          error: err.code,
+          message: err.message,
+        });
+      }
+      throw err;
+    }
+  }),
+);
+
 router.get(
   '/:visitId',
   asyncHandler(async (req, res) => {
@@ -116,6 +157,12 @@ router.patch(
       return res.status(200).json(updated);
     } catch (err) {
       if (err instanceof InvalidStatusTransitionError) {
+        return res.status(409).json({
+          error: err.code,
+          message: err.message,
+        });
+      }
+      if (err instanceof DoctorBusyError) {
         return res.status(409).json({
           error: err.code,
           message: err.message,
@@ -364,33 +411,43 @@ router.post(
 
     const contentKey = buildXrayObjectKey(visit.visitId, xrayId, 'original', contentType);
 
-    const xray = await xrayRepository.putMetadata({
-      visit,
-      xrayId,
-      contentType,
-      size,
-      takenAt,
-      takenByUserId,
-      contentKey,
-    });
-
-    if (req.auth) {
-      logAudit({
-        actorUserId: req.auth.userId,
-        action: 'XRAY_METADATA_CREATED',
-        entity: {
-          type: 'XRAY',
-          id: xray.xrayId,
-        },
-        meta: {
-          visitId: xray.visitId,
-          contentType: xray.contentType,
-          size: xray.size,
-        },
+    try {
+      const xray = await xrayRepository.putMetadata({
+        visit,
+        xrayId,
+        contentType,
+        size,
+        takenAt,
+        takenByUserId,
+        contentKey,
       });
-    }
 
-    return res.status(201).json(xray);
+      if (req.auth) {
+        logAudit({
+          actorUserId: req.auth.userId,
+          action: 'XRAY_METADATA_CREATED',
+          entity: {
+            type: 'XRAY',
+            id: xray.xrayId,
+          },
+          meta: {
+            visitId: xray.visitId,
+            contentType: xray.contentType,
+            size: xray.size,
+          },
+        });
+      }
+
+      return res.status(201).json(xray);
+    } catch (err) {
+      if (err instanceof XrayConflictError) {
+        return res.status(409).json({
+          error: err.code,
+          message: err.message,
+        });
+      }
+      throw err;
+    }
   }),
 );
 

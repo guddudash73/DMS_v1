@@ -1,11 +1,9 @@
-import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { AWS_REGION, DDB_TABLE_NAME, DYNAMO_ENDPOINT } from '../config/env';
 import type {
   FollowUp,
   FollowUpStatus,
@@ -15,6 +13,7 @@ import type {
   VisitId,
 } from '@dms/types';
 import { visitRepository } from './visitRepository';
+import { dynamoClient, TABLE_NAME } from '../config/aws';
 
 export class FollowUpRuleViolationError extends Error {
   readonly code = 'FOLLOWUP_RULE_VIOLATION' as const;
@@ -25,21 +24,11 @@ export class FollowUpRuleViolationError extends Error {
   }
 }
 
-const ddbClient = new DynamoDBClient({
-  region: AWS_REGION,
-  endpoint: DYNAMO_ENDPOINT,
-});
-
-const docClient = DynamoDBDocumentClient.from(ddbClient, {
+const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: {
     removeUndefinedValues: true,
   },
 });
-
-const TABLE_NAME = DDB_TABLE_NAME;
-if (!TABLE_NAME) {
-  throw new Error('DDB_TABLE_NAME env var is required');
-}
 
 const buildFollowUpKey = (visitId: string) => ({
   PK: `VISIT#${visitId}`,
