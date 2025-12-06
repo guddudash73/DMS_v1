@@ -14,6 +14,5 @@
     "plugins": [{ "name": "next" }]
   },
   "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", "**/*.d.ts", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"],
-  "references": [{ "path": "../../packages/types" }, { "path": "../../packages/config" }]
+  "exclude": ["node_modules"]
 }

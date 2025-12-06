@@ -1,13 +1,12 @@
-// apps/api/scripts/seed-test-users.ts
 import path from 'node:path';
 import dotenv from 'dotenv';
+import { userRepository } from '../repositories/userRepository';
+import { env } from '../config/env';
 
-// 1) Load .env from apps/api/.env
 dotenv.config({
   path: path.resolve(process.cwd(), '.env'),
 });
 
-// 2) Ensure NODE_ENV is something EnvSchema accepts
 if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = 'development';
 }
@@ -43,12 +42,8 @@ const seedUsers: SeedUser[] = [
 ];
 
 async function main() {
-  // 3) Only now import modules that depend on parsed env
   const bcryptModule = await import('bcrypt');
   const bcrypt = (bcryptModule as any).default ?? bcryptModule;
-
-  const { userRepository } = await import('../src/repositories/userRepository');
-  const { env } = await import('../src/config/env');
 
   console.log(
     `[seed-test-users] NODE_ENV=${env.NODE_ENV}, table=${env.DDB_TABLE_NAME}, region=${env.AWS_REGION}`,

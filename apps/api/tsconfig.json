@@ -1,13 +1,14 @@
 {
   "extends": "../../packages/tsconfig/base.json",
   "compilerOptions": {
-    "composite": true,
-    "outDir": "dist",
+    "target": "ES2020",
     "rootDir": "src",
-    "strict": true,
-    "skipLibCheck": true,
+    "declaration": true,
+    "outDir": "dist",
+    "sourceMap": true,
+    "noEmit": false,
     "types": ["node", "vitest"]
   },
-  "include": ["src"],
-  "references": [{ "path": "../../packages/config" }, { "path": "../../packages/types" }]
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

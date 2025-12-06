@@ -4,11 +4,13 @@
   "private": true,
   "sideEffects": false,
   "main": "./dist/env.js",
-  "types": "./env.d.ts",
+  "types": "./dist/env.d.ts",
   "exports": {
     ".": {
       "types": "./env.d.ts",
-      "import": "./dist/env.js"
+      "require": "./dist/env.js",
+      "import": "./dist/env.js",
+      "default": "./dist/env.js"
     },
     "./package.json": "./package.json"
   },
@@ -21,7 +23,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "zod": "^4.1.12"
+    "zod": "^4.1.13"
   },
   "devDependencies": {
     "rimraf": "^6.1.0",
