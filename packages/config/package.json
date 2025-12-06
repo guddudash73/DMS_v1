@@ -4,10 +4,10 @@
   "private": true,
   "sideEffects": false,
   "main": "./dist/env.js",
-  "types": "./dist/env.d.ts",
+  "types": "./env.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/env.d.ts",
+      "types": "./env.d.ts",
       "import": "./dist/env.js"
     },
     "./package.json": "./package.json"
