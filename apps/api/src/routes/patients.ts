@@ -2,14 +2,14 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { PatientCreate, PatientUpdate, PatientSearchQuery, PatientId } from '@dms/types';
 import { patientRepository, DuplicatePatientError } from '../repositories/patientRepository';
 import { visitRepository } from '../repositories/visitRepository';
+import type { ZodError } from 'zod';
+import { sendZodValidationError } from '../lib/validation';
+import { logAudit } from '../lib/logger';
 
 const router = express.Router();
 
-const handleValidationError = (res: Response, issues: unknown) => {
-  return res.status(400).json({
-    error: 'VALIDATION_ERROR',
-    issues,
-  });
+const handleValidationError = (req: Request, res: Response, issues: ZodError['issues']) => {
+  return sendZodValidationError(req, res, issues);
 };
 
 const asyncHandler =
@@ -22,17 +22,34 @@ router.post(
   asyncHandler(async (req, res) => {
     const parsed = PatientCreate.safeParse(req.body);
     if (!parsed.success) {
-      return handleValidationError(res, parsed.error.issues);
+      return handleValidationError(req, res, parsed.error.issues);
     }
 
     try {
       const patient = await patientRepository.create(parsed.data);
+
+      if (req.auth) {
+        logAudit({
+          actorUserId: req.auth.userId,
+          action: 'PATIENT_CREATE',
+          entity: {
+            type: 'PATIENT',
+            id: patient.patientId,
+          },
+          meta: {
+            name: patient.name,
+            phone: patient.phone,
+          },
+        });
+      }
+
       return res.status(201).json(patient);
     } catch (err) {
       if (err instanceof DuplicatePatientError) {
         return res.status(409).json({
           error: err.code,
           message: err.message,
+          traceId: req.requestId,
         });
       }
       throw err;
@@ -45,7 +62,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const parsed = PatientSearchQuery.safeParse(req.query);
     if (!parsed.success) {
-      return handleValidationError(res, parsed.error.issues);
+      return handleValidationError(req, res, parsed.error.issues);
     }
 
     const { query, limit } = parsed.data;
@@ -73,12 +90,17 @@ router.get(
       return res.status(400).json({
         error: 'VALIDATION_ERROR',
         message: 'Invalid patient id',
+        traceId: req.requestId,
       });
     }
 
     const patient = await patientRepository.getById(parsedId.data);
     if (!patient) {
-      return res.status(404).json({ error: 'NOT_FOUND' });
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Patient not found',
+        traceId: req.requestId,
+      });
     }
 
     return res.status(200).json(patient);
@@ -93,29 +115,125 @@ router.patch(
       return res.status(400).json({
         error: 'VALIDATION_ERROR',
         message: 'Invalid patient id',
+        traceId: req.requestId,
       });
     }
 
     const parsedBody = PatientUpdate.safeParse(req.body);
     if (!parsedBody.success) {
-      return handleValidationError(res, parsedBody.error.issues);
+      return handleValidationError(req, res, parsedBody.error.issues);
     }
 
     try {
       const updated = await patientRepository.update(parsedId.data, parsedBody.data);
       if (!updated) {
-        return res.status(404).json({ error: 'NOT_FOUND' });
+        return res.status(404).json({
+          error: 'NOT_FOUND',
+          message: 'Patient not found',
+          traceId: req.requestId,
+        });
       }
+
+      if (req.auth) {
+        logAudit({
+          actorUserId: req.auth.userId,
+          action: 'PATIENT_UPDATE',
+          entity: {
+            type: 'PATIENT',
+            id: parsedId.data,
+          },
+          meta: {
+            name: updated.name,
+            phone: updated.phone,
+          },
+        });
+      }
+
       return res.status(200).json(updated);
     } catch (err) {
       if (err instanceof DuplicatePatientError) {
         return res.status(409).json({
           error: err.code,
           message: err.message,
+          traceId: req.requestId,
         });
       }
       throw err;
     }
+  }),
+);
+
+router.delete(
+  '/:patientId',
+  asyncHandler(async (req, res) => {
+    const parsedId = PatientId.safeParse(req.params.patientId);
+    if (!parsedId.success) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'Invalid patient id',
+        traceId: req.requestId,
+      });
+    }
+
+    const deleted = await patientRepository.softDelete(parsedId.data);
+    if (!deleted) {
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Patient not found',
+        traceId: req.requestId,
+      });
+    }
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'PATIENT_SOFT_DELETE',
+        entity: {
+          type: 'PATIENT',
+          id: parsedId.data,
+        },
+        meta: {},
+      });
+    }
+
+    return res.status(204).send();
+  }),
+);
+
+router.post(
+  '/:patientId/restore',
+  asyncHandler(async (req, res) => {
+    const parsedId = PatientId.safeParse(req.params.patientId);
+    if (!parsedId.success) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'Invalid patient id',
+        traceId: req.requestId,
+      });
+    }
+
+    const restored = await patientRepository.restore(parsedId.data);
+    if (!restored) {
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Patient not found',
+        traceId: req.requestId,
+      });
+    }
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'PATIENT_RESTORE',
+        entity: {
+          type: 'PATIENT',
+          id: parsedId.data,
+        },
+        meta: {},
+      });
+    }
+
+    return res.status(200).json(restored);
   }),
 );
 
@@ -127,6 +245,16 @@ router.get(
       return res.status(400).json({
         error: 'VALIDATION_ERROR',
         message: 'Invalid patient id',
+        traceId: req.requestId,
+      });
+    }
+
+    const patient = await patientRepository.getById(parsedId.data);
+    if (!patient) {
+      return res.status(404).json({
+        error: 'PATIENT_NOT_FOUND',
+        message: 'Patient not found or has been deleted',
+        traceId: req.requestId,
       });
     }
 

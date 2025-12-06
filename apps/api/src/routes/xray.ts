@@ -7,15 +7,13 @@ import { XRAY_BUCKET_NAME } from '../config/env';
 import { getPresignedUploadUrl, getPresignedDownloadUrl } from '../lib/s3';
 import { patientRepository } from '../repositories/patientRepository';
 import { v4 as randomUUID } from 'uuid';
-import { logAudit } from '../lib/logger';
+import { logAudit, logError } from '../lib/logger';
+import { sendZodValidationError } from '../lib/validation';
 
 const router = express.Router();
 
-const handleValidationError = (res: Response, issues: unknown) => {
-  return res.status(400).json({
-    error: 'VALIDATION_ERROR',
-    issues,
-  });
+const handleValidationError = (req: Request, res: Response, issues: z.ZodError['issues']) => {
+  return sendZodValidationError(req, res, issues);
 };
 
 const asyncHandler =
@@ -52,7 +50,7 @@ const UrlQuery = z.object({
 });
 type UrlQuery = z.infer<typeof UrlQuery>;
 
-type XrayObjectVarient = 'original' | 'thumb';
+type XrayObjectVariant = 'original' | 'thumb';
 
 const IMAGE_EXTENSION_BY_TYPE: Record<z.infer<typeof XrayContentType>, string> = {
   'image/jpeg': 'jpg',
@@ -62,7 +60,7 @@ const IMAGE_EXTENSION_BY_TYPE: Record<z.infer<typeof XrayContentType>, string> =
 export const buildXrayObjectKey = (
   visitId: string,
   xrayId: string,
-  variant: XrayObjectVarient,
+  variant: XrayObjectVariant,
   contentType: z.infer<typeof XrayContentType>,
 ): string => {
   const ext = IMAGE_EXTENSION_BY_TYPE[contentType] ?? 'bin';
@@ -74,7 +72,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const parsed = PresignRequest.safeParse(req.body);
     if (!parsed.success) {
-      return handleValidationError(res, parsed.error.issues);
+      return handleValidationError(req, res, parsed.error.issues);
     }
 
     const { visitId, contentType, size } = parsed.data;
@@ -84,6 +82,7 @@ router.post(
       return res.status(404).json({
         error: 'VISIT_NOT_FOUND',
         message: 'Visit must exist to attach X-rays',
+        traceId: req.requestId,
       });
     }
 
@@ -92,6 +91,7 @@ router.post(
       return res.status(404).json({
         error: 'PATIENT_NOT_FOUND',
         message: 'Cannot upload X-rays for a deleted or missing patient',
+        traceId: req.requestId,
       });
     }
 
@@ -111,9 +111,19 @@ router.post(
         }),
       );
     } catch (err) {
+      logError('xray_presign_failed', {
+        reqId: req.requestId,
+        visitId,
+        error:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      });
+
       return res.status(503).json({
         error: 'XRAY_PRESIGN_FAILED',
         message: 'Unable to create X-ray upload URL, please retry.',
+        traceId: req.requestId,
       });
     }
 
@@ -150,22 +160,23 @@ router.get(
   asyncHandler(async (req, res) => {
     const idResult = XrayId.safeParse(req.params.xrayId);
     if (!idResult.success) {
-      return res.status(400).json({
-        error: 'VALIDATION_ERROR',
-        message: 'Invalid xray id',
-      });
+      return handleValidationError(req, res, idResult.error.issues);
     }
 
     const queryResult = UrlQuery.safeParse(req.query);
     if (!queryResult.success) {
-      return handleValidationError(res, queryResult.error.issues);
+      return handleValidationError(req, res, queryResult.error.issues);
     }
 
     const { size } = queryResult.data;
 
     const meta = await xrayRepository.getById(idResult.data);
     if (!meta) {
-      return res.status(404).json({ error: 'NOT_FOUND' });
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'X-ray not found',
+        traceId: req.requestId,
+      });
     }
 
     const visit = await visitRepository.getById(meta.visitId);
@@ -173,6 +184,7 @@ router.get(
       return res.status(404).json({
         error: 'VISIT_NOT_FOUND',
         message: 'Visit not found for this X-ray',
+        traceId: req.requestId,
       });
     }
 
@@ -181,6 +193,7 @@ router.get(
       return res.status(404).json({
         error: 'PATIENT_NOT_FOUND',
         message: 'Patient not found or has been deleted',
+        traceId: req.requestId,
       });
     }
 
@@ -196,9 +209,21 @@ router.get(
         }),
       );
     } catch (err) {
+      logError('xray_url_presign_failed', {
+        reqId: req.requestId,
+        xrayId: meta.xrayId,
+        visitId: meta.visitId,
+        variant: size,
+        error:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      });
+
       return res.status(503).json({
         error: 'XRAY_URL_FAILED',
         message: 'Unable to create X-ray download URL, please retry.',
+        traceId: req.requestId,
       });
     }
 

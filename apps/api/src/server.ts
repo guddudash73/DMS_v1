@@ -14,9 +14,10 @@ import medicinesRouter from './routes/medicines';
 import rxPresetsRouter from './routes/rx-presets';
 import adminDoctorsRouter from './routes/admin-doctors';
 import adminRxPresetsRouter from './routes/admin-rx-presets';
-import { authMiddleware, requireRole, AuthError } from './middlewares/auth';
+import { authMiddleware, requireRole } from './middlewares/auth';
 import { genericSensitiveRateLimiter } from './middlewares/rateLimit';
-import { logInfo, logError } from './lib/logger';
+import { logInfo } from './lib/logger';
+import { errorHandler } from './middlewares/errorHandler';
 
 const env = parseEnv(process.env);
 
@@ -132,59 +133,7 @@ export const createApp = () => {
     adminRxPresetsRouter,
   );
 
-  app.use(
-    (err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
-      if (res.headersSent) return next(err);
-
-      if (err instanceof AuthError) {
-        const errorCode = err.code ?? 'AUTH_ERROR';
-
-        logInfo('auth_error', {
-          reqId: req.requestId,
-          userId: req.auth?.userId ?? undefined,
-          code: errorCode,
-          errorCode,
-          message: err.message,
-          path: req.path,
-          method: req.method,
-        });
-
-        return res.status(err.statusCode).json({
-          error: err.code,
-          message: err.message,
-        });
-      }
-
-      if (err instanceof Error) {
-        const anyErr = err as Error & { code?: string };
-
-        logError('unhandled_error', {
-          reqId: req.requestId,
-          userId: req.auth?.userId ?? undefined,
-          name: err.name,
-          message: err.message,
-          stack: err.stack,
-          path: req.path,
-          method: req.method,
-          errorCode: anyErr.code ?? 'UNEXPECTED',
-        });
-      } else {
-        logError('unhandled_error_non_error', {
-          reqId: req.requestId,
-          userId: req.auth?.userId ?? undefined,
-          error: err,
-          path: req.path,
-          method: req.method,
-          errorCode: 'UNEXPECTED',
-        });
-      }
-
-      return res.status(500).json({
-        error: 'INTERNAL_SERVER_ERROR',
-        message: 'Unexpected error',
-      });
-    },
-  );
+  app.use(errorHandler);
 
   return app;
 };

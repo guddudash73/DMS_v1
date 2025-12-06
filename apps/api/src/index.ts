@@ -27,12 +27,13 @@ async function ensureDynamoWithRetry() {
         }),
       );
       return;
-    } catch (err: any) {
-      const code = err?.code ?? err?.name;
-      const message = err?.message ?? String(err);
+    } catch (err: unknown) {
+      const { code, message } = getErrorCodeAndMessage(err);
 
       const isConnRefused =
-        code === 'ECONNREFUSED' || message.includes('ECONNREFUSED') || message.includes('connect');
+        code === 'ECONNREFUSED' ||
+        message.includes('ECONNREFUSED') ||
+        message.toLowerCase().includes('connect');
 
       if (!isConnRefused || attempt === maxRetries) {
         console.error(
@@ -58,6 +59,27 @@ async function ensureDynamoWithRetry() {
       await sleep(delayMs);
     }
   }
+}
+
+type ErrorWithCode = {
+  code?: string;
+  name?: string;
+  message?: string;
+};
+
+function getErrorCodeAndMessage(err: unknown): { code: string; message: string } {
+  if (err && typeof err === 'object') {
+    const e = err as ErrorWithCode;
+    return {
+      code: e.code ?? e.name ?? 'UNKNOWN',
+      message: e.message ?? String(err),
+    };
+  }
+
+  return {
+    code: 'UNKNOWN',
+    message: String(err),
+  };
 }
 
 async function main() {

@@ -11,3 +11,4 @@ export * from './xray';
 export * from './medicine';
 export * from './prescriptionPresets';
 export * from './billing';
+export * from './http';

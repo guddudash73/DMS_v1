@@ -55,7 +55,11 @@ r.patch('/:id', validate(AdminUpdateRxPresetRequest), async (req, res, next) => 
   try {
     const id = req.params.id;
     if (!id) {
-      return res.status(400).json({ error: 'INVALID_RX_PRESET_ID' });
+      return res.status(400).json({
+        error: 'INVALID_RX_PRESET_ID',
+        message: 'Rx preset id is required',
+        traceId: req.requestId,
+      });
     }
 
     const body = req.body as AdminUpdateRxPresetRequest;
@@ -74,7 +78,11 @@ r.patch('/:id', validate(AdminUpdateRxPresetRequest), async (req, res, next) => 
 
     const updated = await prescriptionPresetRepository.update(id as PrescriptionPresetId, patch);
     if (!updated) {
-      return res.status(404).json({ error: 'RX_PRESET_NOT_FOUND' });
+      return res.status(404).json({
+        error: 'RX_PRESET_NOT_FOUND',
+        message: 'Rx preset not found',
+        traceId: req.requestId,
+      });
     }
 
     if (req.auth) {

@@ -1,0 +1,1804 @@
+openapi: 3.1.0
+info:
+  title: Sarangi DMS API
+  version: 1.0.0-rc2
+  description: Backend API for the Sarangi Dental Management System.
+  contact:
+    name: Sarangi DMS Support
+    email: support@example.com
+
+servers:
+  - url: https://api.dev.example.com
+    description: Dev
+  - url: https://api.staging.example.com
+    description: Staging
+  - url: https://api.example.com
+    description: Production
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Auth
+  - name: Patients
+  - name: Visits
+  - name: Billing
+  - name: Xrays
+  - name: Prescriptions
+  - name: Medicines
+  - name: Reports
+  - name: Admin
+
+paths:
+  /health:
+    get:
+      tags: [Auth]
+      summary: Health check
+      description: Simple liveness probe.
+      security: []
+      operationId: getHealth
+      responses:
+        '200':
+          description: API healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login with email and password
+      description: >
+        Authenticates a user with email and password and returns a token pair.
+      security: []
+      operationId: authLogin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Successful login
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Refresh access token
+      description: >
+        Exchanges a valid refresh token for a new token pair.
+      security: []
+      operationId: authRefresh
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshRequest'
+      responses:
+        '200':
+          description: New token pair
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshResponse'
+        '401':
+          description: Invalid or expired refresh token
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /patients:
+    get:
+      tags: [Patients]
+      summary: Search patients
+      description: >
+        Search patients by name or phone-like query. Soft-deleted patients are excluded.
+      operationId: listPatients
+      parameters:
+        - in: query
+          name: query
+          schema:
+            type: string
+          required: false
+          description: Free-text name or phone-like string.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 20
+          required: false
+          description: Maximum number of patients to return.
+      responses:
+        '200':
+          description: Patients list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Patient'
+                  nextCursor:
+                    type: string
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      tags: [Patients]
+      summary: Create patient
+      description: >
+        Creates a new patient. Enforces uniqueness on the composite of normalized phone + name.
+      operationId: createPatient
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatientCreate'
+      responses:
+        '201':
+          description: Patient created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Duplicate patient (same normalized phone + name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /patients/{patientId}:
+    get:
+      tags: [Patients]
+      summary: Get patient by id
+      description: >
+        Returns a single patient. Soft-deleted patients are treated as not found.
+      operationId: getPatientById
+      parameters:
+        - $ref: '#/components/parameters/PatientId'
+      responses:
+        '200':
+          description: Patient
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '400':
+          description: Invalid id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Not found or soft-deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    patch:
+      tags: [Patients]
+      summary: Update patient
+      description: >
+        Partially updates a patient. Enforces composite phone+name uniqueness on change.
+      operationId: updatePatient
+      parameters:
+        - $ref: '#/components/parameters/PatientId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatientUpdate'
+      responses:
+        '200':
+          description: Patient updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Patient'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Patient not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Duplicate patient (same normalized phone + name)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /patients/{patientId}/visits:
+    get:
+      tags: [Patients, Visits]
+      summary: List visits for a patient
+      description: Lists all visits associated with a given patient.
+      operationId: listPatientVisits
+      parameters:
+        - $ref: '#/components/parameters/PatientId'
+      responses:
+        '200':
+          description: Visit list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Visit'
+        '400':
+          description: Invalid patient id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /visits:
+    post:
+      tags: [Visits]
+      summary: Create visit
+      description: Creates a new visit in QUEUED status.
+      operationId: createVisit
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisitCreate'
+      responses:
+        '201':
+          description: Visit created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Visit'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /visits/queue:
+    get:
+      tags: [Visits]
+      summary: Get doctor queue
+      description: >
+        Returns the queue for a given doctor and date, ordered FIFO by creation time.
+      operationId: getDoctorQueue
+      parameters:
+        - in: query
+          name: doctorId
+          required: true
+          schema:
+            type: string
+          description: Doctor user id.
+        - in: query
+          name: date
+          required: false
+          schema:
+            type: string
+            format: date
+          description: Visit date (YYYY-MM-DD). Defaults to today on backend.
+        - in: query
+          name: status
+          required: false
+          schema:
+            type: string
+            enum: [QUEUED, IN_PROGRESS, DONE]
+          description: Optional visit status filter.
+      responses:
+        '200':
+          description: Queue items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Visit'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /visits/queue/take-seat:
+    post:
+      tags: [Visits]
+      summary: Promote visit from QUEUED to IN_PROGRESS
+      description: >
+        Dedicated "take seat" operation. Enforces that the doctor is not already busy.
+      operationId: takeSeat
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [visitId]
+              properties:
+                visitId:
+                  type: string
+      responses:
+        '200':
+          description: Visit updated to IN_PROGRESS
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Visit'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Visit not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Invalid status transition or doctor already busy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /visits/{visitId}:
+    get:
+      tags: [Visits]
+      summary: Get visit by id
+      description: Returns a single visit.
+      operationId: getVisitById
+      parameters:
+        - $ref: '#/components/parameters/VisitId'
+      responses:
+        '200':
+          description: Visit
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Visit'
+        '400':
+          description: Invalid visit id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Visit not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /visits/{visitId}/status:
+    patch:
+      tags: [Visits]
+      summary: Update visit status
+      description: >
+        Updates the visit status (QUEUED → IN_PROGRESS → DONE) with state-machine checks.
+      operationId: updateVisitStatus
+      parameters:
+        - $ref: '#/components/parameters/VisitId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VisitStatusUpdate'
+      responses:
+        '200':
+          description: Visit updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Visit'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Visit not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Invalid status transition or doctor already busy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /visits/{visitId}/followup:
+    get:
+      tags: [Visits]
+      summary: Get follow-up for visit
+      description: Returns the follow-up configuration for a visit.
+      operationId: getVisitFollowup
+      parameters:
+        - $ref: '#/components/parameters/VisitId'
+      responses:
+        '200':
+          description: Follow-up
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FollowUp'
+        '400':
+          description: Invalid visit id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Follow-up not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    put:
+      tags: [Visits]
+      summary: Upsert follow-up for visit
+      description: >
+        Creates or updates follow-up details for a visit.
+      operationId: upsertVisitFollowup
+      parameters:
+        - $ref: '#/components/parameters/VisitId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FollowUpUpsert'
+      responses:
+        '200':
+          description: Follow-up upserted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FollowUp'
+        '400':
+          description: Validation error or follow-up rule violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Visit not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /visits/{visitId}/followup/status:
+    patch:
+      tags: [Visits]
+      summary: Update follow-up status
+      description: Updates only the follow-up status (ACTIVE/COMPLETED/CANCELLED).
+      operationId: updateVisitFollowupStatus
+      parameters:
+        - $ref: '#/components/parameters/VisitId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FollowUpStatusUpdate'
+      responses:
+        '200':
+          description: Follow-up updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FollowUp'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Follow-up not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /visits/{visitId}/rx:
+    post:
+      tags: [Prescriptions, Visits]
+      summary: Create prescription for visit
+      description: >
+        Creates a new prescription version for a visit and stores the full JSON in S3.
+      operationId: createVisitPrescription
+      parameters:
+        - $ref: '#/components/parameters/VisitId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lines]
+              properties:
+                lines:
+                  type: array
+                  minItems: 1
+                  items:
+                    $ref: '#/components/schemas/RxLine'
+      responses:
+        '201':
+          description: Prescription created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RxCreateResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Visit or patient not found/deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /visits/{visitId}/xrays:
+    post:
+      tags: [Xrays, Visits]
+      summary: Attach X-ray metadata to visit
+      description: >
+        Records X-ray metadata for a visit, given an already-uploaded object key.
+      operationId: createVisitXrayMetadata
+      parameters:
+        - $ref: '#/components/parameters/VisitId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/XrayMetadataInput'
+      responses:
+        '201':
+          description: X-ray metadata created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Xray'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Visit or patient not found/deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: X-ray id conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /visits/{visitId}/checkout:
+    post:
+      tags: [Billing, Visits]
+      summary: Checkout visit and create bill
+      description: >
+        Idempotent per visit. Only allowed when visit status is DONE. Optionally creates a follow-up.
+      operationId: checkoutVisit
+      parameters:
+        - $ref: '#/components/parameters/VisitId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BillingCheckoutInput'
+      responses:
+        '201':
+          description: Billing record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Billing'
+        '400':
+          description: Billing or follow-up rule violation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '409':
+          description: Duplicate checkout or visit not DONE
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /visits/{visitId}/bill:
+    get:
+      tags: [Billing, Visits]
+      summary: Get billing details for visit
+      description: Returns the billing record for a visit, if present.
+      operationId: getVisitBilling
+      parameters:
+        - $ref: '#/components/parameters/VisitId'
+      responses:
+        '200':
+          description: Billing record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Billing'
+        '400':
+          description: Invalid visit id
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Billing record not found or visit/patient deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /xrays/presign:
+    post:
+      tags: [Xrays]
+      summary: Get presigned upload URL
+      description: >
+        Validates visit and patient, then returns a presigned URL to upload an X-ray file.
+      operationId: presignXrayUpload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/XrayPresignRequest'
+      responses:
+        '201':
+          description: Upload URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/XrayPresignResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Visit or patient not found / deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: Presign failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /xrays/{xrayId}/url:
+    get:
+      tags: [Xrays]
+      summary: Get signed download URL for X-ray
+      description: >
+        Returns a presigned download URL for an X-ray image, for original or thumbnail size.
+      operationId: getXrayUrl
+      parameters:
+        - in: path
+          name: xrayId
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: size
+          required: false
+          schema:
+            type: string
+            enum: [thumb, original]
+            default: original
+      responses:
+        '200':
+          description: Signed URL
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SignedUrlResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: X-ray/visit/patient not found/deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '503':
+          description: URL generation failed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /rx/{rxId}/json-url:
+    get:
+      tags: [Prescriptions]
+      summary: Get JSON download URL for prescription
+      description: Returns a presigned download URL for the prescription JSON stored in S3.
+      operationId: getPrescriptionJsonUrl
+      parameters:
+        - in: path
+          name: rxId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: JSON URL for prescription
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RxJsonUrlResponse'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Prescription not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /rx/{rxId}/pdf-url:
+    get:
+      tags: [Prescriptions]
+      summary: Get PDF download URL for prescription
+      description: Not implemented yet; returns a NOT_IMPLEMENTED payload.
+      operationId: getPrescriptionPdfUrl
+      parameters:
+        - in: path
+          name: rxId
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Not implemented response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: NOT_IMPLEMENTED
+                  message:
+                    type: string
+
+  /medicines:
+    get:
+      tags: [Medicines]
+      summary: Search medicines
+      description: >
+        Typeahead search for medicine presets based on display name.
+      operationId: searchMedicines
+      parameters:
+        - in: query
+          name: query
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Medicine presets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/MedicineTypeaheadItem'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /medicines/quick-add:
+    post:
+      tags: [Medicines]
+      summary: Quick-add a medicine preset
+      description: >
+        Quickly creates a new medicine preset sourced from inline doctor entry.
+      operationId: quickAddMedicine
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/QuickAddMedicineInput'
+      responses:
+        '201':
+          description: Medicine preset created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MedicinePreset'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /rx-presets:
+    get:
+      tags: [Prescriptions]
+      summary: Search prescription presets
+      description: >
+        Typeahead search over prescription presets.
+      operationId: searchPrescriptionPresets
+      parameters:
+        - in: query
+          name: query
+          required: false
+          schema:
+            type: string
+        - in: query
+          name: limit
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 50
+            default: 10
+      responses:
+        '200':
+          description: Prescription presets
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/PrescriptionPreset'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /reports/daily:
+    get:
+      tags: [Reports]
+      summary: Daily report
+      description: >
+        Returns aggregated metrics for visits, revenue, and procedure counts on a given date.
+      operationId: getDailyReport
+      parameters:
+        - in: query
+          name: date
+          required: true
+          schema:
+            type: string
+            format: date
+          description: Report date (YYYY-MM-DD).
+      responses:
+        '200':
+          description: Daily snapshot
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DailyReport'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/doctors:
+    post:
+      tags: [Admin]
+      summary: Create doctor user
+      description: >
+        ADMIN-only. Creates a doctor user + profile.
+      operationId: adminCreateDoctor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateDoctorRequest'
+      responses:
+        '201':
+          description: Doctor created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDoctorListItem'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    get:
+      tags: [Admin]
+      summary: List doctors
+      description: ADMIN-only. Returns all doctor profiles.
+      operationId: adminListDoctors
+      responses:
+        '200':
+          description: Doctors list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AdminDoctorListItem'
+
+  /admin/doctors/{doctorId}:
+    patch:
+      tags: [Admin]
+      summary: Update doctor profile
+      description: >
+        ADMIN-only. Partially updates doctor profile fields.
+      operationId: adminUpdateDoctor
+      parameters:
+        - in: path
+          name: doctorId
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateDoctorRequest'
+      responses:
+        '200':
+          description: Doctor updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminDoctorListItem'
+        '400':
+          description: Invalid doctor id or validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Doctor not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/rx-presets:
+    post:
+      tags: [Admin]
+      summary: Create prescription preset
+      description: ADMIN-only. Creates a new prescription preset.
+      operationId: adminCreateRxPreset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminCreateRxPresetRequest'
+      responses:
+        '201':
+          description: Prescription preset created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrescriptionPreset'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /admin/rx-presets/{id}:
+    patch:
+      tags: [Admin]
+      summary: Update prescription preset
+      description: ADMIN-only. Partially updates a prescription preset.
+      operationId: adminUpdateRxPreset
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AdminUpdateRxPresetRequest'
+      responses:
+        '200':
+          description: Prescription preset updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PrescriptionPreset'
+        '400':
+          description: Invalid id or validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Preset not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+x-roles:
+  RECEPTION:
+    - 'Patients: search/create/update'
+    - 'Visits: create, queue, checkout'
+    - 'Billing: view & create bills'
+  DOCTOR:
+    - 'Patients: search/view'
+    - 'Visits: queue, status updates, followup, rx, xrays'
+    - 'Medicines, rx-presets: search, quick-add'
+  ADMIN:
+    - 'All of the above plus /admin/* endpoints.'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    PatientId:
+      in: path
+      name: patientId
+      required: true
+      schema:
+        type: string
+    VisitId:
+      in: path
+      name: visitId
+      required: true
+      schema:
+        type: string
+
+  schemas:
+    HealthResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          example: ok
+
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        message:
+          type: string
+          description: Human-readable error message.
+        fieldErrors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
+          description: Optional field-level validation errors.
+        traceId:
+          type: string
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+          format: email
+        password:
+          type: string
+          minLength: 8
+          maxLength: 128
+
+    LoginResponse:
+      type: object
+      required: [userId, role, tokens]
+      properties:
+        userId:
+          type: string
+        role:
+          type: string
+          enum: [RECEPTION, DOCTOR, ADMIN]
+        tokens:
+          $ref: '#/components/schemas/TokenPair'
+
+    RefreshRequest:
+      type: object
+      required: [refreshToken]
+      properties:
+        refreshToken:
+          type: string
+          minLength: 20
+
+    RefreshResponse:
+      type: object
+      required: [tokens]
+      properties:
+        tokens:
+          $ref: '#/components/schemas/TokenPair'
+
+    TokenPair:
+      type: object
+      required: [accessToken, refreshToken, expiresInSec, refreshExpiresInSec]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        expiresInSec:
+          type: integer
+        refreshExpiresInSec:
+          type: integer
+
+    PatientCreate:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        dob:
+          type: string
+          format: date
+        gender:
+          type: string
+          enum: [male, female, other]
+
+    Patient:
+      type: object
+      required: [patientId, name, createdAt, updatedAt]
+      properties:
+        patientId:
+          type: string
+        name:
+          type: string
+        phone:
+          type: string
+        dob:
+          type: string
+          format: date
+        gender:
+          type: string
+          enum: [MALE, FEMALE, OTHER, UNKNOWN]
+        createdAt:
+          type: integer
+        updatedAt:
+          type: integer
+        isDeleted:
+          type: boolean
+        deletedAt:
+          type: integer
+
+    PatientUpdate:
+      type: object
+      description: Partial update for patient. At least one field is required.
+      properties:
+        name:
+          type: string
+        phone:
+          type: string
+        dob:
+          type: string
+          format: date
+        gender:
+          type: string
+          enum: [male, female, other]
+
+    VisitCreate:
+      type: object
+      required: [patientId, doctorId, reason]
+      properties:
+        patientId:
+          type: string
+        doctorId:
+          type: string
+        reason:
+          type: string
+
+    VisitStatusUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [QUEUED, IN_PROGRESS, DONE]
+
+    Visit:
+      type: object
+      required: [visitId, patientId, doctorId, reason, status, visitDate, createdAt, updatedAt]
+      properties:
+        visitId:
+          type: string
+        patientId:
+          type: string
+        doctorId:
+          type: string
+        reason:
+          type: string
+        status:
+          type: string
+          enum: [QUEUED, IN_PROGRESS, DONE]
+        visitDate:
+          type: string
+          format: date
+        createdAt:
+          type: integer
+        updatedAt:
+          type: integer
+        billingAmount:
+          type: number
+
+    FollowUp:
+      type: object
+      required: [visitId, followUpDate, contactMethod, status, createdAt, updatedAt]
+      properties:
+        visitId:
+          type: string
+        followUpDate:
+          type: string
+          format: date
+        reason:
+          type: string
+        contactMethod:
+          type: string
+          enum: [CALL, SMS, WHATSAPP, OTHER]
+        status:
+          type: string
+          enum: [ACTIVE, COMPLETED, CANCELLED]
+        createdAt:
+          type: integer
+        updatedAt:
+          type: integer
+
+    FollowUpUpsert:
+      type: object
+      required: [followUpDate]
+      properties:
+        followUpDate:
+          type: string
+          format: date
+        reason:
+          type: string
+        contactMethod:
+          type: string
+          enum: [CALL, SMS, WHATSAPP, OTHER]
+
+    FollowUpStatusUpdate:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [ACTIVE, COMPLETED, CANCELLED]
+
+    BillingLine:
+      type: object
+      required: [description, quantity, unitAmount]
+      properties:
+        code:
+          type: string
+        description:
+          type: string
+        quantity:
+          type: integer
+          minimum: 1
+        unitAmount:
+          type: number
+          minimum: 0
+
+    CheckoutFollowUpInput:
+      type: object
+      required: [followUpDate]
+      properties:
+        followUpDate:
+          type: string
+          format: date
+        reason:
+          type: string
+        contactMethod:
+          type: string
+          enum: [CALL, SMS, WHATSAPP, OTHER]
+
+    BillingCheckoutInput:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/BillingLine'
+        discountAmount:
+          type: number
+          minimum: 0
+          default: 0
+        taxAmount:
+          type: number
+          minimum: 0
+          default: 0
+        followUp:
+          $ref: '#/components/schemas/CheckoutFollowUpInput'
+
+    Billing:
+      type: object
+      required: [visitId, items, subtotal, discountAmount, taxAmount, total, currency, createdAt]
+      properties:
+        visitId:
+          type: string
+        items:
+          type: array
+          items:
+            allOf:
+              - $ref: '#/components/schemas/BillingLine'
+              - type: object
+                required: [lineTotal]
+                properties:
+                  lineTotal:
+                    type: number
+        subtotal:
+          type: number
+        discountAmount:
+          type: number
+        taxAmount:
+          type: number
+        total:
+          type: number
+        currency:
+          type: string
+          default: 'INR'
+        createdAt:
+          type: integer
+
+    XrayPresignRequest:
+      type: object
+      required: [visitId, contentType, size]
+      properties:
+        visitId:
+          type: string
+        contentType:
+          type: string
+          enum: [image/jpeg, image/png]
+        size:
+          type: integer
+          minimum: 1024
+          maximum: 10485760
+
+    XrayPresignResponse:
+      type: object
+      required: [xrayId, key, uploadUrl, Headers, expiresInSeconds]
+      properties:
+        xrayId:
+          type: string
+        key:
+          type: string
+        uploadUrl:
+          type: string
+          format: uri
+        Headers:
+          type: object
+          additionalProperties:
+            type: string
+        expiresInSeconds:
+          type: integer
+
+    XrayMetadataInput:
+      type: object
+      required: [xrayId, contentType, size, takenAt, takenByUserId]
+      properties:
+        xrayId:
+          type: string
+        contentType:
+          type: string
+          enum: [image/jpeg, image/png]
+        size:
+          type: integer
+          minimum: 1024
+          maximum: 10485760
+        takenAt:
+          type: integer
+        takenByUserId:
+          type: string
+
+    Xray:
+      type: object
+      required: [xrayId, visitId, contentKey, contentType, size, takenAt, takenByUserId, createdAt]
+      properties:
+        xrayId:
+          type: string
+        visitId:
+          type: string
+        contentKey:
+          type: string
+        thumbKey:
+          type: string
+        contentType:
+          type: string
+          enum: [image/jpeg, image/png]
+        size:
+          type: integer
+        takenAt:
+          type: integer
+        takenByUserId:
+          type: string
+        createdAt:
+          type: integer
+        deletedAt:
+          type: integer
+
+    SignedUrlResponse:
+      type: object
+      required: [url, variant]
+      properties:
+        url:
+          type: string
+          format: uri
+        variant:
+          type: string
+          enum: [thumb, original]
+
+    RxLine:
+      type: object
+      required: [medicine, dose, frequency, duration]
+      properties:
+        medicine:
+          type: string
+        dose:
+          type: string
+        frequency:
+          type: string
+          enum: [QD, BID, TID, QID, HS, PRN]
+        duration:
+          type: integer
+          minimum: 1
+          maximum: 365
+        sig:
+          type: string
+        timing:
+          type: string
+          enum: [BEFORE_MEAL, AFTER_MEAL, ANY]
+        notes:
+          type: string
+
+    RxCreateResponse:
+      type: object
+      required: [rxId, visitId, version, createdAt, updatedAt]
+      properties:
+        rxId:
+          type: string
+        visitId:
+          type: string
+        version:
+          type: integer
+        createdAt:
+          type: integer
+        updatedAt:
+          type: integer
+
+    RxJsonUrlResponse:
+      type: object
+      required: [rxId, visitId, version, url, expiresInSeconds]
+      properties:
+        rxId:
+          type: string
+        visitId:
+          type: string
+        version:
+          type: integer
+        url:
+          type: string
+          format: uri
+        expiresInSeconds:
+          type: integer
+
+    MedicinePreset:
+      type: object
+      required: [id, displayName, normalizedName, createdAt, createdByUserId, source, verified]
+      properties:
+        id:
+          type: string
+        displayName:
+          type: string
+        normalizedName:
+          type: string
+        defaultDose:
+          type: string
+        defaultFrequency:
+          type: string
+        defaultDuration:
+          type: integer
+        form:
+          type: string
+          enum: [TABLET, CAPSULE, SYRUP, INJECTION, OINTMENT, GEL, MOUTHWASH, OTHER]
+        tags:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: integer
+        createdByUserId:
+          type: string
+        source:
+          type: string
+          enum: [ADMIN_IMPORT, INLINE_DOCTOR]
+        verified:
+          type: boolean
+
+    MedicineTypeaheadItem:
+      type: object
+      required: [id, displayName]
+      properties:
+        id:
+          type: string
+        displayName:
+          type: string
+        defaultFrequency:
+          type: string
+        defaultDuration:
+          type: integer
+        form:
+          type: string
+          enum: [TABLET, CAPSULE, SYRUP, INJECTION, OINTMENT, GEL, MOUTHWASH, OTHER]
+
+    QuickAddMedicineInput:
+      type: object
+      required: [displayName]
+      properties:
+        displayName:
+          type: string
+        defaultDose:
+          type: string
+        defaultFrequency:
+          type: string
+        defaultDuration:
+          type: integer
+          minimum: 1
+          maximum: 365
+        form:
+          type: string
+          enum: [TABLET, CAPSULE, SYRUP, INJECTION, OINTMENT, GEL, MOUTHWASH, OTHER]
+
+    PrescriptionPreset:
+      type: object
+      required: [id, name, lines, createdByUserId, createdAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/RxLine'
+        tags:
+          type: array
+          items:
+            type: string
+        createdByUserId:
+          type: string
+        createdAt:
+          type: integer
+
+    AdminCreateRxPresetRequest:
+      type: object
+      required: [name, lines]
+      properties:
+        name:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/RxLine'
+        tags:
+          type: array
+          items:
+            type: string
+
+    AdminUpdateRxPresetRequest:
+      type: object
+      properties:
+        name:
+          type: string
+        lines:
+          type: array
+          items:
+            $ref: '#/components/schemas/RxLine'
+        tags:
+          type: array
+          items:
+            type: string
+
+    AdminCreateDoctorRequest:
+      type: object
+      required: [email, displayName, password, fullName, registrationNumber, specialization]
+      properties:
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+        password:
+          type: string
+          minLength: 8
+        fullName:
+          type: string
+        registrationNumber:
+          type: string
+        specialization:
+          type: string
+        contact:
+          type: string
+
+    AdminUpdateDoctorRequest:
+      type: object
+      properties:
+        fullName:
+          type: string
+        registrationNumber:
+          type: string
+        specialization:
+          type: string
+        contact:
+          type: string
+        active:
+          type: boolean
+
+    AdminDoctorListItem:
+      type: object
+      required:
+        - doctorId
+        - fullName
+        - registrationNumber
+        - specialization
+        - active
+        - createdAt
+        - updatedAt
+        - email
+        - displayName
+      properties:
+        doctorId:
+          type: string
+        fullName:
+          type: string
+        registrationNumber:
+          type: string
+        specialization:
+          type: string
+        contact:
+          type: string
+        active:
+          type: boolean
+        createdAt:
+          type: integer
+        updatedAt:
+          type: integer
+        email:
+          type: string
+          format: email
+        displayName:
+          type: string
+
+    DailyReport:
+      type: object
+      required: [date, visitCountsByStatus, totalRevenue, procedureCounts]
+      properties:
+        date:
+          type: string
+          format: date
+        visitCountsByStatus:
+          type: object
+          properties:
+            QUEUED:
+              type: integer
+            IN_PROGRESS:
+              type: integer
+            DONE:
+              type: integer
+        totalRevenue:
+          type: number
+        procedureCounts:
+          type: object
+          additionalProperties:
+            type: integer

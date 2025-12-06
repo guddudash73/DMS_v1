@@ -2,14 +2,12 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { z } from 'zod';
 import { PrescriptionPresetSearchQuery } from '@dms/types';
 import { prescriptionPresetRepository } from '../repositories/prescriptionPresetRepository';
+import { sendZodValidationError } from '../lib/validation';
 
 const router = express.Router();
 
-const handleValidationError = (res: Response, issues: unknown) => {
-  return res.status(400).json({
-    error: 'VALIDATION_ERROR',
-    issues,
-  });
+const handleValidationError = (req: Request, res: Response, issues: z.ZodError['issues']) => {
+  return sendZodValidationError(req, res, issues);
 };
 
 const asyncHandler =
@@ -46,7 +44,7 @@ router.get(
       search = buildPresetSearchFromRequest(req);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return handleValidationError(res, err.issues);
+        return handleValidationError(req, res, err.issues);
       }
       throw err;
     }
@@ -58,10 +56,5 @@ router.get(
     });
   }),
 );
-
-// TODO (Admin endpoints, optional for Day 11):
-// - POST /admin/rx-presets
-// - PATCH /admin/rx-presets/:id
-// These should be mounted under an /admin router and restricted to ADMIN role.
 
 export default router;

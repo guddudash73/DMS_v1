@@ -35,7 +35,11 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
         reqId: req.requestId,
         email,
       });
-      return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid credentials' });
+      return res.status(401).json({
+        error: 'INVALID_CREDENTIALS',
+        message: 'Invalid credentials',
+        traceId: req.requestId,
+      });
     }
 
     const now = Date.now();
@@ -50,6 +54,7 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
         error: 'ACCOUNT_LOCKED',
         message: 'Too many failed attempts. Please try again later.',
         lockUntil: user.lockUntil,
+        traceId: req.requestId,
       });
     }
 
@@ -62,7 +67,11 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
         userId: user.userId,
       });
 
-      return res.status(401).json({ error: 'INVALID_CREDENTIALS', message: 'Invalid credentials' });
+      return res.status(401).json({
+        error: 'INVALID_CREDENTIALS',
+        message: 'Invalid credentials',
+        traceId: req.requestId,
+      });
     }
 
     await userRepository.clearFailedLogins(user.userId);

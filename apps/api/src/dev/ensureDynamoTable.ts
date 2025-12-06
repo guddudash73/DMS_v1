@@ -74,7 +74,9 @@ export async function ensureDynamoTable() {
 
     console.log(`DynamoDB table "${DDB_TABLE_NAME}" created.`);
   } catch (err) {
-    if (err instanceof ResourceInUseException || (err as any)?.name === 'ResourceInUseException') {
+    const name = getErrorName(err);
+
+    if (err instanceof ResourceInUseException || name === 'ResourceInUseException') {
       console.log(
         `DynamoDB table "${DDB_TABLE_NAME}" is already being created or exists (ResourceInUseException).`,
       );
@@ -82,4 +84,10 @@ export async function ensureDynamoTable() {
     }
     throw err;
   }
+}
+
+function getErrorName(err: unknown): string | undefined {
+  if (!err || typeof err !== 'object') return undefined;
+  const maybeName = (err as { name?: unknown }).name;
+  return typeof maybeName === 'string' ? maybeName : undefined;
 }

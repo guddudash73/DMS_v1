@@ -7,9 +7,10 @@ import {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
-  ScanCommand,
+  QueryCommand,
   UpdateCommand,
   TransactWriteCommand,
+  type TransactWriteCommandInput,
 } from '@aws-sdk/lib-dynamodb';
 import type { Patient, PatientCreate, PatientUpdate } from '@dms/types';
 import { normalizePhone } from '../utils/phone';
@@ -28,7 +29,6 @@ const buildPatientKeys = (patientId: string) => ({
 
 const normalizeNameForUniq = (name: string) => name.trim().toLowerCase().replace(/\s+/g, ' ');
 
-// uniqueness index based on (phone + name)
 const buildPatientPhoneKeys = (normalizedPhone: string, normalizedName: string) => ({
   PK: `PATIENT_PHONE#${normalizedPhone}#${normalizedName}`,
   SK: 'PROFILE',
@@ -37,8 +37,14 @@ const buildPatientPhoneKeys = (normalizedPhone: string, normalizedName: string) 
 const normalizeSearchText = (name: string, phone?: string) =>
   `${name} ${phone ?? ''}`.trim().toLowerCase().replace(/\s+/g, ' ');
 
+const buildPatientSearchGsi = (normalizedSearchText: string) => ({
+  GSI1PK: 'PATIENT_SEARCH',
+  GSI1SK: normalizedSearchText,
+});
+
 export class DuplicatePatientError extends Error {
   readonly code = 'DUPLICATE_PATIENT' as const;
+  readonly statusCode = 409 as const;
 
   constructor(message = 'A patient already exists with this name and phone number') {
     super(message);
@@ -51,6 +57,8 @@ export interface PatientRepository {
   getById(patientId: string): Promise<Patient | null>;
   update(patientId: string, patch: PatientUpdate): Promise<Patient | null>;
   search(params: { query?: string; limit: number }): Promise<Patient[]>;
+  softDelete(patientId: string): Promise<boolean>;
+  restore(patientId: string): Promise<Patient | null>; // NEW
 }
 
 export class DynamoDBPatientRepository implements PatientRepository {
@@ -60,6 +68,7 @@ export class DynamoDBPatientRepository implements PatientRepository {
 
     const normalizedPhone = input.phone ? normalizePhone(input.phone) : undefined;
     const normalizedName = normalizeNameForUniq(input.name);
+    const searchText = normalizeSearchText(input.name, input.phone);
 
     const item = {
       ...buildPatientKeys(patientId),
@@ -73,9 +82,10 @@ export class DynamoDBPatientRepository implements PatientRepository {
       updatedAt: now,
       isDeleted: false,
       deletedAt: undefined,
-      searchText: normalizeSearchText(input.name, input.phone),
+      searchText,
       ...(normalizedPhone ? { normalizedPhone } : {}),
       normalizedName,
+      ...buildPatientSearchGsi(searchText),
     };
 
     try {
@@ -176,10 +186,20 @@ export class DynamoDBPatientRepository implements PatientRepository {
     const mergedName = (patch.name ?? existing.name)!;
     const mergedPhone = patch.phone ?? existing.phone;
 
-    if (patch.name !== undefined || patch.phone !== undefined) {
+    const isNameOrPhoneUpdated = patch.name !== undefined || patch.phone !== undefined;
+    let newSearchText: string | undefined;
+
+    if (isNameOrPhoneUpdated) {
+      newSearchText = normalizeSearchText(mergedName, mergedPhone ?? undefined);
       names['#searchText'] = 'searchText';
-      values[':searchText'] = normalizeSearchText(mergedName, mergedPhone);
+      values[':searchText'] = newSearchText;
       setParts.push('#searchText = :searchText');
+
+      names['#GSI1PK'] = 'GSI1PK';
+      names['#GSI1SK'] = 'GSI1SK';
+      values[':gsi1pk'] = 'PATIENT_SEARCH';
+      values[':gsi1sk'] = newSearchText;
+      setParts.push('#GSI1PK = :gsi1pk', '#GSI1SK = :gsi1sk');
     }
 
     const oldNormalizedPhone = existing.phone ? normalizePhone(existing.phone) : undefined;
@@ -223,7 +243,7 @@ export class DynamoDBPatientRepository implements PatientRepository {
         updateExpressionParts.push('REMOVE #normalizedPhone');
       }
 
-      const transactItems: any[] = [
+      const transactItems: NonNullable<TransactWriteCommandInput['TransactItems']> = [
         {
           Update: {
             TableName: TABLE_NAME,
@@ -289,6 +309,7 @@ export class DynamoDBPatientRepository implements PatientRepository {
     };
     const expressionValues: Record<string, unknown> = {
       ':patient': 'PATIENT',
+      ':gsi1pk': 'PATIENT_SEARCH',
     };
 
     let filterExpression = '#entityType = :patient';
@@ -311,8 +332,10 @@ export class DynamoDBPatientRepository implements PatientRepository {
     }
 
     const { Items } = await docClient.send(
-      new ScanCommand({
+      new QueryCommand({
         TableName: TABLE_NAME,
+        IndexName: 'GSI1',
+        KeyConditionExpression: 'GSI1PK = :gsi1pk',
         FilterExpression: filterExpression,
         ExpressionAttributeNames: expressionNames,
         ExpressionAttributeValues: expressionValues,
@@ -321,12 +344,79 @@ export class DynamoDBPatientRepository implements PatientRepository {
 
     const all = (Items ?? []) as Patient[];
 
-    const visible = all.filter((p) => (p as any).isDeleted !== true);
+    const visible = all.filter((p) => p.isDeleted !== true);
 
     if (visible.length <= limit) {
       return visible;
     }
     return visible.slice(0, limit);
+  }
+
+  async softDelete(patientId: string): Promise<boolean> {
+    const now = Date.now();
+
+    try {
+      const { Attributes } = await docClient.send(
+        new UpdateCommand({
+          TableName: TABLE_NAME,
+          Key: buildPatientKeys(patientId),
+          UpdateExpression:
+            'SET #isDeleted = :true, #deletedAt = :deletedAt, #updatedAt = :updatedAt',
+          ExpressionAttributeNames: {
+            '#isDeleted': 'isDeleted',
+            '#deletedAt': 'deletedAt',
+            '#updatedAt': 'updatedAt',
+          },
+          ExpressionAttributeValues: {
+            ':true': true,
+            ':deletedAt': now,
+            ':updatedAt': now,
+          },
+          ConditionExpression: 'attribute_exists(PK)',
+          ReturnValues: 'ALL_NEW',
+        }),
+      );
+
+      return !!Attributes;
+    } catch (err) {
+      if (err instanceof ConditionalCheckFailedException) {
+        return false;
+      }
+      throw err;
+    }
+  }
+
+  async restore(patientId: string): Promise<Patient | null> {
+    const now = Date.now();
+
+    try {
+      const { Attributes } = await docClient.send(
+        new UpdateCommand({
+          TableName: TABLE_NAME,
+          Key: buildPatientKeys(patientId),
+          UpdateExpression: 'SET #isDeleted = :false, #updatedAt = :updatedAt REMOVE #deletedAt',
+          ExpressionAttributeNames: {
+            '#isDeleted': 'isDeleted',
+            '#deletedAt': 'deletedAt',
+            '#updatedAt': 'updatedAt',
+          },
+          ExpressionAttributeValues: {
+            ':false': false,
+            ':updatedAt': now,
+          },
+          ConditionExpression: 'attribute_exists(PK)',
+          ReturnValues: 'ALL_NEW',
+        }),
+      );
+
+      if (!Attributes) return null;
+      return Attributes as Patient;
+    } catch (err) {
+      if (err instanceof ConditionalCheckFailedException) {
+        return null;
+      }
+      throw err;
+    }
   }
 }
 

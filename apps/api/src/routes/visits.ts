@@ -34,15 +34,14 @@ import {
   DuplicateCheckoutError,
   VisitNotDoneError,
 } from '../repositories/billingRepository';
-import { logAudit } from '../lib/logger';
+import { logAudit, logError } from '../lib/logger';
+import { sendZodValidationError } from '../lib/validation';
+import { generateXrayThumbnail } from '../services/xrayThumbnails';
 
 const router = express.Router();
 
-const handleValidationError = (res: Response, issues: unknown) => {
-  return res.status(400).json({
-    error: 'VALIDATION_ERROR',
-    issues,
-  });
+const handleValidationError = (req: Request, res: Response, issues: z.ZodError['issues']) => {
+  return sendZodValidationError(req, res, issues);
 };
 
 const asyncHandler =
@@ -50,12 +49,36 @@ const asyncHandler =
   (req: Request, res: Response, next: NextFunction) =>
     void fn(req, res, next).catch(next);
 
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 100): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (i === attempts - 1) break;
+      await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+    }
+  }
+  throw lastError;
+}
+
+export class PrescriptionStorageError extends Error {
+  readonly code = 'RX_UPLOAD_FAILED' as const;
+  readonly statusCode = 503 as const;
+
+  constructor(message = 'Unable to store prescription JSON, please retry.') {
+    super(message);
+    this.name = 'PrescriptionStorageError';
+  }
+}
+
 router.post(
   '/',
   asyncHandler(async (req, res) => {
     const parsed = VisitCreate.safeParse(req.body);
     if (!parsed.success) {
-      return handleValidationError(res, parsed.error.issues);
+      return handleValidationError(req, res, parsed.error.issues);
     }
 
     const visit = await visitRepository.create(parsed.data);
@@ -68,7 +91,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const parsed = VisitQueueQuery.safeParse(req.query);
     if (!parsed.success) {
-      return handleValidationError(res, parsed.error.issues);
+      return handleValidationError(req, res, parsed.error.issues);
     }
 
     const visits = await visitRepository.getDoctorQueue(parsed.data);
@@ -86,13 +109,17 @@ router.post(
   asyncHandler(async (req, res) => {
     const parsed = TakeSeatBody.safeParse(req.body);
     if (!parsed.success) {
-      return handleValidationError(res, parsed.error.issues);
+      return handleValidationError(req, res, parsed.error.issues);
     }
 
     try {
       const updated = await visitRepository.updateStatus(parsed.data.visitId, 'IN_PROGRESS');
       if (!updated) {
-        return res.status(404).json({ error: 'NOT_FOUND' });
+        return res.status(404).json({
+          error: 'NOT_FOUND',
+          message: 'Visit not found',
+          traceId: req.requestId,
+        });
       }
       return res.status(200).json(updated);
     } catch (err) {
@@ -100,12 +127,14 @@ router.post(
         return res.status(409).json({
           error: err.code,
           message: err.message,
+          traceId: req.requestId,
         });
       }
       if (err instanceof InvalidStatusTransitionError) {
         return res.status(409).json({
           error: err.code,
           message: err.message,
+          traceId: req.requestId,
         });
       }
       throw err;
@@ -118,15 +147,16 @@ router.get(
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) {
-      return res.status(400).json({
-        error: 'VALIDATION_ERROR',
-        message: 'Invalid visit id',
-      });
+      return handleValidationError(req, res, id.error.issues);
     }
 
     const visit = await visitRepository.getById(id.data);
     if (!visit) {
-      return res.status(404).json({ error: 'NOT_FOUND' });
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Visit not found',
+        traceId: req.requestId,
+      });
     }
 
     return res.status(200).json(visit);
@@ -138,21 +168,22 @@ router.patch(
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) {
-      return res.status(400).json({
-        error: 'VALIDATION_ERROR',
-        message: 'Invalid visit id',
-      });
+      return handleValidationError(req, res, id.error.issues);
     }
 
     const parsedBody = VisitStatusUpdate.safeParse(req.body);
     if (!parsedBody.success) {
-      return handleValidationError(res, parsedBody.error.issues);
+      return handleValidationError(req, res, parsedBody.error.issues);
     }
 
     try {
       const updated = await visitRepository.updateStatus(id.data, parsedBody.data.status);
       if (!updated) {
-        return res.status(404).json({ error: 'NOT_FOUND' });
+        return res.status(404).json({
+          error: 'NOT_FOUND',
+          message: 'Visit not found',
+          traceId: req.requestId,
+        });
       }
       return res.status(200).json(updated);
     } catch (err) {
@@ -160,12 +191,14 @@ router.patch(
         return res.status(409).json({
           error: err.code,
           message: err.message,
+          traceId: req.requestId,
         });
       }
       if (err instanceof DoctorBusyError) {
         return res.status(409).json({
           error: err.code,
           message: err.message,
+          traceId: req.requestId,
         });
       }
       throw err;
@@ -178,15 +211,16 @@ router.get(
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) {
-      return res.status(400).json({
-        error: 'VALIDATION_ERROR',
-        message: 'Invalid visit id',
-      });
+      return handleValidationError(req, res, id.error.issues);
     }
 
     const followup = await followupRepository.getByVisitId(id.data);
     if (!followup) {
-      return res.status(404).json({ error: 'NOT_FOUND' });
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Follow-up not found',
+        traceId: req.requestId,
+      });
     }
 
     return res.status(200).json(followup);
@@ -198,15 +232,12 @@ router.put(
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) {
-      return res.status(400).json({
-        error: 'VALIDATION_ERROR',
-        message: 'Invalid visit id',
-      });
+      return handleValidationError(req, res, id.error.issues);
     }
 
     const parsedBody = FollowUpUpsert.safeParse(req.body);
     if (!parsedBody.success) {
-      return handleValidationError(res, parsedBody.error.issues);
+      return handleValidationError(req, res, parsedBody.error.issues);
     }
 
     try {
@@ -233,6 +264,7 @@ router.put(
         return res.status(400).json({
           error: err.code,
           message: err.message,
+          traceId: req.requestId,
         });
       }
       throw err;
@@ -245,20 +277,21 @@ router.patch(
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) {
-      return res.status(400).json({
-        error: 'VALIDATION_ERROR',
-        message: 'Invalid visit id',
-      });
+      return handleValidationError(req, res, id.error.issues);
     }
 
     const parsedBody = FollowUpStatusUpdate.safeParse(req.body);
     if (!parsedBody.success) {
-      return handleValidationError(res, parsedBody.error.issues);
+      return handleValidationError(req, res, parsedBody.error.issues);
     }
 
     const updated = await followupRepository.updateStatus(id.data, parsedBody.data);
     if (!updated) {
-      return res.status(404).json({ error: 'NOT_FOUND' });
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Follow-up not found',
+        traceId: req.requestId,
+      });
     }
 
     if (req.auth) {
@@ -289,20 +322,21 @@ router.post(
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) {
-      return res.status(400).json({
-        error: 'VALIDATION_ERROR',
-        message: 'Invalid visit id',
-      });
+      return handleValidationError(req, res, id.error.issues);
     }
 
     const parsedBody = RxCreateBody.safeParse(req.body);
     if (!parsedBody.success) {
-      return handleValidationError(res, parsedBody.error.issues);
+      return handleValidationError(req, res, parsedBody.error.issues);
     }
 
     const visit = await visitRepository.getById(id.data);
     if (!visit) {
-      return res.status(404).json({ error: 'NOT_FOUND' });
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Visit not found',
+        traceId: req.requestId,
+      });
     }
 
     const patient = await patientRepository.getById(visit.patientId);
@@ -310,6 +344,7 @@ router.post(
       return res.status(404).json({
         error: 'PATIENT_NOT_FOUND',
         message: 'Cannot create prescriptions for deleted or missing patient',
+        traceId: req.requestId,
       });
     }
 
@@ -325,15 +360,30 @@ router.post(
       updatedAt: now,
     };
 
-    await s3Client.send(
-      new PutObjectCommand({
-        Bucket: XRAY_BUCKET_NAME,
-        Key: jsonKey,
-        Body: JSON.stringify(jsonPayload),
-        ContentType: 'application/json',
-        ServerSideEncryption: 'AES256',
-      }),
-    );
+    try {
+      await withRetry(() =>
+        s3Client.send(
+          new PutObjectCommand({
+            Bucket: XRAY_BUCKET_NAME,
+            Key: jsonKey,
+            Body: JSON.stringify(jsonPayload),
+            ContentType: 'application/json',
+            ServerSideEncryption: 'AES256',
+          }),
+        ),
+      );
+    } catch (err) {
+      logError('rx_s3_put_failed', {
+        reqId: req.requestId,
+        visitId: visit.visitId,
+        error:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      });
+
+      throw new PrescriptionStorageError();
+    }
 
     const prescription = await prescriptionRepository.createForVisit({
       visit,
@@ -376,6 +426,7 @@ const XrayMetaDataInput = z.object({
     .max(10 * 1024 * 1024),
   takenAt: z.number().int().nonnegative(),
   takenByUserId: UserId,
+  thumbKey: z.string().min(1).optional(),
 });
 
 router.post(
@@ -383,20 +434,21 @@ router.post(
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) {
-      return res.status(400).json({
-        error: 'VALIDATION_ERROR',
-        message: 'Invalid visit id',
-      });
+      return handleValidationError(req, res, id.error.issues);
     }
 
     const parsedBody = XrayMetaDataInput.safeParse(req.body);
     if (!parsedBody.success) {
-      return handleValidationError(res, parsedBody.error.issues);
+      return handleValidationError(req, res, parsedBody.error.issues);
     }
 
     const visit = await visitRepository.getById(id.data);
     if (!visit) {
-      return res.status(404).json({ error: 'NOT_FOUND' });
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Visit not found',
+        traceId: req.requestId,
+      });
     }
 
     const patient = await patientRepository.getById(visit.patientId);
@@ -404,12 +456,41 @@ router.post(
       return res.status(404).json({
         error: 'PATIENT_NOT_FOUND',
         message: 'Cannot attach X-rays to deleted or missing patient',
+        traceId: req.requestId,
       });
     }
 
-    const { xrayId, contentType, size, takenAt, takenByUserId } = parsedBody.data;
+    const { xrayId, contentType, size, takenAt, takenByUserId, thumbKey } = parsedBody.data;
 
     const contentKey = buildXrayObjectKey(visit.visitId, xrayId, 'original', contentType);
+
+    let effectiveThumbKey = thumbKey;
+
+    // If caller did not supply a thumbKey, generate a thumbnail into a deterministic location.
+    if (!effectiveThumbKey) {
+      const autoThumbKey = buildXrayObjectKey(visit.visitId, xrayId, 'thumb', contentType);
+
+      try {
+        await generateXrayThumbnail({
+          contentKey,
+          thumbKey: autoThumbKey,
+          contentType: contentType as 'image/jpeg' | 'image/png',
+        });
+        effectiveThumbKey = autoThumbKey;
+      } catch (err) {
+        // Best-effort: log and continue with only the original image available.
+        logError('xray_thumbnail_failed', {
+          reqId: req.requestId,
+          visitId: visit.visitId,
+          xrayId,
+          error:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        });
+        effectiveThumbKey = undefined;
+      }
+    }
 
     try {
       const xray = await xrayRepository.putMetadata({
@@ -420,6 +501,7 @@ router.post(
         takenAt,
         takenByUserId,
         contentKey,
+        ...(effectiveThumbKey !== undefined ? { thumbKey: effectiveThumbKey } : {}),
       });
 
       if (req.auth) {
@@ -434,6 +516,7 @@ router.post(
             visitId: xray.visitId,
             contentType: xray.contentType,
             size: xray.size,
+            hasThumb: !!xray.thumbKey,
           },
         });
       }
@@ -444,6 +527,7 @@ router.post(
         return res.status(409).json({
           error: err.code,
           message: err.message,
+          traceId: req.requestId,
         });
       }
       throw err;
@@ -457,15 +541,12 @@ router.post(
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) {
-      return res.status(400).json({
-        error: 'VALIDATION_ERROR',
-        message: 'Invalid visit id',
-      });
+      return handleValidationError(req, res, id.error.issues);
     }
 
     const parsedBody = BillingCheckoutInput.safeParse(req.body);
     if (!parsedBody.success) {
-      return handleValidationError(res, parsedBody.error.issues);
+      return handleValidationError(req, res, parsedBody.error.issues);
     }
 
     try {
@@ -492,24 +573,28 @@ router.post(
         return res.status(409).json({
           error: err.code,
           message: err.message,
+          traceId: req.requestId,
         });
       }
       if (err instanceof DuplicateCheckoutError) {
         return res.status(409).json({
           error: err.code,
           message: err.message,
+          traceId: req.requestId,
         });
       }
       if (err instanceof BillingRuleViolationError) {
         return res.status(400).json({
           error: err.code,
           message: err.message,
+          traceId: req.requestId,
         });
       }
       if (err instanceof FollowUpRuleViolationError) {
         return res.status(400).json({
           error: err.code,
           message: err.message,
+          traceId: req.requestId,
         });
       }
       throw err;
@@ -522,16 +607,15 @@ router.get(
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) {
-      return res.status(400).json({
-        error: 'VALIDATION_ERROR',
-        message: 'Invalid visit id',
-      });
+      return handleValidationError(req, res, id.error.issues);
     }
 
     const billing = await billingRepository.getByVisitId(id.data);
     if (!billing) {
       return res.status(404).json({
         error: 'NOT_FOUND',
+        message: 'Billing not found',
+        traceId: req.requestId,
       });
     }
     return res.status(200).json(billing);

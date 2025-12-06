@@ -1,13 +1,14 @@
 import type { Request, Response, NextFunction } from 'express';
-import { type ZodType } from 'zod';
+import type { ZodType } from 'zod';
 
-export const validate = (schema: ZodType) => (req: Request, res: Response, next: NextFunction) => {
-  const parsed = schema.safeParse(req.body);
-  if (!parsed.success) {
-    const issues = parsed.error.flatten();
-    return res.status(400).json({ error: 'VALIDATION_ERROR', issues });
-  }
+export const validate =
+  <T>(schema: ZodType<T>) =>
+  (req: Request, _res: Response, next: NextFunction) => {
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) {
+      return next(parsed.error);
+    }
 
-  req.body = parsed.data as unknown;
-  return next();
-};
+    req.body = parsed.data as T;
+    return next();
+  };

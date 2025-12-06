@@ -15,6 +15,7 @@ import type { Visit, VisitCreate, VisitStatus, VisitQueueQuery } from '@dms/type
 
 export class InvalidStatusTransitionError extends Error {
   readonly code = 'INVALID_STATUS_TRANSITION' as const;
+  readonly statusCode = 409 as const;
 
   constructor(message: string) {
     super(message);

@@ -233,4 +233,30 @@ describe('Billing / Checkout API', () => {
 
     expect(res.body.error).toBe('FOLLOWUP_RULE_VIOLATION');
   });
+
+  it('rejects checkout when followUpDate is before the visitDate (billing path)', async () => {
+    const patientId = await createPatient('Billing Patient 7', '+919900000007');
+    const visit = await createVisitForPatient(patientId);
+    await completeVisit(visit.visitId);
+
+    const visitDate = new Date(visit.visitDate);
+    visitDate.setDate(visitDate.getDate() - 1);
+    const beforeVisitDate = visitDate.toISOString().slice(0, 10);
+
+    const res = await request(app)
+      .post(`/visits/${visit.visitId}/checkout`)
+      .set('Authorization', asReception())
+      .send({
+        items: [{ description: 'Consultation', quantity: 1, unitAmount: 500 }],
+        discountAmount: 0,
+        taxAmount: 0,
+        followUp: {
+          followUpDate: beforeVisitDate,
+          reason: 'Before visit date',
+        },
+      })
+      .expect(400);
+
+    expect(res.body.error).toBe('FOLLOWUP_RULE_VIOLATION');
+  });
 });

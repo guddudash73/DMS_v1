@@ -3,11 +3,13 @@ import type { Billing, BillingCheckoutInput, Visit, VisitId } from '@dms/types';
 import { visitRepository } from './visitRepository';
 import { patientRepository } from './patientRepository';
 import { followupRepository, FollowUpRuleViolationError } from './followupRepository';
-import { log } from '../lib/logger';
+import { logInfo, logError } from '../lib/logger';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 
 export class BillingRuleViolationError extends Error {
   readonly code = 'BILLING_RULE_VIOLATION' as const;
+  readonly statusCode = 400 as const;
+
   constructor(message: string) {
     super(message);
     this.name = 'BillingRuleViolationError';
@@ -16,6 +18,8 @@ export class BillingRuleViolationError extends Error {
 
 export class DuplicateCheckoutError extends Error {
   readonly code = 'DUPLICATE_CHECKOUT' as const;
+  readonly statusCode = 409 as const;
+
   constructor(message: string) {
     super(message);
     this.name = 'DuplicateCheckoutError';
@@ -24,6 +28,8 @@ export class DuplicateCheckoutError extends Error {
 
 export class VisitNotDoneError extends Error {
   readonly code = 'VISIT_NOT_DONE' as const;
+  readonly statusCode = 409 as const;
+
   constructor(message: string) {
     super(message);
     this.name = 'VisitNotDoneError';
@@ -260,7 +266,7 @@ export class DynamoDBBillingRepository implements BillingRepository {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error during billing checkout';
 
-      log('billing:checkout_failed', {
+      logError('billing_checkout_failed', {
         visitId,
         error: message,
       });
@@ -270,7 +276,7 @@ export class DynamoDBBillingRepository implements BillingRepository {
       );
     }
 
-    log('billing:checkout_success', {
+    logInfo('billing_checkout_success', {
       visitId,
       patientId: visit.patientId,
       total,
@@ -296,6 +302,7 @@ export class DynamoDBBillingRepository implements BillingRepository {
     if (!visit) {
       return null;
     }
+
     const patient = await patientRepository.getById(visit.patientId);
     if (!patient) {
       return null;

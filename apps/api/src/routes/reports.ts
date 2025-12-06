@@ -4,14 +4,13 @@ import type { Patient } from '@dms/types';
 import { visitRepository } from '../repositories/visitRepository';
 import { patientRepository } from '../repositories/patientRepository';
 import { billingRepository } from '../repositories/billingRepository';
+import { type ZodError } from 'zod';
+import { sendZodValidationError } from '../lib/validation';
 
 const router = express.Router();
 
-const handleValidationError = (res: Response, issues: unknown) => {
-  return res.status(400).json({
-    error: 'VALIDATION_ERROR',
-    issues,
-  });
+const handleValidationError = (req: Request, res: Response, issues: ZodError['issues']) => {
+  return sendZodValidationError(req, res, issues);
 };
 
 const asyncHandler =
@@ -24,7 +23,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const parsed = DailyReportQuery.safeParse(req.query);
     if (!parsed.success) {
-      return handleValidationError(res, parsed.error.issues);
+      return handleValidationError(req, res, parsed.error.issues);
     }
 
     const { date } = parsed.data;

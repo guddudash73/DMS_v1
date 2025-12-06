@@ -4,14 +4,12 @@ import { MedicineSearchQuery, QuickAddMedicineInput } from '@dms/types';
 import type { MedicineTypeaheadItem } from '@dms/types';
 import { medicinePresetRepository } from '../repositories/medicinePresetRepository';
 import { logAudit } from '../lib/logger';
+import { sendZodValidationError } from '../lib/validation';
 
 const router = express.Router();
 
-const handleValidationError = (res: Response, issues: unknown) => {
-  return res.status(400).json({
-    error: 'VALIDATION_ERROR',
-    issues,
-  });
+const handleValidationError = (req: Request, res: Response, issues: z.ZodError['issues']) => {
+  return sendZodValidationError(req, res, issues);
 };
 
 const asyncHandler =
@@ -48,7 +46,7 @@ router.get(
       searchQuery = buildSearchQueryFromRequest(req);
     } catch (err) {
       if (err instanceof z.ZodError) {
-        return handleValidationError(res, err.issues);
+        return handleValidationError(req, res, err.issues);
       }
       throw err;
     }
@@ -74,7 +72,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const parsed = QuickAddMedicineInput.safeParse(req.body);
     if (!parsed.success) {
-      return handleValidationError(res, parsed.error.issues);
+      return handleValidationError(req, res, parsed.error.issues);
     }
 
     // Router is mounted behind authMiddleware + requireRole('DOCTOR' | 'ADMIN'),

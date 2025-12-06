@@ -4,20 +4,35 @@ import { RxId } from '@dms/types';
 import { prescriptionRepository } from '../repositories/prescriptionRepository';
 import { XRAY_BUCKET_NAME } from '../config/env';
 import { getPresignedDownloadUrl } from '../lib/s3';
+import { visitRepository } from '../repositories/visitRepository';
+import { patientRepository } from '../repositories/patientRepository';
+import { sendZodValidationError } from '../lib/validation';
+import { logError } from '../lib/logger';
 
 const router = express.Router();
 
-const handleValidationError = (res: Response, issues: unknown) => {
-  return res.status(400).json({
-    error: 'VALIDATION_ERROR',
-    issues,
-  });
+const handleValidationError = (req: Request, res: Response, issues: z.ZodError['issues']) => {
+  return sendZodValidationError(req, res, issues);
 };
 
 const asyncHandler =
   (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
   (req: Request, res: Response, next: NextFunction) =>
     void fn(req, res, next).catch(next);
+
+async function withRetry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 100): Promise<T> {
+  let lastError: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      lastError = err;
+      if (i === attempts - 1) break;
+      await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+    }
+  }
+  throw lastError;
+}
 
 const RxIdParam = z.object({
   rxId: RxId,
@@ -29,7 +44,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const parsedId = RxIdParam.safeParse(req.params);
     if (!parsedId.success) {
-      return handleValidationError(res, parsedId.error.issues);
+      return handleValidationError(req, res, parsedId.error.issues);
     }
 
     const { rxId } = parsedId.data;
@@ -39,14 +54,57 @@ router.get(
       return res.status(404).json({
         error: 'RX_NOT_FOUND',
         message: 'Prescription not found',
+        traceId: req.requestId,
       });
     }
 
-    const url = await getPresignedDownloadUrl({
-      bucket: XRAY_BUCKET_NAME,
-      key: meta.jsonKey,
-      expiresInSeconds: 90,
-    });
+    const visit = await visitRepository.getById(meta.visitId);
+    if (!visit) {
+      return res.status(404).json({
+        error: 'VISIT_NOT_FOUND',
+        message: 'Visit not found for this prescription',
+        traceId: req.requestId,
+      });
+    }
+
+    const patient = await patientRepository.getById(visit.patientId);
+    if (!patient) {
+      return res.status(404).json({
+        error: 'PATIENT_NOT_FOUND',
+        message: 'Patient not found or has been deleted',
+        traceId: req.requestId,
+      });
+    }
+
+    let url: string;
+    try {
+      url = await withRetry(
+        () =>
+          getPresignedDownloadUrl({
+            bucket: XRAY_BUCKET_NAME,
+            key: meta.jsonKey,
+            expiresInSeconds: 90,
+          }),
+        3,
+        100,
+      );
+    } catch (err) {
+      logError('rx_url_presign_failed', {
+        reqId: req.requestId,
+        rxId: meta.rxId,
+        visitId: meta.visitId,
+        error:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      });
+
+      return res.status(503).json({
+        error: 'RX_URL_FAILED',
+        message: 'Unable to create prescription download URL, please retry.',
+        traceId: req.requestId,
+      });
+    }
 
     return res.status(200).json({
       rxId: meta.rxId,
@@ -63,7 +121,7 @@ router.get(
   asyncHandler(async (req, res) => {
     const parsedId = RxIdParam.safeParse(req.params);
     if (!parsedId.success) {
-      return handleValidationError(res, parsedId.error.issues);
+      return handleValidationError(req, res, parsedId.error.issues);
     }
 
     return res.status(200).json({

@@ -91,7 +91,11 @@ r.patch('/:doctorId', validate(AdminUpdateDoctorRequest), async (req, res, next)
   try {
     const doctorId = req.params.doctorId;
     if (!doctorId) {
-      return res.status(400).json({ error: 'INVALID_DOCTOR_ID' });
+      return res.status(400).json({
+        error: 'INVALID_DOCTOR_ID',
+        message: 'Doctor id is required',
+        traceId: req.requestId,
+      });
     }
 
     const body = req.body as AdminUpdateDoctorRequest;
@@ -116,12 +120,20 @@ r.patch('/:doctorId', validate(AdminUpdateDoctorRequest), async (req, res, next)
 
     const updated = await userRepository.updateDoctorProfile(doctorId, repoPatch);
     if (!updated) {
-      return res.status(404).json({ error: 'DOCTOR_NOT_FOUND' });
+      return res.status(404).json({
+        error: 'DOCTOR_NOT_FOUND',
+        message: 'Doctor not found',
+        traceId: req.requestId,
+      });
     }
 
     const user = await userRepository.getById(doctorId);
     if (!user) {
-      return res.status(500).json({ error: 'USER_NOT_FOUND_FOR_DOCTOR' });
+      return res.status(500).json({
+        error: 'USER_NOT_FOUND_FOR_DOCTOR',
+        message: 'User record not found for doctor',
+        traceId: req.requestId,
+      });
     }
 
     const result: AdminDoctorListItem = {
