@@ -1,5 +1,6 @@
 import path from 'node:path';
 import dotenv from 'dotenv';
+import bcrypt from 'bcrypt';
 import { userRepository } from '../repositories/userRepository';
 import { env } from '../config/env';
 
@@ -42,9 +43,6 @@ const seedUsers: SeedUser[] = [
 ];
 
 async function main() {
-  const bcryptModule = await import('bcrypt');
-  const bcrypt = (bcryptModule as any).default ?? bcryptModule;
-
   console.log(
     `[seed-test-users] NODE_ENV=${env.NODE_ENV}, table=${env.DDB_TABLE_NAME}, region=${env.AWS_REGION}`,
   );
@@ -61,9 +59,11 @@ async function main() {
       });
 
       console.log(`[seed-test-users] created ${u.role} user`, u.email, '→ userId=', created.userId);
-    } catch (err: any) {
-      const name = err?.name ?? 'Error';
-      const message = err?.message ?? String(err);
+    } catch (err) {
+      const errorLike = err as { name?: string; message?: string };
+
+      const name = errorLike.name ?? 'Error';
+      const message = errorLike.message ?? String(err);
 
       if (name === 'TransactionCanceledException') {
         console.log(`[seed-test-users] ${u.email} already exists (TransactionCanceled), skipping`);

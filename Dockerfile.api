@@ -1,4 +1,3 @@
-# ---------- prune ----------
 FROM node:20 AS pruner
 WORKDIR /repo
 COPY . .
@@ -6,40 +5,32 @@ COPY . .
 ARG TURBO_SCOPE=@dms/api
 RUN npx turbo prune --scope=$TURBO_SCOPE --docker
 
-# ---------- install ----------
 FROM node:20 AS installer
 WORKDIR /repo
 
-# Pruned workspace (package.jsons + lockfile + minimal source)
 COPY --from=pruner /repo/out/json/ ./
 COPY --from=pruner /repo/out/package-lock.json ./package-lock.json
 COPY --from=pruner /repo/out/full/ ./
 COPY --from=pruner /repo/turbo.json ./turbo.json
 
-
 COPY --from=pruner /repo/packages/tsconfig/base.json ./packages/tsconfig/base.json
-
-# (Optional but often useful if you also have a root tsconfig.base.json)
 COPY --from=pruner /repo/tsconfig.base.json ./tsconfig.base.json
 
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
 RUN npm ci --workspaces --include-workspace-root
 
-# ---------- build ----------
 FROM node:20 AS builder
 WORKDIR /repo
 COPY --from=installer /repo ./
 
 RUN npx turbo run build --filter=@dms/api...
 
-# ---------- prod deps only ----------
 FROM node:20 AS proddeps
 WORKDIR /repo
 COPY --from=installer /repo ./
 RUN npm prune --omit=dev
 
-# ---------- runtime ----------
 FROM node:20-slim AS runner
 WORKDIR /repo
 RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
