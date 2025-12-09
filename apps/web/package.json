@@ -29,6 +29,7 @@
     "react-redux": "^9.2.0",
     "react-toastify": "^11.0.5",
     "recharts": "^2.15.4",
+    "reconnecting-websocket": "^4.4.0",
     "tailwind-merge": "^2.6.0"
   },
   "devDependencies": {

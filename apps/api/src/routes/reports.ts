@@ -173,7 +173,6 @@ router.get(
     while (current <= end) {
       const dateStr = current.toISOString().slice(0, 10);
       // reuse the same computation used by /daily/patients
-      // eslint-disable-next-line no-await-in-loop
       const summary = await buildDailyPatientSummary(dateStr);
       points.push(summary);
       current.setDate(current.getDate() + 1);

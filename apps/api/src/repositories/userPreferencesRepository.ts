@@ -1,3 +1,4 @@
+// apps/api/src/repositories/userPreferencesRepository.ts
 import { DynamoDBDocumentClient, GetCommand, PutCommand } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 import type { UserPreferences } from '@dms/types';
@@ -47,8 +48,8 @@ class DynamoDBUserPreferencesRepository implements UserPreferencesRepository {
       entityType: 'USER_PREFERENCES' as const,
       dashboard: prefs.dashboard ?? undefined,
       updatedAt: now,
-      // createdAt is optional, but nice to have
-      ...(prefs ? { createdAt: (prefs as any).createdAt ?? now } : {}),
+      // if you ever care about createdAt, you can add a separate
+      // migration/update logic later – for now we keep the shape simple
     };
 
     await docClient.send(

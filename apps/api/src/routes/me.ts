@@ -1,12 +1,13 @@
+// apps/api/src/routes/me.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
-import { z } from 'zod';
+import type { ZodError } from 'zod';
 import { UserPreferences } from '@dms/types';
 import { userPreferencesRepository } from '../repositories/userPreferencesRepository';
 import { sendZodValidationError } from '../lib/validation';
 
 const router = express.Router();
 
-const handleValidationError = (req: Request, res: Response, issues: z.ZodError['issues']) => {
+const handleValidationError = (req: Request, res: Response, issues: ZodError['issues']) => {
   return sendZodValidationError(req, res, issues);
 };
 

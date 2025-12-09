@@ -129,15 +129,14 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
   // ---- DASHBOARD PATIENT SUMMARY (BACKEND ROUTE) ----
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
-  const {
-    data: patientSummary,
-    isLoading: summaryLoading,
-    isFetching: summaryFetching,
-  } = useGetDailyPatientSummaryQuery(todayIso, {
-    skip: !canUseApi,
-    // keep this reasonably fresh – 15s is plenty for these counters
-    pollingInterval: 15000,
-  });
+  const { data: patientSummary, isLoading: summaryLoading } = useGetDailyPatientSummaryQuery(
+    todayIso,
+    {
+      skip: !canUseApi,
+      // keep this reasonably fresh – 15s is plenty for these counters
+      pollingInterval: 15000,
+    },
+  );
 
   const newPatientsToday = patientSummary?.newPatients;
   const followupPatientsToday = patientSummary?.followupPatients;

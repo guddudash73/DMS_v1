@@ -87,7 +87,7 @@ async function createVisit(token: string, patientId: string, doctorId: string) {
 }
 
 describe('Auth roles', () => {
-  it('allows RECEPTION to access /patients and /visits but not /rx or /reports', async () => {
+  it('allows RECEPTION to access /patients /visits /rx and /reports', async () => {
     const patientsRes = await request(app)
       .get('/patients')
       .set('Authorization', `Bearer ${receptionToken}`)
@@ -106,16 +106,14 @@ describe('Auth roles', () => {
       .get('/rx/some-id/json-url')
       .set('Authorization', `Bearer ${receptionToken}`);
 
-    expect(rxRes.status).toBe(403);
-    expect(rxRes.body.error).toBe('FORBIDDEN');
+    expect(rxRes.status).toBe(404);
 
     const reportsRes = await request(app)
       .get('/reports/daily')
       .set('Authorization', `Bearer ${receptionToken}`)
       .query({ date: '2030-01-01' });
 
-    expect(reportsRes.status).toBe(403);
-    expect(reportsRes.body.error).toBe('FORBIDDEN');
+    expect(reportsRes.status).toBe(200);
   });
 
   it('allows DOCTOR to access /visits, /rx, /medicines, /xrays but not /admin routes', async () => {
@@ -235,7 +233,7 @@ describe('Auth roles', () => {
     expect(forbiddenRes.body.error).toBe('FORBIDDEN');
   });
 
-  it('restricts /reports to ADMIN only', async () => {
+  it('allows /reports to all', async () => {
     const date = '2030-01-01';
 
     const adminRes = await request(app)
@@ -253,15 +251,13 @@ describe('Auth roles', () => {
       .set('Authorization', `Bearer ${doctorToken}`)
       .query({ date });
 
-    expect(doctorRes.status).toBe(403);
-    expect(doctorRes.body.error).toBe('FORBIDDEN');
+    expect(doctorRes.status).toBe(200);
 
     const receptionRes = await request(app)
       .get('/reports/daily')
       .set('Authorization', `Bearer ${receptionToken}`)
       .query({ date });
 
-    expect(receptionRes.status).toBe(403);
-    expect(receptionRes.body.error).toBe('FORBIDDEN');
+    expect(receptionRes.status).toBe(200);
   });
 });

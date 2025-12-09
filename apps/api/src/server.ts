@@ -109,7 +109,7 @@ export const createApp = () => {
     '/medicines',
     genericSensitiveRateLimiter,
     authMiddleware,
-    requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
+    requireRole('DOCTOR', 'ADMIN'),
     medicinesRouter,
   );
   app.use(
