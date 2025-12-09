@@ -56,15 +56,25 @@ async function createPatient(name: string, phone: string) {
   return patientId;
 }
 
-async function createVisit(patientId: string, doctorId: string, reason: string) {
+async function createVisit(
+  patientId: string,
+  doctorId: string,
+  reason: string,
+  tag?: 'N' | 'F' | 'Z',
+) {
+  const payload: Record<string, unknown> = {
+    patientId,
+    doctorId,
+    reason,
+  };
+  if (tag) {
+    payload.tag = tag;
+  }
+
   const res = await request(app)
     .post('/visits')
     .set('Authorization', asReception())
-    .send({
-      patientId,
-      doctorId,
-      reason,
-    })
+    .send(payload)
     .expect(201);
 
   return res.body as { visitId: string; visitDate: string; patientId: string };
@@ -287,5 +297,37 @@ describe('Daily Reports API', () => {
       .expect(400);
 
     expect(res.body.error).toBe('VALIDATION_ERROR');
+  });
+
+  it('aggregates daily patient summary by visit tags', async () => {
+    const date = '2030-01-03';
+    await clearVisitsForDate(date);
+
+    const p1 = await createPatient('Tagged New', '+919999001001');
+    const v1 = await createVisit(p1, 'DOCTOR#TAGS', 'New visit', 'N');
+
+    const p2 = await createPatient('Tagged Followup', '+919999001002');
+    const v2 = await createVisit(p2, 'DOCTOR#TAGS', 'Follow-up visit', 'F');
+
+    const p3 = await createPatient('Tagged Zero', '+919999001003');
+    const v3 = await createVisit(p3, 'DOCTOR#TAGS', 'Zero billed visit', 'Z');
+
+    await setVisitDateAndBilling(v1.visitId, v1.patientId, date);
+    await setVisitDateAndBilling(v2.visitId, v2.patientId, date);
+    await setVisitDateAndBilling(v3.visitId, v3.patientId, date);
+
+    const res = await request(app)
+      .get('/reports/daily/patients')
+      .set('Authorization', asAdmin())
+      .query({ date })
+      .expect(200);
+
+    expect(res.body).toEqual({
+      date,
+      newPatients: 1,
+      followupPatients: 1,
+      zeroBilledVisits: 1,
+      totalPatients: 3,
+    });
   });
 });

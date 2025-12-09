@@ -2,8 +2,11 @@ import { z } from 'zod';
 import { Role, UserId } from './user';
 
 export const LoginRequest = z.object({
-  email: z.email(),
-  password: z.string().min(8).max(128),
+  email: z.string().email('Please enter a valid email address'),
+  password: z
+    .string()
+    .min(8, 'Password must be at least 8 characters')
+    .max(128, 'Password must be at most 128 characters'),
 });
 export type LoginRequest = z.infer<typeof LoginRequest>;
 

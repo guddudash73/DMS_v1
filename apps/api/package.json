@@ -11,7 +11,7 @@
     "lint": "eslint \"src/**/*.ts\"",
     "test": "vitest run --reporter=default",
     "clean": "rimraf dist || rm -rf dist",
-    "seed:test-users": "tsx scripts/seed-test-users.ts"
+    "seed:test-users": "tsx src/scripts/seed-test-users.ts"
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.946.0",

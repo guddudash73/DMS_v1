@@ -18,6 +18,7 @@ import { authMiddleware, requireRole } from './middlewares/auth';
 import { genericSensitiveRateLimiter } from './middlewares/rateLimit';
 import { logInfo } from './lib/logger';
 import { errorHandler } from './middlewares/errorHandler';
+import meRouter from './routes/me';
 
 const env = parseEnv(process.env);
 
@@ -26,16 +27,17 @@ export const createApp = () => {
 
   app.set('trust proxy', 1);
 
-  app.use(express.json({ limit: '1mb' }));
-  app.use(cookieParser());
   app.use(
     cors({
       origin: env.CORS_ORIGIN ?? 'http://localhost:3000',
       methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
-      credentials: false,
+      credentials: true,
     }),
   );
+
+  app.use(express.json({ limit: '1mb' }));
+  app.use(cookieParser());
 
   app.use((req, res, next) => {
     const headerReqId = req.header('x-request-id');
@@ -86,35 +88,35 @@ export const createApp = () => {
     '/reports',
     genericSensitiveRateLimiter,
     authMiddleware,
-    requireRole('ADMIN'),
+    requireRole('ADMIN', 'DOCTOR', 'RECEPTION'),
     reportsRoutes,
   );
   app.use(
     '/xrays',
     genericSensitiveRateLimiter,
     authMiddleware,
-    requireRole('DOCTOR', 'ADMIN'),
+    requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
     xrayRouter,
   );
   app.use(
     '/rx',
     genericSensitiveRateLimiter,
     authMiddleware,
-    requireRole('DOCTOR', 'ADMIN'),
+    requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
     rxRouter,
   );
   app.use(
     '/medicines',
     genericSensitiveRateLimiter,
     authMiddleware,
-    requireRole('DOCTOR', 'ADMIN'),
+    requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
     medicinesRouter,
   );
   app.use(
     '/rx-presets',
     genericSensitiveRateLimiter,
     authMiddleware,
-    requireRole('DOCTOR', 'ADMIN'),
+    requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
     rxPresetsRouter,
   );
 
@@ -122,7 +124,7 @@ export const createApp = () => {
     '/admin/doctors',
     genericSensitiveRateLimiter,
     authMiddleware,
-    requireRole('ADMIN'),
+    requireRole('ADMIN', 'RECEPTION'),
     adminDoctorsRouter,
   );
   app.use(
@@ -132,6 +134,8 @@ export const createApp = () => {
     requireRole('ADMIN'),
     adminRxPresetsRouter,
   );
+
+  app.use('/me', authMiddleware, meRouter);
 
   app.use(errorHandler);
 

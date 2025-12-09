@@ -11,7 +11,7 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
-import type { Visit, VisitCreate, VisitStatus, VisitQueueQuery } from '@dms/types';
+import type { Visit, VisitCreate, VisitStatus, VisitQueueQuery, VisitTag } from '@dms/types';
 
 export class InvalidStatusTransitionError extends Error {
   readonly code = 'INVALID_STATUS_TRANSITION' as const;
@@ -91,6 +91,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
     const visitId = randomUUID();
     const visitDate = toDateString(now);
     const status: VisitStatus = 'QUEUED';
+    const tag: VisitTag | undefined = input.tag;
 
     const base: Visit = {
       visitId,
@@ -101,6 +102,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
       visitDate,
       createdAt: now,
       updatedAt: now,
+      ...(tag ? { tag } : {}),
     };
 
     const patientItem = {

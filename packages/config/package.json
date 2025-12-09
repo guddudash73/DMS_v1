@@ -7,7 +7,7 @@
   "types": "./dist/env.d.ts",
   "exports": {
     ".": {
-      "types": "./env.d.ts",
+      "types": "./dist/env.d.ts",
       "require": "./dist/env.js",
       "import": "./dist/env.js",
       "default": "./dist/env.js"

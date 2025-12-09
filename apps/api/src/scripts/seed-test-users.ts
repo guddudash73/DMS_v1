@@ -1,16 +1,16 @@
 import path from 'node:path';
 import dotenv from 'dotenv';
 import bcrypt from 'bcrypt';
-import { userRepository } from '../repositories/userRepository';
-import { env } from '../config/env';
 
 dotenv.config({
-  path: path.resolve(process.cwd(), '.env'),
+  path: path.resolve(__dirname, '../../.env'),
 });
 
 if (!process.env.NODE_ENV) {
   process.env.NODE_ENV = 'development';
 }
+import { userRepository } from '../repositories/userRepository';
+import { env } from '../config/env';
 
 type Role = 'ADMIN' | 'DOCTOR' | 'RECEPTION';
 
