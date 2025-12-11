@@ -1,4 +1,3 @@
-// apps/api/src/routes/reports.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { DailyReportQuery, DailyPatientSummaryRangeQuery } from '@dms/types';
 import type { Patient, DailyPatientSummary } from '@dms/types';
@@ -19,11 +18,9 @@ const asyncHandler =
   (req: Request, res: Response, next: NextFunction) =>
     void fn(req, res, next).catch(next);
 
-// --- Helper: build a DailyPatientSummary for a single date ---
 async function buildDailyPatientSummary(date: string): Promise<DailyPatientSummary> {
   const visits = await visitRepository.listByDate(date);
 
-  // Reuse the "existing patients only" rule from the daily report
   const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
   const patientResults = await Promise.all(
     uniquePatientIds.map((id) => patientRepository.getById(id)),
@@ -50,7 +47,6 @@ async function buildDailyPatientSummary(date: string): Promise<DailyPatientSumma
         zeroBilledVisits++;
         break;
       default:
-      // visits created before tags existed – ignored for tag-based metrics
     }
   }
 
@@ -147,8 +143,6 @@ router.get(
     return res.status(200).json(summary);
   }),
 );
-
-// NEW: Daily patients time series – used by VisitorsRatioChart
 router.get(
   '/daily/patients/series',
   asyncHandler(async (req, res) => {
@@ -164,7 +158,6 @@ router.get(
     const start = new Date(startDate);
     const end = new Date(endDate);
 
-    // If invalid or reversed range, just return empty series
     if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
       return res.status(200).json({ points });
     }
@@ -172,7 +165,6 @@ router.get(
     const current = new Date(start);
     while (current <= end) {
       const dateStr = current.toISOString().slice(0, 10);
-      // reuse the same computation used by /daily/patients
       const summary = await buildDailyPatientSummary(dateStr);
       points.push(summary);
       current.setDate(current.getDate() + 1);

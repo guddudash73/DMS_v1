@@ -13,6 +13,8 @@ import type {
   AdminDoctorListItem,
   Visit,
 } from '@dms/types';
+import { createDoctorQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
+import type { RootState } from './index'; // adjust path as needed
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL && process.env.NEXT_PUBLIC_API_BASE_URL.length > 0
@@ -36,6 +38,8 @@ type AuthStateShape = {
     accessToken?: string;
   };
 };
+
+type RootStateShape = RootState & AuthStateShape;
 
 export const api = createApi({
   reducerPath: 'api',
@@ -163,6 +167,50 @@ export const api = createApi({
         },
       }),
       providesTags: (_result, _error, args) => [{ type: 'Doctors' as const, id: args.doctorId }],
+      async onCacheEntryAdded(arg, { cacheDataLoaded, cacheEntryRemoved, dispatch, getState }) {
+        await cacheDataLoaded;
+
+        const state = getState() as RootStateShape;
+        const token = state.auth?.accessToken;
+
+        if (!token) {
+          await cacheEntryRemoved;
+          return;
+        }
+
+        const socket = createDoctorQueueWebSocket({ token });
+
+        if (!socket) {
+          await cacheEntryRemoved;
+          return;
+        }
+
+        const handleMessage = (event: MessageEvent) => {
+          try {
+            const data: RealtimeMessage = JSON.parse(event.data);
+
+            if (data.type !== 'DoctorQueueUpdated') return;
+
+            const { doctorId, visitDate } = data.payload;
+
+            // Only refetch for this endpoint’s doctorId and date
+            if (doctorId !== arg.doctorId) return;
+            if (arg.date && arg.date !== visitDate) return;
+
+            // Simple and robust: invalidate tags so this query refetches once
+            dispatch(api.util.invalidateTags([{ type: 'Doctors', id: arg.doctorId }]));
+          } catch {
+            // ignore malformed messages
+          }
+        };
+
+        socket.addEventListener('message', handleMessage);
+
+        await cacheEntryRemoved;
+
+        socket.removeEventListener('message', handleMessage);
+        socket.close();
+      },
     }),
   }),
 });

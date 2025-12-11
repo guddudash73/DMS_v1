@@ -1,14 +1,5 @@
-import path from 'node:path';
-import dotenv from 'dotenv';
+import '../scripts/load-env';
 import bcrypt from 'bcrypt';
-
-dotenv.config({
-  path: path.resolve(__dirname, '../../.env'),
-});
-
-if (!process.env.NODE_ENV) {
-  process.env.NODE_ENV = 'development';
-}
 import { userRepository } from '../repositories/userRepository';
 import { env } from '../config/env';
 

@@ -1,4 +1,3 @@
-// apps/api/src/routes/me.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import type { ZodError } from 'zod';
 import { UserPreferences } from '@dms/types';
@@ -16,7 +15,6 @@ const asyncHandler =
   (req: Request, res: Response, next: NextFunction) =>
     void fn(req, res, next).catch(next);
 
-// GET /me/preferences  → returns current user's preferences (or {} if none)
 router.get(
   '/preferences',
   asyncHandler(async (req, res) => {
@@ -31,12 +29,10 @@ router.get(
 
     const prefs = await userPreferencesRepository.getByUserId(auth.userId);
 
-    // If no row yet, return an empty object (caller can treat as "no preferences set")
     return res.status(200).json(prefs ?? {});
   }),
 );
 
-// PUT /me/preferences  → upsert preferences for current user
 router.put(
   '/preferences',
   asyncHandler(async (req, res) => {

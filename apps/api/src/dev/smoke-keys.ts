@@ -34,7 +34,6 @@ function sample() {
 const out = sample();
 console.log(JSON.stringify(out, null, 2));
 
-// Minimal assertions
 const ok =
   out.patientPK.startsWith('PATIENT#') &&
   out.visitPK.startsWith('VISIT#') &&

@@ -1,4 +1,3 @@
-// apps/api/src/scripts/seed-dashboard-demo.ts
 import '../scripts/load-env';
 import bcrypt from 'bcrypt';
 import { randomUUID } from 'node:crypto';
@@ -10,14 +9,9 @@ import { userRepository } from '../repositories/userRepository';
 import { patientRepository } from '../repositories/patientRepository';
 import type { Visit, VisitStatus, VisitTag } from '@dms/types';
 
-// ---------- ENV ----------
-
-// ---------- DDB CLIENT ----------
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: { removeUndefinedValues: true },
 });
-
-// ---------- Helpers for visit keys (copied from visitRepository) ----------
 
 const toDateString = (timestampMs: number): string =>
   new Date(timestampMs).toISOString().slice(0, 10);
@@ -41,8 +35,6 @@ const buildGsi3Keys = (date: string, visitId: string) => ({
   GSI3PK: `DATE#${date}`,
   GSI3SK: `TYPE#VISIT#ID#${visitId}`,
 });
-
-// ---------- Demo data ----------
 
 type Gender = 'male' | 'female';
 
@@ -69,15 +61,13 @@ const demoPatients: DemoPatientSeed[] = [
   { name: 'Rohit Kulkarni', gender: 'male', phone: '9000000012' },
 ];
 
-// Each template line → one visit per doctor/day
 interface VisitTemplate {
-  idx: number; // patient index within that doctor's pool
+  idx: number;
   tag: VisitTag;
   status: VisitStatus;
   description: string;
 }
 
-// today (offset 0)
 const todayTemplates: VisitTemplate[] = [
   {
     idx: 0,
@@ -105,7 +95,6 @@ const todayTemplates: VisitTemplate[] = [
   },
 ];
 
-// yesterday (offset 1)
 const yesterdayTemplates: VisitTemplate[] = [
   {
     idx: 4,
@@ -133,14 +122,11 @@ const yesterdayTemplates: VisitTemplate[] = [
   },
 ];
 
-// which patient pool each doctor uses (indexes into demoPatients)
 const perDoctorPatients: Record<'d1' | 'd2' | 'd3', number[]> = {
-  d1: [0, 1, 4, 5, 8, 9], // Ankita, Priya, Ravi, Sanjay, Meera, Kiran
-  d2: [2, 3, 6, 7, 10, 11], // Neha, Asha, Arjun, Vikram, Swati, Rohit
-  d3: [1, 4, 7, 8, 9, 10], // mix
+  d1: [0, 1, 4, 5, 8, 9],
+  d2: [2, 3, 6, 7, 10, 11],
+  d3: [1, 4, 7, 8, 9, 10],
 };
-
-// ---------- Seeding helpers ----------
 
 async function seedDoctors() {
   console.log('\nCreating doctors...');
@@ -212,16 +198,15 @@ async function putVisitDirect(args: {
   status: VisitStatus;
   tag: VisitTag;
   description: string;
-  dayOffset: number; // 0 = today, 1 = yesterday
-  order: number; // to slightly offset timestamps
+  dayOffset: number;
+  order: number;
 }) {
   const { doctorId, patient, status, tag, description, dayOffset, order } = args;
 
-  // Base day 10:00 AM today and then subtract offset days
   const base = new Date();
   base.setHours(10, 0, 0, 0);
   const msPerDay = 24 * 60 * 60 * 1000;
-  const ts = base.getTime() - dayOffset * msPerDay + order * 60_000; // + N minutes
+  const ts = base.getTime() - dayOffset * msPerDay + order * 60_000;
 
   const visitDate = toDateString(ts);
   const visitId = randomUUID();
@@ -288,7 +273,6 @@ async function seedVisits(
   for (const [doctorId, idxPool] of Object.entries(doctorMap)) {
     console.log(`\n--- Doctor ${doctorId} ---`);
 
-    // TODAY (dayOffset 0)
     let order = 0;
     for (const tmpl of todayTemplates) {
       const patient = pickPatient(idxPool, tmpl.idx);
@@ -303,7 +287,6 @@ async function seedVisits(
       });
     }
 
-    // YESTERDAY (dayOffset 1)
     order = 0;
     for (const tmpl of yesterdayTemplates) {
       const patient = pickPatient(idxPool, tmpl.idx);
@@ -319,8 +302,6 @@ async function seedVisits(
     }
   }
 }
-
-// ---------- main ----------
 
 async function main() {
   console.log('Seeding dashboard demo data...');

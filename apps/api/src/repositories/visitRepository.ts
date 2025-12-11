@@ -81,8 +81,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
   private isValidTransition(from: VisitStatus, to: VisitStatus): boolean {
     if (from === 'QUEUED' && to === 'IN_PROGRESS') return true;
     if (from === 'IN_PROGRESS' && to === 'DONE') return true;
-    // add QUEUED → DONE if ever needed:
-    // if (from === 'QUEUED' && to === 'DONE') return true;
     return false;
   }
 
@@ -195,7 +193,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
     const canLock = Boolean(doctorId && visitDate);
 
     if (!canLock || (!enteringInProgress && !leavingInProgress)) {
-      // Simple path: no lock logic needed
       const { Attributes } = await docClient.send(
         new UpdateCommand({
           TableName: TABLE_NAME,
@@ -242,11 +239,9 @@ export class DynamoDBVisitRepository implements VisitRepository {
       return Attributes as Visit;
     }
 
-    // Lock-aware path: enforce at most one IN_PROGRESS visit per doctor/day.
     const lockKey = buildDoctorDayLockKey(doctorId, visitDate);
 
     if (enteringInProgress) {
-      // QUEUED → IN_PROGRESS with lock acquisition
       try {
         await docClient.send(
           new TransactWriteCommand({
@@ -295,13 +290,11 @@ export class DynamoDBVisitRepository implements VisitRepository {
           err instanceof TransactionCanceledException ||
           err instanceof ConditionalCheckFailedException
         ) {
-          // Either visit not QUEUED anymore, or doctor already has IN_PROGRESS lock
           throw new DoctorBusyError();
         }
         throw err;
       }
     } else if (leavingInProgress) {
-      // IN_PROGRESS → DONE (or other) with lock release
       try {
         await docClient.send(
           new TransactWriteCommand({
@@ -356,8 +349,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
         throw err;
       }
     }
-
-    // Update the patient visit record after successful transaction
     await docClient.send(
       new UpdateCommand({
         TableName: TABLE_NAME,

@@ -29,7 +29,6 @@ export default function QueueSummaryCard({ date }: QueueSummaryCardProps) {
     isError,
   } = useGetDailyReportQuery(effectiveDate, {
     skip: !canUseApi,
-    pollingInterval: 15000, // 15 seconds
   });
 
   const { completed, onChair, waiting, total } = useMemo(() => {

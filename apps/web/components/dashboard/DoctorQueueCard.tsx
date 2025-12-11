@@ -111,7 +111,6 @@ export default function DoctorQueueCard() {
     { doctorId: effectiveSelectedIds[0]!, date: todayIso },
     {
       skip: !canUseApi || !effectiveSelectedIds[0],
-      pollingInterval: 5000,
     },
   );
 
@@ -119,7 +118,6 @@ export default function DoctorQueueCard() {
     { doctorId: effectiveSelectedIds[1]!, date: todayIso },
     {
       skip: !canUseApi || !effectiveSelectedIds[1],
-      pollingInterval: 5000,
     },
   );
 
@@ -127,7 +125,6 @@ export default function DoctorQueueCard() {
     { doctorId: effectiveSelectedIds[2]!, date: todayIso },
     {
       skip: !canUseApi || !effectiveSelectedIds[2],
-      pollingInterval: 5000,
     },
   );
 

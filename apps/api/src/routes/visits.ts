@@ -37,6 +37,7 @@ import {
 import { logAudit, logError } from '../lib/logger';
 import { sendZodValidationError } from '../lib/validation';
 import { generateXrayThumbnail } from '../services/xrayThumbnails';
+import { publishDoctorQueueUpdated } from '../realtime/publisher';
 
 const router = express.Router();
 
@@ -82,6 +83,12 @@ router.post(
     }
 
     const visit = await visitRepository.create(parsed.data);
+
+    void publishDoctorQueueUpdated({
+      doctorId: visit.doctorId,
+      visitDate: visit.visitDate,
+    });
+
     return res.status(201).json(visit);
   }),
 );
@@ -99,7 +106,6 @@ router.get(
   }),
 );
 
-// Dedicated "take seat" operation: doctor promotes a QUEUED visit into IN_PROGRESS
 const TakeSeatBody = z.object({
   visitId: VisitId,
 });
@@ -185,6 +191,12 @@ router.patch(
           traceId: req.requestId,
         });
       }
+
+      void publishDoctorQueueUpdated({
+        doctorId: updated.doctorId,
+        visitDate: updated.visitDate,
+      });
+
       return res.status(200).json(updated);
     } catch (err) {
       if (err instanceof InvalidStatusTransitionError) {
@@ -466,7 +478,6 @@ router.post(
 
     let effectiveThumbKey = thumbKey;
 
-    // If caller did not supply a thumbKey, generate a thumbnail into a deterministic location.
     if (!effectiveThumbKey) {
       const autoThumbKey = buildXrayObjectKey(visit.visitId, xrayId, 'thumb', contentType);
 
@@ -478,7 +489,6 @@ router.post(
         });
         effectiveThumbKey = autoThumbKey;
       } catch (err) {
-        // Best-effort: log and continue with only the original image available.
         logError('xray_thumbnail_failed', {
           reqId: req.requestId,
           visitId: visit.visitId,
@@ -564,6 +574,14 @@ router.post(
             total: billing.total,
             hasFollowUp: !!parsedBody.data.followUp,
           },
+        });
+      }
+
+      const visit = await visitRepository.getById(id.data);
+      if (visit) {
+        void publishDoctorQueueUpdated({
+          doctorId: visit.doctorId,
+          visitDate: visit.visitDate,
         });
       }
 

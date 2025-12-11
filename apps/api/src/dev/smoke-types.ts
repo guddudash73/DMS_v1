@@ -1,4 +1,3 @@
-/* Temporary runtime schema smokes. Remove once Vitest lands on Day 6. */
 import process from 'node:process';
 import {
   Patient,

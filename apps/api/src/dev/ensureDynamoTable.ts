@@ -11,9 +11,25 @@ const client = new DynamoDBClient({
   endpoint: DYNAMO_ENDPOINT,
 });
 
+function isLocalEndpoint(endpoint: string | undefined): boolean {
+  if (!endpoint) return false;
+  return (
+    endpoint.includes('localhost') ||
+    endpoint.includes('127.0.0.1') ||
+    endpoint.includes('dynamodb-local')
+  );
+}
+
 export async function ensureDynamoTable() {
   if (!DDB_TABLE_NAME) {
     throw new Error('DDB_TABLE_NAME env var is required');
+  }
+
+  if (!isLocalEndpoint(DYNAMO_ENDPOINT)) {
+    console.log(
+      `ensureDynamoTable: skipping because DYNAMO_ENDPOINT is not local (${DYNAMO_ENDPOINT ?? 'undefined'})`,
+    );
+    return;
   }
 
   const tables = await client.send(new ListTablesCommand({}));

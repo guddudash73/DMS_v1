@@ -21,7 +21,6 @@ export const Visit = z.object({
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
   billingAmount: z.number().nonnegative().optional(),
-  // Optional so old rows remain valid; new visits should always set this.
   tag: VisitTag.optional(),
 });
 export type Visit = z.infer<typeof Visit>;
@@ -30,8 +29,6 @@ export const VisitCreate = z.object({
   patientId: PatientId,
   doctorId: UserId,
   reason: z.string().min(1).max(500),
-  // Optional in schema to avoid breaking existing callers;
-  // UI can still enforce this as required.
   tag: VisitTag.optional(),
 });
 export type VisitCreate = z.infer<typeof VisitCreate>;

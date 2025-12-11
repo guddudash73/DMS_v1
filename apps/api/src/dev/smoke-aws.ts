@@ -1,4 +1,3 @@
-/* Verify AWS emulator connectivity: DynamoDB Local + LocalStack S3 */
 import process from 'node:process';
 import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
@@ -12,27 +11,23 @@ import { AWS_REGION, DYNAMO_ENDPOINT, S3_ENDPOINT } from '../config/env';
 import { log } from '../lib/logger';
 
 async function main() {
-  // DynamoDB Local
   const ddb = new DynamoDBClient({
     region: AWS_REGION,
     endpoint: DYNAMO_ENDPOINT,
-    credentials: { accessKeyId: 'test', secretAccessKey: 'test' }, // emulators accept static creds
+    credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
   });
   const ddbDoc = DynamoDBDocumentClient.from(ddb);
 
-  // S3 via LocalStack
   const s3 = new S3Client({
     region: AWS_REGION,
     endpoint: S3_ENDPOINT,
-    forcePathStyle: true, // required for LocalStack
+    forcePathStyle: true,
     credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
   });
 
-  // DDB list tables (should succeed even without tables)
   const tables = await ddb.send(new ListTablesCommand({}));
   log('aws.smoke.ddb.listTables.ok', { tables });
 
-  // DDB put/get smoke (table may not exist; treat as optional)
   const tableName = 'dev-smoke';
 
   try {
@@ -56,7 +51,6 @@ async function main() {
     log('aws.smoke.ddb.get.skip', { tableName, reason: (e as Error).message });
   }
 
-  // S3 create bucket (idempotent)
   const Bucket = 'dms-dev-smoke';
   try {
     await s3.send(new CreateBucketCommand({ Bucket }));
@@ -69,7 +63,6 @@ async function main() {
     log('aws.smoke.s3.createBucket.exists', { Bucket });
   }
 
-  // S3 put/get
   await s3.send(
     new PutObjectCommand({ Bucket, Key: 'health.txt', Body: 'ok', ContentType: 'text/plain' }),
   );

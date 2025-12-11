@@ -84,9 +84,10 @@ function getErrorCodeAndMessage(err: unknown): { code: string; message: string }
 
 async function main() {
   const isLocalDynamo =
-    DYNAMO_ENDPOINT.includes('localhost') ||
-    DYNAMO_ENDPOINT.includes('127.0.0.1') ||
-    DYNAMO_ENDPOINT.includes('dynamodb-local');
+    !!DYNAMO_ENDPOINT &&
+    (DYNAMO_ENDPOINT.includes('localhost') ||
+      DYNAMO_ENDPOINT.includes('127.0.0.1') ||
+      DYNAMO_ENDPOINT.includes('dynamodb-local'));
 
   if (NODE_ENV !== 'production' && isLocalDynamo) {
     await ensureDynamoWithRetry();
