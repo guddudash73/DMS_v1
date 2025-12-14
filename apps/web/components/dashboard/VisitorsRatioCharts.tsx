@@ -30,17 +30,16 @@ const chartConfig = {
   },
   newPatients: {
     label: 'New',
-    color: '#4f8f84', // base greenish (#78bab0 family)
+    color: '#4f8f84',
   },
   followupPatients: {
     label: 'Followup',
-    color: '#8abab3', // slightly different shade
+    color: '#8abab3',
   },
 } satisfies ChartConfig;
 
 function getDateRange(range: TimeRange): { startDate: string; endDate: string } {
   const end = new Date();
-  // normalise to start-of-day for stability
   end.setHours(0, 0, 0, 0);
 
   let days = 90;
@@ -48,7 +47,6 @@ function getDateRange(range: TimeRange): { startDate: string; endDate: string } 
   if (range === '7d') days = 7;
 
   const start = new Date(end);
-  // include today → subtract (days - 1)
   start.setDate(start.getDate() - (days - 1));
 
   const toIso = (d: Date) => d.toISOString().slice(0, 10);
@@ -144,13 +142,11 @@ export default function VisitorsRatioChart() {
           >
             <AreaChart data={chartData}>
               <defs>
-                {/* New Patients gradient */}
                 <linearGradient id="fillNewPatients" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="var(--color-newPatients)" stopOpacity={0.85} />
                   <stop offset="95%" stopColor="var(--color-newPatients)" stopOpacity={0.1} />
                 </linearGradient>
 
-                {/* Followup Patients gradient */}
                 <linearGradient id="fillFollowupPatients" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="5%" stopColor="var(--color-followupPatients)" stopOpacity={0.9} />
                   <stop offset="95%" stopColor="var(--color-followupPatients)" stopOpacity={0.2} />
@@ -189,7 +185,6 @@ export default function VisitorsRatioChart() {
                 }
               />
 
-              {/* Stacked areas: New at bottom, Followup on top */}
               <Area
                 dataKey="newPatients"
                 type="natural"

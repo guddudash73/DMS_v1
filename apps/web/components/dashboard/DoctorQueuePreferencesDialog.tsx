@@ -1,4 +1,3 @@
-// apps/web/components/dashboard/DoctorQueuePreferencesDialog.tsx
 'use client';
 
 import * as React from 'react';
@@ -48,7 +47,6 @@ export default function DoctorQueuePreferencesDialog() {
 
   const [updatePrefs, { isLoading: saving }] = useUpdateMyPreferencesMutation();
 
-  // Initialise local selection from preferences or fallback to first 3 active doctors
   React.useEffect(() => {
     if (shouldSkipQueries) return;
     if (!doctors || (!prefs && prefsLoading)) return;
@@ -65,7 +63,6 @@ export default function DoctorQueuePreferencesDialog() {
     setLocalSelection(initialIds);
   }, [doctors, prefs, prefsLoading, shouldSkipQueries]);
 
-  // If user can't edit, don't render the button at all
   if (!canEditRole) return null;
 
   const toggleDoctor = (id: string) => {

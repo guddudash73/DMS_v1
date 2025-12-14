@@ -2,8 +2,12 @@
 
 import { useEffect, useRef } from 'react';
 import { useDispatch, useSelector } from 'react-redux';
-import type { RootState, AppDispatch } from '../store/types';
-import { restoreFromStorage, setUnauthenticated, type StoredAuthPayload } from '../store/authSlice';
+import type { RootState, AppDispatch } from '@/src/store';
+import {
+  restoreFromStorage,
+  setUnauthenticated,
+  type StoredAuthPayload,
+} from '@/src/store/authSlice';
 
 const STORAGE_KEY = 'dms_auth';
 
@@ -12,7 +16,6 @@ export function useAuth() {
   const auth = useSelector((state: RootState) => state.auth);
   const hasHydrated = useRef(false);
 
-  // 1. Hydrate from localStorage once
   useEffect(() => {
     if (hasHydrated.current) return;
     hasHydrated.current = true;
@@ -32,22 +35,17 @@ export function useAuth() {
     }
   }, [dispatch]);
 
-  // 2. Persist to localStorage when auth changes
   useEffect(() => {
     if (typeof window === 'undefined') return;
 
-    if (
-      auth.status === 'authenticated' &&
-      auth.userId &&
-      auth.role &&
-      auth.accessToken &&
-      auth.expiresAt
-    ) {
+    if (auth.status === 'authenticated' && auth.userId && auth.role) {
       const payload: StoredAuthPayload = {
         userId: auth.userId,
         role: auth.role,
         accessToken: auth.accessToken,
-        expiresAt: auth.expiresAt,
+        accessExpiresAt: auth.accessExpiresAt,
+        refreshToken: auth.refreshToken,
+        refreshExpiresAt: auth.refreshExpiresAt,
       };
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     } else if (auth.status === 'unauthenticated') {
@@ -58,7 +56,6 @@ export function useAuth() {
   return auth;
 }
 
-// For now this is just a convenience hook; middleware does the redirecting
 export function useRequireAuth() {
   return useAuth();
 }

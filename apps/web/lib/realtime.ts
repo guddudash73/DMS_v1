@@ -1,9 +1,8 @@
-// apps/web/src/lib/realtime.ts
 export type RealtimeMessage = {
   type: 'DoctorQueueUpdated';
   payload: {
     doctorId: string;
-    visitDate: string; // YYYY-MM-DD
+    visitDate: string;
   };
 };
 
@@ -15,12 +14,10 @@ export function createDoctorQueueWebSocket(params: {
 
   const base = process.env.NEXT_PUBLIC_WS_BASE_URL;
   if (!base) {
-    // eslint-disable-next-line no-console
     console.warn('[realtime] NEXT_PUBLIC_WS_BASE_URL not set; skipping WebSocket');
     return null;
   }
 
-  // Normalize the base so it ALWAYS ends with "/$default"
   const trimmed = base.replace(/\/+$/, '');
   const withStage = trimmed.endsWith('/$default') ? trimmed : `${trimmed}/$default`;
 

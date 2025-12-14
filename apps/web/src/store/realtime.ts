@@ -1,4 +1,3 @@
-// apps/web/src/store/realtime.ts
 'use client';
 
 import type { Visit } from '@dms/types';
@@ -11,7 +10,6 @@ type MessageHandler = (event: DoctorQueueEvent) => void;
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_BASE_URL;
 
-// key = doctorId|date
 const subscribers = new Map<string, Set<MessageHandler>>();
 
 let socket: WebSocket | null = null;
@@ -37,11 +35,11 @@ type IncomingMessage =
       date: string;
       event: DoctorQueueEvent;
     }
-  | Record<string, never>; // fallback
+  | Record<string, never>;
 
 function ensureSocket() {
-  if (typeof window === 'undefined') return; // SSR guard
-  if (!WS_URL) return; // no WS configured → no-op
+  if (typeof window === 'undefined') return;
+  if (!WS_URL) return;
 
   if (socket || isConnecting) return;
 
@@ -63,7 +61,6 @@ function ensureSocket() {
     };
 
     ws.onerror = () => {
-      // Silently ignore errors – HTTP polling still works.
       socket = null;
       isConnecting = false;
     };
@@ -91,11 +88,8 @@ export function subscribeToDoctorQueue(
   onEvent: (event: DoctorQueueEvent) => void,
 ): { unsubscribe: () => void } {
   if (typeof window === 'undefined' || !WS_URL) {
-    // No-op on server or when WS is not configured.
     return {
-      unsubscribe() {
-        // nothing
-      },
+      unsubscribe() {},
     };
   }
 
@@ -110,7 +104,6 @@ export function subscribeToDoctorQueue(
 
   set.add(onEvent);
 
-  // Send a subscribe message to backend when socket is ready.
   if (socket && socket.readyState === WebSocket.OPEN) {
     try {
       socket.send(
@@ -122,7 +115,7 @@ export function subscribeToDoctorQueue(
         }),
       );
     } catch {
-      // ignore – HTTP data still works
+      // ignore
     }
   }
 

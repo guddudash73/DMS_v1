@@ -19,6 +19,7 @@ import { genericSensitiveRateLimiter } from './middlewares/rateLimit';
 import { logInfo } from './lib/logger';
 import { errorHandler } from './middlewares/errorHandler';
 import meRouter from './routes/me';
+import followupsRouter from './routes/followups';
 
 const env = parseEnv(process.env);
 
@@ -136,6 +137,8 @@ export const createApp = () => {
   );
 
   app.use('/me', authMiddleware, meRouter);
+
+  app.use('/followups', followupsRouter);
 
   app.use(errorHandler);
 

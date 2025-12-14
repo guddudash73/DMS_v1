@@ -8,6 +8,12 @@ npm-debug.log*
 .yarn-integrity
 .eslintcache
 
+
+
+#extra
+infra/
+realtime.ts
+
 # ─────────────────────────────────────────────
 # Build output
 # ─────────────────────────────────────────────

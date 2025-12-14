@@ -1,0 +1,235 @@
+'use client';
+
+import * as React from 'react';
+import { toast } from 'react-toastify';
+import { useForm, type SubmitErrorHandler } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+
+import { VisitCreate as VisitCreateSchema, type VisitCreate, type VisitTag } from '@dms/types';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { useAuth } from '@/src/hooks/useAuth';
+import {
+  useGetDoctorsQuery,
+  useGetPatientByIdQuery,
+  useCreateVisitMutation,
+} from '@/src/store/api';
+
+type Props = {
+  patientId: string;
+  onClose: () => void;
+};
+
+export default function RegisterVisitModal({ patientId, onClose }: Props) {
+  const auth = useAuth();
+
+  const [mounted, setMounted] = React.useState(false);
+  const [closing, setClosing] = React.useState(false);
+
+  React.useEffect(() => {
+    const r = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(r);
+  }, []);
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') handleClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handleClose = () => {
+    if (closing) return;
+    setClosing(true);
+    window.setTimeout(() => onClose(), 180);
+  };
+
+  const { data: patient } = useGetPatientByIdQuery(patientId as any, {
+    skip: !patientId || auth.status !== 'authenticated',
+  });
+
+  const { data: doctors } = useGetDoctorsQuery(undefined, {
+    skip: auth.status !== 'authenticated',
+  });
+
+  const [createVisit, { isLoading }] = useCreateVisitMutation();
+
+  const {
+    register,
+    handleSubmit,
+    setValue,
+    watch,
+    formState: { errors, isSubmitting },
+  } = useForm<VisitCreate>({
+    resolver: zodResolver(VisitCreateSchema),
+    mode: 'onBlur',
+    defaultValues: {
+      patientId: patientId as any,
+      doctorId: (doctors?.[0]?.doctorId ?? '') as any,
+      reason: '',
+      tag: 'N',
+    },
+  });
+
+  React.useEffect(() => {
+    // ensure patientId is always set
+    setValue('patientId', patientId as any);
+  }, [patientId, setValue]);
+
+  React.useEffect(() => {
+    // set default doctor when doctors load
+    if (doctors?.length && !watch('doctorId')) {
+      setValue('doctorId', doctors[0].doctorId as any);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doctors]);
+
+  const selectedTag = watch('tag');
+
+  const onSubmit = async (values: VisitCreate) => {
+    try {
+      await createVisit(values).unwrap();
+      toast.success('Visit created successfully.');
+      handleClose();
+    } catch {
+      toast.error('Unable to create visit. Please try again.');
+    }
+  };
+
+  const onSubmitError: SubmitErrorHandler<VisitCreate> = (formErrors) => {
+    const messages = Object.values(formErrors)
+      .map((e) => e?.message)
+      .filter((m): m is string => Boolean(m));
+    toast.error(messages.length ? messages.join('\n') : 'Please check the fields.');
+  };
+
+  return (
+    <div
+      className={[
+        'absolute inset-0 z-30 flex items-center justify-center',
+        'bg-black/10 backdrop-blur-sm',
+        mounted && !closing ? 'opacity-100' : 'opacity-0',
+        'transition-opacity duration-200',
+      ].join(' ')}
+      onMouseDown={(e) => {
+        if (e.target === e.currentTarget) handleClose();
+      }}
+      role="dialog"
+      aria-modal="true"
+    >
+      <div
+        className={[
+          mounted && !closing ? 'scale-100 translate-y-0' : 'scale-[0.98] translate-y-1',
+          'transition-transform duration-200 ease-out',
+        ].join(' ')}
+      >
+        <Card className="min-w-120 max-w-xl rounded-2xl border-none bg-white shadow-lg gap-2">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-xl font-semibold text-gray-900">Register Checkup</CardTitle>
+          </CardHeader>
+
+          <CardContent className="pt-0">
+            <form
+              className="grid gap-6"
+              onSubmit={handleSubmit(onSubmit, onSubmitError)}
+              noValidate
+            >
+              {/* Read-only summary */}
+              <div className="grid gap-2 text-sm text-gray-800">
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500">Name</span>
+                  <span className="font-medium">{patient?.name ?? '—'}</span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500">Regd. Date</span>
+                  <span className="font-medium">
+                    {patient?.createdAt
+                      ? new Date(patient.createdAt).toLocaleDateString('en-GB')
+                      : '—'}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-gray-500">Contact No</span>
+                  <span className="font-medium">{patient?.phone ?? '—'}</span>
+                </div>
+              </div>
+
+              {/* Doctor */}
+              <div>
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-gray-800">Doctor</label>
+                  <select
+                    className={`h-10 w-full rounded-xl border bg-white px-3 text-sm ${
+                      errors.doctorId
+                        ? 'border-red-500 focus-visible:ring-red-500'
+                        : 'border-gray-200 focus-visible:ring-gray-300'
+                    }`}
+                    {...register('doctorId')}
+                  >
+                    {(doctors ?? []).map((d) => (
+                      <option key={d.doctorId} value={d.doctorId}>
+                        {d.fullName || d.displayName || d.doctorId}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="h-3 text-xs">&nbsp;</p>
+                </div>
+
+                {/* Reason */}
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-gray-800">Reason</label>
+                  <Input
+                    placeholder="Enter the reason for this Visit"
+                    className={`h-10 rounded-xl text-sm ${
+                      errors.reason
+                        ? 'border-red-500 focus-visible:ring-red-500'
+                        : 'border-gray-200 focus-visible:ring-gray-300'
+                    }`}
+                    {...register('reason')}
+                  />
+                  <p className="h-3 text-xs">&nbsp;</p>
+                </div>
+              </div>
+
+              {/* Tag */}
+              <div className="flex items-center justify-end gap-4 pb-2">
+                {(['N', 'F', 'Z'] as VisitTag[]).map((t) => (
+                  <label key={t} className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="radio"
+                      value={t}
+                      checked={selectedTag === t}
+                      onChange={() => setValue('tag', t)}
+                    />
+                    {t}
+                  </label>
+                ))}
+              </div>
+
+              <div className="mt-2 flex justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="h-10 rounded-xl px-4 text-sm"
+                  onClick={handleClose}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  disabled={isSubmitting || isLoading}
+                  className="h-10 rounded-xl bg-black px-6 text-sm font-medium text-white hover:bg-black/90"
+                >
+                  {isSubmitting || isLoading ? 'Creating…' : 'Create Visit'}
+                </Button>
+              </div>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}

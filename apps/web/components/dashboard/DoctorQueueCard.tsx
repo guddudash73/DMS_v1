@@ -1,4 +1,3 @@
-// apps/web/components/dashboard/DoctorQueueCard.tsx
 'use client';
 
 import * as React from 'react';
@@ -42,19 +41,15 @@ const getVisitLabel = (visit: Visit): string => visit.reason || `Patient: ${visi
 
 const PlaceholderBlock = () => (
   <>
-    {/* DONE placeholder */}
     <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
       No visits done yet.
     </div>
-    {/* IN_PROGRESS placeholder */}
     <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
       No on-going visits.
     </div>
-    {/* QUEUED #1 placeholder */}
     <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
       No waiting visits.
     </div>
-    {/* QUEUED #2 placeholder */}
     <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
       No waiting visits.
     </div>
@@ -79,7 +74,6 @@ export default function DoctorQueueCard() {
 
   const loadingPrefs = doctorsLoading || prefsLoading || prefsFetching;
 
-  // Preferences shape: { dashboard?: { selectedDoctorIds: string[] } }
   const selectedIdsFromPrefs =
     (prefs as UserPreferences | undefined)?.dashboard?.selectedDoctorIds ?? [];
 
@@ -103,10 +97,8 @@ export default function DoctorQueueCard() {
     });
   }, [effectiveSelectedIds, doctors]);
 
-  // Today in YYYY-MM-DD
   const todayIso = React.useMemo(() => new Date().toISOString().slice(0, 10), []);
 
-  // Queue hooks (one per potential doctor column)
   const queue1 = useGetDoctorQueueQuery(
     { doctorId: effectiveSelectedIds[0]!, date: todayIso },
     {
@@ -142,7 +134,6 @@ export default function DoctorQueueCard() {
           const queueHook = queues[idx];
           const isInitialLoading = loadingPrefs || queueHook?.isLoading;
 
-          // If no doctor selected for this column, we *always* show the placeholders
           if (!col.doctor || !canUseApi) {
             return (
               <div key={`col-${idx}`}>
@@ -164,7 +155,6 @@ export default function DoctorQueueCard() {
 
           const visits: Visit[] = queueHook?.data?.items ?? [];
 
-          // Most recent DONE (list is oldest→newest so reverse to get latest DONE)
           const doneVisit = [...visits].reverse().find((v) => v.status === 'DONE');
           const inProgressVisit = visits.find((v) => v.status === 'IN_PROGRESS');
           const queuedVisits = visits.filter((v) => v.status === 'QUEUED').slice(0, 2);
@@ -182,7 +172,6 @@ export default function DoctorQueueCard() {
                   </div>
                 ) : (
                   <>
-                    {/* 1) Recently DONE */}
                     {doneVisit ? (
                       <DoctorQueueItem label={getVisitLabel(doneVisit)} status={doneVisit.status} />
                     ) : (
@@ -191,7 +180,6 @@ export default function DoctorQueueCard() {
                       </div>
                     )}
 
-                    {/* 2) IN_PROGRESS */}
                     {inProgressVisit ? (
                       <DoctorQueueItem
                         label={getVisitLabel(inProgressVisit)}
@@ -203,7 +191,6 @@ export default function DoctorQueueCard() {
                       </div>
                     )}
 
-                    {/* 3) Waiting visit #1 */}
                     {queuedVisits[0] ? (
                       <DoctorQueueItem
                         label={getVisitLabel(queuedVisits[0])}
@@ -214,8 +201,6 @@ export default function DoctorQueueCard() {
                         No waiting visits.
                       </div>
                     )}
-
-                    {/* 4) Waiting visit #2 */}
                     {queuedVisits[1] ? (
                       <DoctorQueueItem
                         label={getVisitLabel(queuedVisits[1])}

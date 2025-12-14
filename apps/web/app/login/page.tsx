@@ -38,23 +38,26 @@ export default function LoginPage() {
 
     try {
       const response = (await login(values).unwrap()) as LoginResponse;
-      dispatch(setCredentials(response));
 
-      const expiresAt = Date.now() + response.tokens.expiresInSec * 1000;
+      dispatch(setCredentials(response));
+      const refreshMaxAgeSec = response.tokens.refreshExpiresInSec;
 
       await fetch(`${window.location.origin}/api/session`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        credentials: 'include', // ← VERY IMPORTANT
-        body: JSON.stringify({ expiresAt }),
+        credentials: 'include',
+        body: JSON.stringify({ maxAgeSec: refreshMaxAgeSec }),
       });
 
       toast.success('Logged in successfully.');
-      router.push('/');
+
+      if (response.role === 'RECEPTION') router.push('/');
+      else if (response.role === 'DOCTOR') router.push('/doctor');
+      else if (response.role === 'ADMIN') router.push('/admin');
+      else router.push('/');
     } catch (err) {
       const msg = 'Invalid credentials.';
-      // Remove this
-      console.log(err);
+      console.error(err);
       dispatch(setAuthError(msg));
       toast.error(msg);
     }
@@ -66,14 +69,12 @@ export default function LoginPage() {
       .filter((m): m is string => Boolean(m));
 
     const msg = messages.length > 0 ? messages.join('\n') : 'Please check the highlighted fields.';
-
     toast.error(msg);
   };
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f5f7f8] px-3 py-8 md:px-4">
       <div className="relative flex w-full max-w-4xl md:max-h-[560px] flex-col overflow-hidden rounded-2xl bg-white shadow-sm md:flex-row">
-        {/* Left: form side */}
         <Card className="border-0 w-full md:w-[45%] rounded-none flex-col">
           <CardHeader className="px-8 pt-8 md:px-12 md:pt-10">
             <div className="mb-2 flex items-center gap-3">
@@ -100,7 +101,6 @@ export default function LoginPage() {
 
           <CardContent className="px-8 pb-8 pt-0 md:px-12 md:pb-10">
             <form className="space-y-3" onSubmit={handleSubmit(onSubmit, onSubmitError)} noValidate>
-              {/* Email */}
               <div className="space-y-1">
                 <Label htmlFor="email" className="text-sm font-medium text-gray-800">
                   Email
@@ -117,11 +117,9 @@ export default function LoginPage() {
                   }`}
                   {...register('email')}
                 />
-                {/* keep empty line to avoid layout jump */}
                 <p className="h-2 text-xs text-red-600">&nbsp;</p>
               </div>
 
-              {/* Password */}
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <Label htmlFor="password" className="text-sm font-medium text-gray-800">
@@ -149,7 +147,6 @@ export default function LoginPage() {
                 <p className="h-2 text-xs text-red-600">&nbsp;</p>
               </div>
 
-              {/* Submit */}
               <Button
                 type="submit"
                 disabled={isSubmitting || isLoading}
@@ -161,7 +158,6 @@ export default function LoginPage() {
           </CardContent>
         </Card>
 
-        {/* Right: hero image */}
         <div className="relative hidden w-[55%] md:block">
           <Image
             src="/login-hero.jpg"
@@ -173,7 +169,7 @@ export default function LoginPage() {
           />
         </div>
       </div>
-      {/* Bottom-right footer text */}
+
       <p className="pointer-events-none absolute bottom-3 right-4 hidden text-[10px] text-gray-400 md:block">
         Designed and Developed by @TCPL Group
       </p>

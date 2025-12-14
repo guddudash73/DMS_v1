@@ -33,9 +33,10 @@ import {
   useGetDailyPatientSummaryQuery,
 } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
+import NewPatientModal from '@/components/patients/NewPatientModal';
+import RegisterVisitModal from '@/components/visits/RegisterVisitModal';
 
 type ClinicShellProps = {
-  title: string;
   children: React.ReactNode;
 };
 
@@ -60,7 +61,6 @@ const mainNav: NavItem[] = [
 
 const moreNav: NavItem[] = [{ label: 'Notifications', href: '/notifications', icon: Bell }];
 
-// Small helper for 1st/2nd/3rd/4th, etc.
 const getDaySuffix = (day: number) => {
   if (day >= 11 && day <= 13) return 'th';
   switch (day % 10) {
@@ -92,21 +92,39 @@ const asErrorResponse = (data: unknown): ErrorResponse | null => {
   return null;
 };
 
-export default function ClinicShell({ title, children }: ClinicShellProps) {
+const deriveTitleFromPath = (pathname: string): string => {
+  if (pathname === '/') return 'Dashboard';
+
+  // NOTE: we still derive title if user navigates, but in your setup New Patient opens modal.
+  if (pathname.startsWith('/patients/new')) return 'New Patient';
+  if (pathname.startsWith('/patients/')) return 'Patient';
+  if (pathname.startsWith('/patients')) return 'Patients';
+
+  if (pathname.startsWith('/reports/daily')) return 'Daily Report';
+  if (pathname.startsWith('/reminders')) return 'WBC/Reminder Call';
+  if (pathname.startsWith('/documents')) return 'Documents';
+  if (pathname.startsWith('/notifications')) return 'Notifications';
+
+  return 'Dashboard';
+};
+
+export default function ClinicShell({ children }: ClinicShellProps) {
   const pathname = usePathname();
   const router = useRouter();
   const dispatch = useDispatch();
 
   const auth = useAuth();
 
-  // ---- LIVE DATE/TIME STATE ----
+  const [isNewPatientOpen, setIsNewPatientOpen] = useState(false);
+  const [visitModalPatientId, setVisitModalPatientId] = useState<string | null>(null);
+
+  const pageTitle = deriveTitleFromPath(pathname);
+
+  // ---- LIVE DATE/TIME ----
   const [now, setNow] = useState<Date>(() => new Date());
 
   useEffect(() => {
-    const id = window.setInterval(() => {
-      setNow(new Date());
-    }, 1000);
-
+    const id = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -123,17 +141,15 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
     hour12: true,
   });
 
-  // Today in YYYY-MM-DD for backend reports
   const todayIso = now.toISOString().slice(0, 10);
 
-  // ---- DASHBOARD PATIENT SUMMARY (BACKEND ROUTE) ----
+  // ---- SUMMARY ----
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
   const { data: patientSummary, isLoading: summaryLoading } = useGetDailyPatientSummaryQuery(
     todayIso,
     {
       skip: !canUseApi,
-      // keep this reasonably fresh – 15s is plenty for these counters
       pollingInterval: 15000,
     },
   );
@@ -143,22 +159,16 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
   const totalPatients = patientSummary?.totalPatients;
 
   const isActive = (href: string) => {
-    // Dashboard should be active on exact "/"
     if (href === '/' && pathname === '/') return true;
     return href !== '/' && pathname.startsWith(href);
   };
 
   const handleLogout = async () => {
     try {
-      // 1) Clear Redux state
       dispatch(setUnauthenticated());
 
-      // 2) Clear localStorage (match STORAGE_KEY in useAuth)
-      if (typeof window !== 'undefined') {
-        window.localStorage.removeItem('dms_auth');
-      }
+      if (typeof window !== 'undefined') window.localStorage.removeItem('dms_auth');
 
-      // 3) Clear httpOnly session cookie on the server
       await fetch('/api/session', { method: 'DELETE' });
 
       toast.success('Logged out successfully.');
@@ -169,7 +179,7 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
     }
   };
 
-  // ---- PATIENT SEARCH STATE (GLOBAL SEARCH BOX) ----
+  // ---- GLOBAL PATIENT SEARCH ----
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -181,12 +191,10 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
   const resultsContainerRef = useRef<HTMLDivElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
-  // Debounce input a bit (300ms)
   useEffect(() => {
     const handle = window.setTimeout(() => {
       const trimmed = searchTerm.trim();
       setDebouncedTerm(trimmed);
-      // reset pagination + results whenever the term changes
       setCursor(undefined);
       setPatients([]);
       setHasMore(false);
@@ -203,18 +211,10 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
     isFetching: searchFetching,
     error: searchRawError,
   } = useGetPatientsQuery(
-    {
-      query: debouncedTerm || undefined,
-      limit: 10,
-      cursor,
-    },
-    {
-      // don’t hit the API if there’s no term OR we know user is unauthenticated
-      skip: !debouncedTerm || auth.status === 'unauthenticated',
-    },
+    { query: debouncedTerm || undefined, limit: 10, cursor },
+    { skip: !debouncedTerm || auth.status === 'unauthenticated' },
   );
 
-  // Accumulate pages of patients
   useEffect(() => {
     if (!searchData) return;
 
@@ -236,7 +236,6 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
     return maybe?.message ?? 'Unable to search patients.';
   })();
 
-  // Infinite scroll inside dropdown
   useEffect(() => {
     if (!resultsContainerRef.current || !sentinelRef.current) return;
 
@@ -249,19 +248,14 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
         if (!entry.isIntersecting) return;
         if (!hasMore || !nextCursor) return;
         if (searchLoading || searchFetching) return;
-        if (cursor === nextCursor) return; // avoid loops
+        if (cursor === nextCursor) return;
 
         setCursor(nextCursor);
       },
-      {
-        root,
-        rootMargin: '0px',
-        threshold: 1.0,
-      },
+      { root, rootMargin: '0px', threshold: 1.0 },
     );
 
     observer.observe(sentinel);
-
     return () => {
       observer.unobserve(sentinel);
       observer.disconnect();
@@ -283,42 +277,41 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
     router.push(`/patients/${patientId}`);
   };
 
-  const goToCreateVisit = (patientId: string) => {
+  const openVisitModal = (patientId: string) => {
     resetSearch();
-    // Assumes you will/now have a create-visit page that accepts patientId
-    router.push(`/visits/new?patientId=${patientId}`);
+    setVisitModalPatientId(patientId);
   };
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (patients.length === 1) {
-      // Single result → create visit
-      goToCreateVisit(patients[0].patientId);
-    }
-    // if multiple, we just show the dropdown; user will click one
+    if (patients.length === 1) openVisitModal(patients[0].patientId);
   };
 
   const handleProfileClick = (e: MouseEvent<HTMLButtonElement>, patientId: string) => {
-    e.stopPropagation(); // don’t trigger the row’s create-visit handler
+    e.stopPropagation();
     goToPatientProfile(patientId);
   };
+
+  const isAnyModalOpen = isNewPatientOpen || Boolean(visitModalPatientId);
 
   return (
     <div className="flex h-screen bg-white">
       {/* Sidebar */}
-      <aside className="flex w-64 flex-col bg-white pb-5.5">
-        <div className="flex flex-col w-full items-center justify-center px-6 pt-6 pb-4">
+      <aside className="flex w-70 flex-col bg-white pb-5.5">
+        <div className="flex w-full flex-col items-center justify-center px-6 pb-4 pt-6">
           <div className="relative h-18 w-32">
             <Image
               src="/dashboard-logo.png"
               alt="Sarangi Dentistry"
-              fill
+              width={128}
+              height={48}
               className="object-contain"
               priority
+              unoptimized
             />
           </div>
-          {/* Date / small status area – dynamic now with icons */}
-          <div className="w-32 pb-4 text-xs text-gray-500 space-y-1">
+
+          <div className="w-32 space-y-1 pb-4 text-xs text-gray-500">
             <div className="flex items-center gap-1.5">
               <Calendar className="h-3.5 w-3.5" />
               <span>{dateLabel}</span>
@@ -340,11 +333,29 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
                 const Icon = item.icon;
                 const active = isActive(item.href);
 
+                if (item.href === '/patients/new') {
+                  return (
+                    <button
+                      key={item.href}
+                      type="button"
+                      onClick={() => setIsNewPatientOpen(true)}
+                      className={`group mb-2 flex w-[96%] cursor-pointer justify-start gap-3 rounded-xl px-3 py-2 text-sm font-semibold 2xl:w-[88%] ${
+                        active
+                          ? 'bg-black text-white hover:bg-black'
+                          : 'text-gray-700 hover:bg-gray-100'
+                      }`}
+                    >
+                      <Icon className="h-4 w-4" />
+                      <span>{item.label}</span>
+                    </button>
+                  );
+                }
+
                 return (
                   <Link key={item.href} href={item.href}>
                     <Button
                       variant={active ? 'default' : 'ghost'}
-                      className={`group mb-2 flex w-[96%] 2xl:w-[88%] cursor-pointer justify-start gap-3 rounded-xl px-3 py-2 text-sm ${
+                      className={`group mb-2 flex w-[96%] cursor-pointer justify-start gap-3 rounded-xl px-3 py-2 text-sm 2xl:w-[88%] ${
                         active
                           ? 'bg-black text-white hover:bg-black'
                           : 'text-gray-700 hover:bg-gray-100'
@@ -370,7 +381,7 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
                   <Link key={item.href} href={item.href}>
                     <Button
                       variant={active ? 'default' : 'ghost'}
-                      className={`group mb-2 flex w-[96%] 2xl:w-[88%] cursor-pointer justify-start gap-3 rounded-xl px-3 py-2 text-sm ${
+                      className={`group mb-2 flex w-[96%] cursor-pointer justify-start gap-3 rounded-xl px-3 py-2 text-sm 2xl:w-[88%] ${
                         active
                           ? 'bg-black text-white hover:bg-black'
                           : 'text-gray-700 hover:bg-gray-100'
@@ -379,7 +390,6 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
                       <Icon className="h-4 w-4" />
                       <span>{item.label}</span>
 
-                      {/* simple red dot for unread notifications */}
                       {item.label === 'Notifications' && (
                         <span className="ml-auto inline-flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[10px] font-semibold text-white">
                           1
@@ -393,9 +403,8 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
           </div>
         </nav>
 
-        {/* User card + logout */}
         <div className="mt-auto px-4">
-          <Card className="flex items-center justify-between rounded-2xl border px-3 py-2 shadow-none flex-row">
+          <Card className="flex flex-row items-center justify-between rounded-2xl border px-3 py-2 shadow-none">
             <div className="flex items-center gap-2">
               <Avatar className="h-8 w-8">
                 <AvatarFallback>G</AvatarFallback>
@@ -405,6 +414,7 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
                 <div className="text-[10px] text-gray-500">Front Desk</div>
               </div>
             </div>
+
             <Button
               onClick={handleLogout}
               variant="ghost"
@@ -417,17 +427,17 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
         </div>
       </aside>
 
-      {/* Main content area */}
-      <div className="flex h-full grow items-center justify-start pr-6">
+      {/* Main content */}
+      <div className="flex h-full grow items-center justify-start pr-6 min-w-auto lg:min-w-[84.4%]">
         <div className="flex h-[94%] flex-1 flex-col rounded-2xl bg-[#f1f3f5]">
-          {/* Top header bar */}
-          <header className="flex items-center gap-4 rounded-t-2xl border-b bg-[#f1f3f5] px-4 2xl:px-12 py-2 shadow-inner">
-            <h1 className="m4-8 text-2xl font-semibold text-gray-900">{title}</h1>
+          {/* Top header */}
+          <header className="flex items-center gap-4 rounded-t-2xl border-b bg-[#f1f3f5] px-4 py-2 shadow-inner 2xl:px-12">
+            <h1 className="m4-8 text-2xl font-semibold text-gray-900">{pageTitle}</h1>
 
             {/* Search */}
             <div className="flex flex-1 justify-center 2xl:px-12">
               <form
-                className="relative flex w-full max-w-2xl items-center gap-2 rounded-full border bg-white pl-2 pr-1 py-1"
+                className="relative flex w-full max-w-2xl items-center gap-2 rounded-full border bg-white py-1 pl-2 pr-1"
                 onSubmit={handleSearchSubmit}
               >
                 <Search className="text-gray-500" />
@@ -478,7 +488,7 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
                             <li
                               key={p.patientId}
                               className="cursor-pointer px-3 py-2 text-xs hover:bg-gray-50"
-                              onClick={() => goToCreateVisit(p.patientId)}
+                              onClick={() => openVisitModal(p.patientId)}
                             >
                               <div className="flex items-center justify-between gap-3">
                                 <div className="flex flex-col">
@@ -493,7 +503,6 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
                                   </div>
                                 </div>
 
-                                {/* Profile icon – click ONLY this to go to patient info */}
                                 <Button
                                   type="button"
                                   variant="ghost"
@@ -514,7 +523,6 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
                         <div className="px-3 py-1 text-[10px] text-gray-500">Loading more…</div>
                       )}
 
-                      {/* sentinel for infinite scroll */}
                       <div ref={sentinelRef} className="h-2 w-full" />
 
                       {!hasMore && !searchFetching && patients.length > 0 && (
@@ -528,7 +536,7 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
               </form>
             </div>
 
-            {/* Small summary block on the right */}
+            {/* Summary */}
             <div className="flex items-center gap-3 text-[11px] text-gray-700">
               <div className="flex h-12 w-34 flex-col items-center justify-center rounded-xl bg-gray-50 px-3">
                 <div className="flex w-full items-center justify-start gap-2 pl-0.5">
@@ -573,11 +581,36 @@ export default function ClinicShell({ title, children }: ClinicShellProps) {
           </header>
 
           {/* Content */}
-          <main className="flex-1 overflow-y-auto px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10 dms-scroll">
-            <div className="min-h-full rounded-3xl bg-[#f1f3f5]">{children}</div>
+          <main
+            className={[
+              'flex-1 overflow-y-auto dms-scroll ',
+              // Optional: block scrolling the whole content container while modal open
+              isAnyModalOpen ? 'overflow-hidden' : '',
+            ].join(' ')}
+          >
+            {/* ✅ This is the overlay root: relative */}
+            <div
+              className={[
+                'relative min-h-full rounded-b-2xl bg-[#f1f3f5]  ',
+                isAnyModalOpen ? 'overflow-hidden' : '',
+              ].join(' ')}
+            >
+              {children}
+
+              {/* ✅ Content-area overlays */}
+              {isNewPatientOpen && <NewPatientModal onClose={() => setIsNewPatientOpen(false)} />}
+
+              {visitModalPatientId && (
+                <RegisterVisitModal
+                  patientId={visitModalPatientId}
+                  onClose={() => setVisitModalPatientId(null)}
+                />
+              )}
+            </div>
           </main>
         </div>
       </div>
+
       <footer className="absolute bottom-0 right-0 px-8 pb-1 text-[10px] text-gray-400">
         Designed and Developed by @TCPL Group
       </footer>
