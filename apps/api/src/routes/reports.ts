@@ -1,9 +1,23 @@
+// apps/api/src/routes/reports.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
-import { DailyReportQuery, DailyPatientSummaryRangeQuery } from '@dms/types';
-import type { Patient, DailyPatientSummary } from '@dms/types';
+import {
+  DailyReportQuery,
+  DailyPatientSummaryRangeQuery,
+  DailyVisitsBreakdownQuery,
+  DoctorDailyVisitsBreakdownQuery,
+  DoctorRecentVisitsQuery,
+} from '@dms/types';
+import type {
+  Patient,
+  DailyPatientSummary,
+  DailyVisitsBreakdownResponse,
+  DoctorDailyVisitsBreakdownResponse,
+  DoctorRecentVisitsResponse,
+} from '@dms/types';
 import { visitRepository } from '../repositories/visitRepository';
 import { patientRepository } from '../repositories/patientRepository';
 import { billingRepository } from '../repositories/billingRepository';
+import { userRepository } from '../repositories/userRepository';
 import { type ZodError } from 'zod';
 import { sendZodValidationError } from '../lib/validation';
 
@@ -143,6 +157,7 @@ router.get(
     return res.status(200).json(summary);
   }),
 );
+
 router.get(
   '/daily/patients/series',
   asyncHandler(async (req, res) => {
@@ -171,6 +186,241 @@ router.get(
     }
 
     return res.status(200).json({ points });
+  }),
+);
+
+router.get(
+  '/daily/doctor/patients/series',
+  asyncHandler(async (req, res) => {
+    const parsed = DailyPatientSummaryRangeQuery.safeParse(req.query);
+    if (!parsed.success) {
+      return handleValidationError(req, res, parsed.error.issues);
+    }
+
+    const doctorId = req.auth?.userId;
+    if (!doctorId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { startDate, endDate } = parsed.data;
+
+    const points: DailyPatientSummary[] = [];
+
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+      return res.status(200).json({ points });
+    }
+
+    const current = new Date(start);
+    while (current <= end) {
+      const dateStr = current.toISOString().slice(0, 10);
+
+      // All visits for THIS doctor on THIS day
+      const visits = await visitRepository.getDoctorQueue({ doctorId, date: dateStr });
+
+      let newPatients = 0;
+      let followupPatients = 0;
+      let zeroBilledVisits = 0;
+
+      for (const v of visits) {
+        if (v.tag === 'N') newPatients++;
+        else if (v.tag === 'F') followupPatients++;
+        else if (v.tag === 'Z') zeroBilledVisits++;
+      }
+
+      const totalPatients = newPatients + followupPatients + zeroBilledVisits;
+
+      points.push({
+        date: dateStr,
+        newPatients,
+        followupPatients,
+        zeroBilledVisits,
+        totalPatients,
+      });
+
+      current.setDate(current.getDate() + 1);
+    }
+
+    return res.status(200).json({ points });
+  }),
+);
+
+/**
+ * ✅ Doctor panel: daily breakdown (logged-in doctor only)
+ * GET /reports/daily/doctor/visits-breakdown?date=YYYY-MM-DD
+ */
+router.get(
+  '/daily/doctor/visits-breakdown',
+  asyncHandler(async (req, res) => {
+    const parsed = DoctorDailyVisitsBreakdownQuery.safeParse(req.query);
+    if (!parsed.success) {
+      return handleValidationError(req, res, parsed.error.issues);
+    }
+
+    const doctorId = req.auth?.userId;
+    if (!doctorId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const { date } = parsed.data;
+
+    const doctorUser = await userRepository.getById(doctorId);
+    const doctorName =
+      doctorUser?.displayName || doctorUser?.email || `Doctor (${doctorId.slice(0, 6)})`;
+
+    const visits = await visitRepository.getDoctorQueue({ doctorId, date });
+
+    if (!visits.length) {
+      const empty: DoctorDailyVisitsBreakdownResponse = {
+        date,
+        doctorId,
+        doctorName,
+        totalVisits: 0,
+        items: [],
+      };
+      return res.status(200).json(empty);
+    }
+
+    // Patients lookup
+    const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
+    const patientResults = await Promise.all(
+      uniquePatientIds.map((id) => patientRepository.getById(id)),
+    );
+    const patientMap = new Map(patientResults.filter(Boolean).map((p) => [p!.patientId, p!]));
+
+    const items = visits
+      .map((v) => {
+        const p = patientMap.get(v.patientId);
+        if (!p) return null;
+
+        return {
+          visitId: v.visitId,
+          visitDate: v.visitDate,
+          status: v.status,
+          tag: v.tag,
+          reason: v.reason,
+          billingAmount: v.billingAmount,
+          createdAt: v.createdAt,
+          updatedAt: v.updatedAt,
+          patientName: p.name,
+          patientPhone: (p as any).phone,
+          patientGender: (p as any).gender,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+      .sort((a, b) => a.createdAt - b.createdAt);
+
+    const payload: DoctorDailyVisitsBreakdownResponse = {
+      date,
+      doctorId,
+      doctorName,
+      totalVisits: items.length,
+      items,
+    };
+
+    return res.status(200).json(payload);
+  }),
+);
+
+/**
+ * Reception panel:
+ * given a date, return all visits for that date grouped by doctor,
+ * including doctor displayName and patient details.
+ */
+router.get(
+  '/daily/visits-breakdown',
+  asyncHandler(async (req, res) => {
+    const parsed = DailyVisitsBreakdownQuery.safeParse(req.query);
+    if (!parsed.success) {
+      return handleValidationError(req, res, parsed.error.issues);
+    }
+
+    const { date } = parsed.data;
+
+    const visits = await visitRepository.listByDate(date);
+
+    if (!visits.length) {
+      const empty: DailyVisitsBreakdownResponse = { date, doctors: [], totalVisits: 0 };
+      return res.status(200).json(empty);
+    }
+
+    // Patients lookup
+    const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
+    const patientResults = await Promise.all(
+      uniquePatientIds.map((id) => patientRepository.getById(id)),
+    );
+    const patientMap = new Map(patientResults.filter(Boolean).map((p) => [p!.patientId, p!]));
+
+    // Doctors lookup via USER table (displayName lives there)
+    const uniqueDoctorIds = Array.from(new Set(visits.map((v) => v.doctorId)));
+    const doctorUsers = await Promise.all(uniqueDoctorIds.map((id) => userRepository.getById(id)));
+
+    const doctorNameMap = new Map<string, string>();
+    for (let i = 0; i < uniqueDoctorIds.length; i++) {
+      const id = uniqueDoctorIds[i]!;
+      const u = doctorUsers[i];
+      const name = u?.displayName || u?.email || `Doctor (${id.slice(0, 6)})`;
+      doctorNameMap.set(id, name);
+    }
+
+    // Normalize & filter (skip visits where patient record not found)
+    const normalized = visits
+      .map((v) => {
+        const p = patientMap.get(v.patientId);
+        if (!p) return null;
+
+        const doctorName = doctorNameMap.get(v.doctorId) ?? `Doctor (${v.doctorId.slice(0, 6)})`;
+
+        return {
+          visitId: v.visitId,
+          visitDate: v.visitDate,
+          status: v.status,
+          tag: v.tag,
+          reason: v.reason,
+          billingAmount: v.billingAmount,
+          createdAt: v.createdAt,
+          updatedAt: v.updatedAt,
+
+          patientId: p.patientId,
+          patientName: p.name,
+          patientPhone: (p as any).phone,
+          patientGender: (p as any).gender,
+
+          doctorId: v.doctorId,
+          doctorName,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null);
+
+    // Group by doctor
+    const byDoctor = new Map<string, typeof normalized>();
+    for (const item of normalized) {
+      const arr = byDoctor.get(item.doctorId) ?? [];
+      arr.push(item);
+      byDoctor.set(item.doctorId, arr);
+    }
+
+    const doctors = Array.from(byDoctor.entries()).map(([doctorId, items]) => {
+      const doctorName = doctorNameMap.get(doctorId) ?? `Doctor (${doctorId.slice(0, 6)})`;
+      return {
+        doctorId,
+        doctorName,
+        total: items.length,
+        items: items.sort((a, b) => a.createdAt - b.createdAt),
+      };
+    });
+
+    doctors.sort((a, b) => b.total - a.total);
+
+    const payload: DailyVisitsBreakdownResponse = {
+      date,
+      doctors,
+      totalVisits: normalized.length,
+    };
+
+    return res.status(200).json(payload);
   }),
 );
 

@@ -33,15 +33,15 @@ function QueuePill({
   return (
     <div
       className={[
-        'flex h-8 items-center justify-between rounded-2xl px-5 text-sm',
+        'flex h-8 items-center justify-between rounded-2xl px-5',
         'shadow-[0_0_0_1px_rgba(0,0,0,0.04)]',
         muted ? 'bg-gray-50 text-gray-400' : 'bg-white text-gray-900',
       ].join(' ')}
     >
-      <span className="truncate">{label}</span>
+      <span className="truncate text-xs">{label}</span>
       {status ? (
         <span
-          className={`ml-3 inline-block h-3 w-3 shrink-0 rounded-full ${statusDotClass[status]}`}
+          className={`ml-3 inline-block h-2 w-2 shrink-0 rounded-full ${statusDotClass[status]}`}
         />
       ) : (
         <span className="ml-3 inline-block h-3 w-3 shrink-0 rounded-full bg-transparent" />

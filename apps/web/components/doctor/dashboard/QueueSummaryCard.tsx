@@ -55,7 +55,7 @@ export default function DoctorQueueSummaryCard({ date }: QueueSummaryCardProps) 
       <h3 className="text-xl font-semibold tracking-wide text-gray-300">Queue Summary:</h3>
 
       <div className="pl-4">
-        <div className="space-y-2 text-xl">
+        <div className="space-y-2 text-md">
           <div className="flex items-center gap-6">
             <span className="h-4 w-4 rounded-full bg-[#4ade80]" />
             <span className="text-gray-900">
@@ -81,7 +81,7 @@ export default function DoctorQueueSummaryCard({ date }: QueueSummaryCardProps) 
 
       <div className="h-px w-full bg-gray-200" />
 
-      <div className="flex items-center gap-6 text-xl pl-4">
+      <div className="flex items-center gap-6 text-md pl-4">
         <span className="h-4 w-4 rounded-full bg-gray-500" />
         <span className="text-gray-900">
           Total: <span className="font-semibold">{display(total)}</span>

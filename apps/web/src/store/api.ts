@@ -1,3 +1,4 @@
+// apps/web/src/store/api.ts
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import type { BaseQueryFn } from '@reduxjs/toolkit/query';
 import type { FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query';
@@ -15,6 +16,9 @@ import type {
   AdminDoctorListItem,
   Visit,
   VisitCreate,
+  DoctorPatientsCountSeries,
+  DailyVisitsBreakdownResponse,
+  DoctorDailyVisitsBreakdownResponse,
 } from '@dms/types';
 
 import { createDoctorQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
@@ -159,6 +163,39 @@ export const api = createApi({
       query: ({ startDate, endDate }) => ({
         url: '/reports/daily/patients/series',
         params: { startDate, endDate },
+      }),
+    }),
+
+    /**
+     * Reception panel (click date → show details)
+     */
+    getDailyVisitsBreakdown: builder.query<DailyVisitsBreakdownResponse, string>({
+      query: (date) => ({
+        url: '/reports/daily/visits-breakdown',
+        params: { date },
+      }),
+    }),
+
+    /**
+     * ✅ Doctor panel: same "Visitors Ratio" series (N/F/Z + total), but filtered for logged-in doctor
+     */
+    getDoctorDailyPatientSummarySeries: builder.query<
+      DailyPatientSummarySeries,
+      { startDate: string; endDate: string }
+    >({
+      query: ({ startDate, endDate }) => ({
+        url: '/reports/daily/doctor/patients/series',
+        params: { startDate, endDate },
+      }),
+    }),
+
+    /**
+     * ✅ Doctor panel: daily breakdown (logged-in doctor only)
+     */
+    getDoctorDailyVisitsBreakdown: builder.query<DoctorDailyVisitsBreakdownResponse, string>({
+      query: (date) => ({
+        url: '/reports/daily/doctor/visits-breakdown',
+        params: { date },
       }),
     }),
 
@@ -330,6 +367,19 @@ export const api = createApi({
       }),
       providesTags: (_result, _error, date) => [{ type: 'Followups' as const, id: date }],
     }),
+
+    /**
+     * (Legacy) If you still use this elsewhere, keep it.
+     */
+    getDoctorPatientsCountSeries: builder.query<
+      DoctorPatientsCountSeries,
+      { startDate: string; endDate: string }
+    >({
+      query: ({ startDate, endDate }) => ({
+        url: '/reports/daily/doctor/patients/series',
+        params: { startDate, endDate },
+      }),
+    }),
   }),
 });
 
@@ -342,6 +392,9 @@ export const {
   useGetDailyReportQuery,
   useGetDailyPatientSummaryQuery,
   useGetDailyPatientSummarySeriesQuery,
+  useGetDailyVisitsBreakdownQuery,
+  useGetDoctorDailyPatientSummarySeriesQuery,
+  useGetDoctorDailyVisitsBreakdownQuery,
   useGetDoctorsQuery,
   useGetMyPreferencesQuery,
   useUpdateMyPreferencesMutation,
@@ -350,4 +403,5 @@ export const {
   useTakeSeatMutation,
   useUpdateVisitStatusMutation,
   useGetDailyFollowupsQuery,
+  useGetDoctorPatientsCountSeriesQuery,
 } = api;
