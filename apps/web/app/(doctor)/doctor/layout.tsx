@@ -2,23 +2,22 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import ClinicShell from '@/components/layout/ClinicShell';
+import DoctorShell from '@/components/layout/DoctorShell';
 import { useRequireAuth } from '@/src/hooks/useAuth';
 
-export default function ClinicLayout({ children }: { children: React.ReactNode }) {
+export default function DoctorLayout({ children }: { children: React.ReactNode }) {
   const auth = useRequireAuth();
   const router = useRouter();
 
   useEffect(() => {
     if (auth.status !== 'authenticated') return;
 
-    // Hard RBAC: Doctors should never see the clinic shell
-    if (auth.role === 'DOCTOR') router.replace('/doctor');
+    // Hard RBAC: Only DOCTOR can see this panel
+    if (auth.role === 'RECEPTION') router.replace('/');
     if (auth.role === 'ADMIN') router.replace('/admin');
   }, [auth.status, auth.role, router]);
 
-  // While redirecting, avoid flashing the clinic UI
-  if (auth.status === 'authenticated' && auth.role && auth.role !== 'RECEPTION') {
+  if (auth.status === 'authenticated' && auth.role && auth.role !== 'DOCTOR') {
     return (
       <div className="flex h-screen items-center justify-center text-sm text-gray-700">
         Redirecting…
@@ -26,5 +25,5 @@ export default function ClinicLayout({ children }: { children: React.ReactNode }
     );
   }
 
-  return <ClinicShell>{children}</ClinicShell>;
+  return <DoctorShell>{children}</DoctorShell>;
 }
