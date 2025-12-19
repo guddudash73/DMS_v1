@@ -1,6 +1,7 @@
 'use client';
 
 import DoctorQueueCard from '@/components/doctor/dashboard/DoctorQueueCard';
+import DoctorQueueSummaryCard from '@/components/doctor/dashboard/QueueSummaryCard';
 
 export default function DoctorDashboardPage() {
   return (
@@ -9,13 +10,11 @@ export default function DoctorDashboardPage() {
         {/* Left column */}
         <div className="flex flex-col gap-6 2xl:gap-10">
           <DoctorQueueCard />
-          {/* Next: Queue Summary card will go here */}
+          <DoctorQueueSummaryCard />
         </div>
 
-        {/* Right column */}
+        {/* Right column (next cards) */}
         <div className="flex h-full flex-col gap-6 2xl:gap-10">
-          {/* Next: Visitors chart card */}
-          {/* Next: Recent visits table */}
           <div className="flex h-full items-center justify-center rounded-2xl bg-white shadow-sm">
             <div className="text-center text-sm text-gray-500">Right-side cards coming next…</div>
           </div>
