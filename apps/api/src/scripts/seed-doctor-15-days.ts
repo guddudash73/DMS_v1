@@ -10,7 +10,7 @@ import type { Visit, VisitStatus, VisitTag } from '@dms/types';
 /* CONFIG                              */
 /* ---------------------------------- */
 
-const DOCTOR_ID = 'b9c4e9dc-643b-44b4-a3c3-188a2d947b09';
+const DOCTOR_ID = '41fb7b06-c9b4-413e-b660-fd521e21dc25';
 const DAYS_BACK = 15;
 const VISITS_MIN = 6;
 const VISITS_MAX = 12;

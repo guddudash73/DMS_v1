@@ -6,19 +6,35 @@ import DoctorQueueCard from '@/components/doctor/dashboard/DoctorQueueCard';
 import QueueSummaryCard from '@/components/doctor/dashboard/QueueSummaryCard';
 import DoctorPatientsChart from '@/components/doctor/dashboard/DoctorPatientsChart';
 import DoctorDailyVisitsBreakdownPanel from '@/components/doctor/dashboard/DoctorDailyVisitsBreakdownPanel';
+import TodayCaseMixCard from '@/components/doctor/dashboard/TodayCaseMixCard';
+import RecentlyCompletedCard from '@/components/doctor/dashboard/RecentlyCompletedCard';
+import DoctorQueueFullPanel from '@/components/doctor/dashboard/DoctorQueueFullPanel';
+
+type ViewMode = 'dashboard' | 'chart' | 'queue';
 
 export default function DoctorDashboardPage() {
   const [selectedDate, setSelectedDate] = React.useState<string | null>(null);
+  const [viewMode, setViewMode] = React.useState<ViewMode>('dashboard');
 
-  // DETAIL MODE (after click on a chart point) — FULL CONTENT AREA like clinic page
-  if (selectedDate) {
+  // If chart date selected -> chart mode
+  React.useEffect(() => {
+    if (selectedDate) setViewMode('chart');
+    else if (viewMode === 'chart') setViewMode('dashboard');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedDate]);
+
+  // QUEUE FULL VIEW MODE
+  if (viewMode === 'queue') {
+    return <DoctorQueueFullPanel onBack={() => setViewMode('dashboard')} />;
+  }
+
+  // CHART DETAIL MODE (existing)
+  if (viewMode === 'chart' && selectedDate) {
     return (
       <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
         <div className="mx-auto flex h-full w-full max-w-[1200px] flex-col gap-6 2xl:gap-10">
-          {/* Chart stays on top */}
           <DoctorPatientsChart onDateSelect={(dateIso) => setSelectedDate(dateIso)} />
 
-          {/* Breakdown goes UNDER the chart, wider */}
           <DoctorDailyVisitsBreakdownPanel
             date={selectedDate}
             onBack={() => setSelectedDate(null)}
@@ -28,13 +44,13 @@ export default function DoctorDashboardPage() {
     );
   }
 
-  // NORMAL DOCTOR DASHBOARD MODE (your existing layout)
+  // NORMAL DASHBOARD MODE
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
       <div className="grid h-full grid-cols-1 gap-6 2xl:gap-10 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,3fr)]">
         {/* Left column */}
         <div className="flex flex-col gap-6 2xl:gap-10">
-          <DoctorQueueCard />
+          <DoctorQueueCard onViewAll={() => setViewMode('queue')} />
           <QueueSummaryCard />
         </div>
 
@@ -42,10 +58,9 @@ export default function DoctorDashboardPage() {
         <div className="flex h-full flex-col gap-6 2xl:gap-10">
           <DoctorPatientsChart onDateSelect={(dateIso) => setSelectedDate(dateIso)} />
 
-          <div className="flex h-full items-center justify-center rounded-2xl bg-white shadow-sm">
-            <div className="text-center text-sm text-gray-500">
-              Click a date on the chart to view daily breakdown.
-            </div>
+          <div className="grid grid-cols-1 gap-6 items-stretch lg:grid-cols-[minmax(220px,1fr)_minmax(0,2fr)]">
+            <TodayCaseMixCard />
+            <RecentlyCompletedCard />
           </div>
         </div>
       </div>

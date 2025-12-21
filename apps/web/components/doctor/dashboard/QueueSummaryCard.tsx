@@ -51,8 +51,8 @@ export default function DoctorQueueSummaryCard({ date }: QueueSummaryCardProps) 
   const display = (value: number) => (showDots ? '…' : value);
 
   return (
-    <Card className="w-full rounded-2xl border-none bg-white px-6 py-2 pb-4 shadow-sm gap-4">
-      <h3 className="text-xl font-semibold tracking-wide text-gray-300">Queue Summary:</h3>
+    <Card className="w-full rounded-2xl border-none bg-white px-6 py-2 pb-4 shadow-sm md:gap-4 2xl:gap-6">
+      <h3 className="text-2xl font-semibold tracking-wide text-gray-300">Queue Summary:</h3>
 
       <div className="pl-4">
         <div className="space-y-2 text-md">

@@ -72,10 +72,9 @@ type TooltipProps = {
   active?: boolean;
   payload?: any[];
   label?: unknown;
-  onPick?: (dateIso: string) => void;
 };
 
-function DoctorVisitorsTooltip({ active, payload, label, onPick }: TooltipProps) {
+function DoctorVisitorsTooltip({ active, payload, label }: TooltipProps) {
   if (!active || !payload?.length) return null;
 
   const row = payload?.[0]?.payload ?? {};
@@ -84,40 +83,39 @@ function DoctorVisitorsTooltip({ active, payload, label, onPick }: TooltipProps)
       ? row.totalPatients
       : (row.newPatients ?? 0) + (row.followupPatients ?? 0) + (row.zeroBilledVisits ?? 0);
 
-  const getColor = (key: string) => payload.find((p) => p.dataKey === key)?.color;
-
   const items = [
     {
       key: 'newPatients',
       label: 'New',
       value: row.newPatients ?? 0,
-      color: getColor('newPatients'),
+      color: payload.find((p) => p.dataKey === 'newPatients')?.color,
     },
     {
       key: 'followupPatients',
       label: 'Followup',
       value: row.followupPatients ?? 0,
-      color: getColor('followupPatients'),
+      color: payload.find((p) => p.dataKey === 'followupPatients')?.color,
     },
     {
       key: 'zeroBilledVisits',
       label: 'Zero billed',
       value: row.zeroBilledVisits ?? 0,
-      color: getColor('zeroBilledVisits'),
+      color: payload.find((p) => p.dataKey === 'zeroBilledVisits')?.color,
     },
   ];
 
-  const dateIso = String(label ?? '');
-
   return (
-    <div className="grid min-w-64 gap-2 rounded-lg border border-border/50 bg-background px-3 py-2 text-xs shadow-xl">
+    <div className="grid min-w-44 gap-2 rounded-lg border border-border/50 bg-background px-3 py-2 text-xs shadow-xl">
       <div className="font-medium">{formatShortDate(label)}</div>
 
       <div className="grid gap-1.5">
         {items.map((it) => (
           <div key={it.key} className="flex items-center justify-between gap-6">
             <div className="flex items-center gap-2">
-              <span className="h-3 w-3 rounded-[3px]" style={{ backgroundColor: it.color }} />
+              <span
+                className="h-3 w-3 rounded-[3px]"
+                style={{ backgroundColor: it.color || 'var(--muted-foreground)' }}
+              />
               <span className="text-muted-foreground">{it.label}</span>
             </div>
             <span className="font-mono font-medium tabular-nums text-foreground">
@@ -136,37 +134,30 @@ function DoctorVisitorsTooltip({ active, payload, label, onPick }: TooltipProps)
         </span>
       </div>
 
-      {onPick ? (
-        <button
-          type="button"
-          onClick={() => onPick(dateIso)}
-          className="mt-1 text-left text-[11px] text-muted-foreground hover:text-foreground"
-        >
-          Click to view daily breakdown →
-        </button>
-      ) : null}
+      <div className="pt-1 text-[11px] text-muted-foreground">Click to view daily breakdown →</div>
     </div>
   );
 }
 
-type Props = {
-  onDateSelect?: (dateIso: string) => void;
+export type DoctorPatientsChartProps = {
+  onDateSelect?: (dateIso: string) => void; // YYYY-MM-DD
 };
 
-export default function DoctorPatientsChart({ onDateSelect }: Props) {
+export default function DoctorPatientsChart({ onDateSelect }: DoctorPatientsChartProps) {
   const auth = useAuth();
   const [timeRange, setTimeRange] = React.useState<TimeRange>('90d');
 
   const { startDate, endDate } = React.useMemo(() => getDateRange(timeRange), [timeRange]);
-
-  const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
   const {
     data: series,
     isLoading,
     isFetching,
     isError,
-  } = useGetDoctorDailyPatientSummarySeriesQuery({ startDate, endDate }, { skip: !canUseApi });
+  } = useGetDoctorDailyPatientSummarySeriesQuery(
+    { startDate, endDate },
+    { skip: auth.status !== 'authenticated' },
+  );
 
   const chartData = React.useMemo(
     () =>
@@ -183,17 +174,15 @@ export default function DoctorPatientsChart({ onDateSelect }: Props) {
   const description = React.useMemo(() => {
     switch (timeRange) {
       case '7d':
-        return 'Showing visits handled for the last 7 days';
+        return 'Showing total visitors for the last 7 days';
       case '30d':
-        return 'Showing visits handled for the last 30 days';
+        return 'Showing total visitors for the last 30 days';
       default:
-        return 'Showing visits handled for the last 3 months';
+        return 'Showing total visitors for the last 3 months';
     }
   }, [timeRange]);
 
   const loading = (isLoading || isFetching) && chartData.length === 0;
-
-  const lastActiveLabelRef = React.useRef<string | null>(null);
 
   return (
     <Card className="border-none bg-white/80 shadow-sm">
@@ -203,7 +192,7 @@ export default function DoctorPatientsChart({ onDateSelect }: Props) {
           <CardDescription>{description}</CardDescription>
         </div>
 
-        <Select value={timeRange} onValueChange={(v: TimeRange) => setTimeRange(v)}>
+        <Select value={timeRange} onValueChange={(value: TimeRange) => setTimeRange(value)}>
           <SelectTrigger
             className="hidden w-[150px] rounded-full border bg-white text-xs sm:ml-auto sm:flex"
             aria-label="Select time range"
@@ -225,11 +214,11 @@ export default function DoctorPatientsChart({ onDateSelect }: Props) {
       </CardHeader>
 
       <CardContent className="px-2 pt-4 sm:px-6 sm:pt-2">
-        {!canUseApi ? (
+        {auth.status !== 'authenticated' ? (
           <p className="text-xs text-gray-500">Log in to see visitors data.</p>
         ) : loading ? (
           <p className="text-xs text-gray-500">Loading visitors data…</p>
-        ) : isError || chartData.length === 0 ? (
+        ) : chartData.length === 0 || isError ? (
           <p className="text-xs text-gray-500">
             No visitors data available for the selected range.
           </p>
@@ -240,15 +229,15 @@ export default function DoctorPatientsChart({ onDateSelect }: Props) {
           >
             <AreaChart
               data={chartData}
-              onMouseMove={(e: any) => {
-                const label = e?.activeLabel;
-                if (typeof label === 'string') lastActiveLabelRef.current = label;
+              onClick={(e: any) => {
+                const dateFromPayload = e?.activePayload?.[0]?.payload?.date;
+                const dateFromLabel = e?.activeLabel;
+                const date = typeof dateFromPayload === 'string' ? dateFromPayload : dateFromLabel;
+                if (typeof date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+                  onDateSelect?.(date);
+                }
               }}
-              onClick={() => {
-                if (!onDateSelect) return;
-                const label = lastActiveLabelRef.current;
-                if (label) onDateSelect(label);
-              }}
+              style={{ cursor: onDateSelect ? 'pointer' : 'default' }}
             >
               <defs>
                 <linearGradient id="fillNewPatients" x1="0" y1="0" x2="0" y2="1">
@@ -278,10 +267,7 @@ export default function DoctorPatientsChart({ onDateSelect }: Props) {
                 tickFormatter={(value) => formatShortDate(value)}
               />
 
-              <ChartTooltip
-                cursor={false}
-                content={<DoctorVisitorsTooltip onPick={onDateSelect} />}
-              />
+              <ChartTooltip cursor={false} content={<DoctorVisitorsTooltip />} />
 
               <Area
                 dataKey="newPatients"

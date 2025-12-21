@@ -136,3 +136,53 @@ export const DoctorDailyVisitsBreakdownResponse = z.object({
   items: z.array(DoctorDailyVisitBreakdownItem),
 });
 export type DoctorDailyVisitsBreakdownResponse = z.infer<typeof DoctorDailyVisitsBreakdownResponse>;
+
+export const DoctorRecentVisitsQuery = z.object({
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  limit: z.coerce.number().int().min(1).max(20).optional(),
+});
+export type DoctorRecentVisitsQuery = z.infer<typeof DoctorRecentVisitsQuery>;
+
+export const DoctorRecentVisitItem = z.object({
+  visitId: z.string().min(1),
+  patientId: z.string().min(1),
+  patientName: z.string().min(1),
+  hasRx: z.boolean(),
+  hasXray: z.boolean(),
+});
+export type DoctorRecentVisitItem = z.infer<typeof DoctorRecentVisitItem>;
+
+export const DoctorRecentVisitsResponse = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  doctorId: z.string().min(1),
+  items: z.array(DoctorRecentVisitItem),
+});
+export type DoctorRecentVisitsResponse = z.infer<typeof DoctorRecentVisitsResponse>;
+
+export const DoctorRecentCompletedQuery = z.object({
+  date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/)
+    .optional(),
+  limit: z.coerce.number().int().min(1).max(20).optional(),
+});
+export type DoctorRecentCompletedQuery = z.infer<typeof DoctorRecentCompletedQuery>;
+
+export const DoctorRecentCompletedItem = z.object({
+  visitId: z.string().min(1),
+  patientId: z.string().min(1),
+  patientName: z.string().min(1),
+  hasRx: z.boolean(),
+  hasXray: z.boolean(),
+});
+export type DoctorRecentCompletedItem = z.infer<typeof DoctorRecentCompletedItem>;
+
+export const DoctorRecentCompletedResponse = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  doctorId: z.string().min(1),
+  items: z.array(DoctorRecentCompletedItem),
+});
+export type DoctorRecentCompletedResponse = z.infer<typeof DoctorRecentCompletedResponse>;

@@ -6,6 +6,7 @@ import {
   DailyVisitsBreakdownQuery,
   DoctorDailyVisitsBreakdownQuery,
   DoctorRecentVisitsQuery,
+  DoctorRecentCompletedQuery,
 } from '@dms/types';
 import type {
   Patient,
@@ -13,6 +14,7 @@ import type {
   DailyVisitsBreakdownResponse,
   DoctorDailyVisitsBreakdownResponse,
   DoctorRecentVisitsResponse,
+  DoctorRecentCompletedResponse,
 } from '@dms/types';
 import { visitRepository } from '../repositories/visitRepository';
 import { patientRepository } from '../repositories/patientRepository';
@@ -20,6 +22,8 @@ import { billingRepository } from '../repositories/billingRepository';
 import { userRepository } from '../repositories/userRepository';
 import { type ZodError } from 'zod';
 import { sendZodValidationError } from '../lib/validation';
+import { prescriptionRepository } from '../repositories/prescriptionRepository';
+import { xrayRepository } from '../repositories/xrayRepository';
 
 const router = express.Router();
 
@@ -418,6 +422,74 @@ router.get(
       date,
       doctors,
       totalVisits: normalized.length,
+    };
+
+    return res.status(200).json(payload);
+  }),
+);
+
+router.get(
+  '/daily/doctor/recent-completed',
+  asyncHandler(async (req, res) => {
+    const parsed = DoctorRecentCompletedQuery.safeParse(req.query);
+    if (!parsed.success) {
+      return handleValidationError(req, res, parsed.error.issues);
+    }
+
+    const doctorId = req.auth?.userId;
+    if (!doctorId) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    const todayIso = new Date().toISOString().slice(0, 10);
+    const date = parsed.data.date ?? todayIso;
+    const limit = parsed.data.limit ?? 5;
+
+    const visits = await visitRepository.getDoctorQueue({ doctorId, date });
+
+    const done = visits
+      .filter((v) => v.status === 'DONE')
+      .slice()
+      .sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt))
+      .slice(0, limit);
+
+    if (done.length === 0) {
+      const empty: DoctorRecentCompletedResponse = {
+        date,
+        doctorId,
+        items: [],
+      };
+      return res.status(200).json(empty);
+    }
+
+    const patientIds = Array.from(new Set(done.map((v) => v.patientId)));
+    const patients = await Promise.all(patientIds.map((id) => patientRepository.getById(id)));
+    const patientMap = new Map(patients.filter(Boolean).map((p) => [p!.patientId, p!]));
+
+    const items = await Promise.all(
+      done.map(async (v) => {
+        const p = patientMap.get(v.patientId);
+        if (!p) return null;
+
+        const [rxList, xrayList] = await Promise.all([
+          prescriptionRepository.listByVisit(v.visitId),
+          xrayRepository.listByVisit(v.visitId),
+        ]);
+
+        return {
+          visitId: v.visitId,
+          patientId: v.patientId,
+          patientName: p.name,
+          hasRx: rxList.length > 0,
+          hasXray: xrayList.length > 0,
+        };
+      }),
+    );
+
+    const payload: DoctorRecentCompletedResponse = {
+      date,
+      doctorId,
+      items: items.filter((x): x is NonNullable<typeof x> => x !== null),
     };
 
     return res.status(200).json(payload);

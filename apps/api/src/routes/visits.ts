@@ -1,3 +1,4 @@
+// apps/api/src/routes/visits.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
@@ -102,7 +103,25 @@ router.get(
     }
 
     const visits = await visitRepository.getDoctorQueue(parsed.data);
-    return res.status(200).json({ items: visits });
+
+    // ✅ Hydrate patient names so Doctor UI can show Patient Name in pills
+    const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
+    const patientResults = await Promise.all(
+      uniquePatientIds.map((id) => patientRepository.getById(id)),
+    );
+
+    const patientNameMap = new Map<string, string>();
+    for (const p of patientResults) {
+      if (!p) continue;
+      patientNameMap.set(p.patientId, p.name);
+    }
+
+    const items = visits.map((v) => ({
+      ...v,
+      patientName: patientNameMap.get(v.patientId) ?? undefined,
+    }));
+
+    return res.status(200).json({ items });
   }),
 );
 
@@ -491,7 +510,7 @@ router.post(
       } catch (err) {
         logError('xray_thumbnail_failed', {
           reqId: req.requestId,
-          visitId: visit.visitId,
+          visitId: req.params.visitId,
           xrayId,
           error:
             err instanceof Error

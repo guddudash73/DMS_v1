@@ -19,6 +19,7 @@ import type {
   DoctorPatientsCountSeries,
   DailyVisitsBreakdownResponse,
   DoctorDailyVisitsBreakdownResponse,
+  DoctorRecentCompletedResponse,
 } from '@dms/types';
 
 import { createDoctorQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
@@ -263,8 +264,9 @@ export const api = createApi({
       providesTags: (_result, _error, patientId) => [{ type: 'Patient' as const, id: patientId }],
     }),
 
+    // ✅ UPDATED TYPE: items include patientName from backend hydration
     getDoctorQueue: builder.query<
-      { items: Visit[] },
+      { items: (Visit & { patientName?: string })[] },
       { doctorId: string; date?: string; status?: 'QUEUED' | 'IN_PROGRESS' | 'DONE' }
     >({
       query: ({ doctorId, date, status }) => ({
@@ -380,6 +382,19 @@ export const api = createApi({
         params: { startDate, endDate },
       }),
     }),
+
+    getDoctorRecentCompleted: builder.query<
+      DoctorRecentCompletedResponse,
+      { date?: string; limit?: number }
+    >({
+      query: ({ date, limit } = {}) => ({
+        url: '/reports/daily/doctor/recent-completed',
+        params: {
+          ...(date ? { date } : {}),
+          ...(typeof limit === 'number' ? { limit } : {}),
+        },
+      }),
+    }),
   }),
 });
 
@@ -404,4 +419,5 @@ export const {
   useUpdateVisitStatusMutation,
   useGetDailyFollowupsQuery,
   useGetDoctorPatientsCountSeriesQuery,
+  useGetDoctorRecentCompletedQuery,
 } = api;

@@ -1,8 +1,14 @@
+// apps/api/src/repositories/xrayRepository.ts
 import {
   ConditionalCheckFailedException,
   TransactionCanceledException,
 } from '@aws-sdk/client-dynamodb';
-import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  DynamoDBDocumentClient,
+  GetCommand,
+  QueryCommand, // ✅ add
+  TransactWriteCommand,
+} from '@aws-sdk/lib-dynamodb';
 import type { Visit, Xray, XrayContentType } from '@dms/types';
 import { key } from '@dms/types';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
@@ -27,6 +33,9 @@ export interface XrayMetaDataInput {
 export interface XrayRepository {
   putMetadata(input: XrayMetaDataInput): Promise<Xray>;
   getById(xrayId: string): Promise<Xray | null>;
+
+  // ✅ NEW
+  listByVisit(visitId: string): Promise<Xray[]>;
 }
 
 export class XrayConflictError extends Error {
@@ -124,15 +133,31 @@ export class DynamoDBXrayRepository implements XrayRepository {
     );
 
     if (!Item || Item.entityType !== 'XRAY') return null;
-    if (Item.deletedAt != null) {
-      return null;
-    }
-
-    if (Item.patientIsDeleted === true || Item.visitIsDeleted === true) {
-      return null;
-    }
+    if (Item.deletedAt != null) return null;
+    if (Item.patientIsDeleted === true || Item.visitIsDeleted === true) return null;
 
     return Item as Xray;
+  }
+
+  // ✅ NEW
+  async listByVisit(visitId: string): Promise<Xray[]> {
+    const { Items } = await docClient.send(
+      new QueryCommand({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :skPrefix)',
+        ExpressionAttributeValues: {
+          ':pk': key.visitPK(visitId),
+          ':skPrefix': 'XRAY#',
+        },
+        ScanIndexForward: true,
+      }),
+    );
+
+    if (!Items || Items.length === 0) return [];
+    const xrays = Items as Xray[];
+
+    // Ensure deleted don't leak
+    return xrays.filter((x) => x.deletedAt == null);
   }
 }
 
