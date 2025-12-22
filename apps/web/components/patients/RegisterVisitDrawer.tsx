@@ -1,4 +1,3 @@
-// apps/web/components/patients/RegisterVisitDrawer.tsx
 'use client';
 
 import * as React from 'react';

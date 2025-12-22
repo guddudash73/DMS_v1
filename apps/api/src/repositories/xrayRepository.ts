@@ -1,4 +1,3 @@
-// apps/api/src/repositories/xrayRepository.ts
 import {
   ConditionalCheckFailedException,
   TransactionCanceledException,
@@ -6,7 +5,7 @@ import {
 import {
   DynamoDBDocumentClient,
   GetCommand,
-  QueryCommand, // ✅ add
+  QueryCommand,
   TransactWriteCommand,
 } from '@aws-sdk/lib-dynamodb';
 import type { Visit, Xray, XrayContentType } from '@dms/types';
@@ -34,7 +33,6 @@ export interface XrayRepository {
   putMetadata(input: XrayMetaDataInput): Promise<Xray>;
   getById(xrayId: string): Promise<Xray | null>;
 
-  // ✅ NEW
   listByVisit(visitId: string): Promise<Xray[]>;
 }
 
@@ -139,7 +137,6 @@ export class DynamoDBXrayRepository implements XrayRepository {
     return Item as Xray;
   }
 
-  // ✅ NEW
   async listByVisit(visitId: string): Promise<Xray[]> {
     const { Items } = await docClient.send(
       new QueryCommand({
@@ -156,7 +153,6 @@ export class DynamoDBXrayRepository implements XrayRepository {
     if (!Items || Items.length === 0) return [];
     const xrays = Items as Xray[];
 
-    // Ensure deleted don't leak
     return xrays.filter((x) => x.deletedAt == null);
   }
 }

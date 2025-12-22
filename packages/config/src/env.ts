@@ -1,6 +1,5 @@
 import { z } from 'zod';
 
-// Dummy comment to force TypeScript to treat this as a module
 export {};
 
 const EnvSchema = z.object({
@@ -9,7 +8,11 @@ const EnvSchema = z.object({
 
   AWS_REGION: z.string().min(1),
   DYNAMO_ENDPOINT: z.string().min(1),
+
   S3_ENDPOINT: z.string().min(1),
+
+  S3_PUBLIC_ENDPOINT: z.string().min(1),
+
   DDB_TABLE_NAME: z.string().min(1),
   XRAY_BUCKET_NAME: z.string().min(1),
 

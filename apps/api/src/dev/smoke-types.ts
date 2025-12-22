@@ -21,7 +21,6 @@ function assertOk(label: string, ok: boolean, msg?: string) {
 }
 
 try {
-  // Patient
   const patientOk = Patient.safeParse({
     patientId: '01HYTESTPATIENT',
     name: 'Asha Rao',
@@ -32,7 +31,6 @@ try {
   }).success;
   assertOk('Patient', patientOk);
 
-  // Visit
   const visitOk = Visit.safeParse({
     visitId: '01HYTESTVISIT',
     patientId: '01HYTESTPATIENT',
@@ -45,21 +43,10 @@ try {
   }).success;
   assertOk('Visit', visitOk);
 
-  // Xray
-  // const xrayOk = Xray.safeParse({
-  //   xrayId: '01HYX',
-  //   visitId: '01HYTESTVISIT',
-  //   contentKey: 'xray/01HYTESTVISIT/01HYX.jpg',
-  //   contentType: 'image/jpeg',
-  //   size: 1024,
-  //   createdAt: Date.now(),
-  // }).success;
-  // assertOk('Xray', xrayOk);
-
   {
     const candidate = {
-      xrayId: '01J5Z4F8S9X4Z7W3R8K2C1V6AB', // ULID-looking
-      visitId: '01J5Z4F8S9X4Z7W3R8K2C1V6AC', // ULID-looking
+      xrayId: '01J5Z4F8S9X4Z7W3R8K2C1V6AB',
+      visitId: '01J5Z4F8S9X4Z7W3R8K2C1V6AC',
       contentKey: 'xray/01J5Z4F8S9X4Z7W3R8K2C1V6AC/01J5Z4F8S9X4Z7W3R8K2C1V6AB.jpg',
       contentType: 'image/jpeg',
       size: 1024,
@@ -78,7 +65,6 @@ try {
     assertOk('Xray', parsed.success);
   }
 
-  // Prescription
   const rxLineOk = RxLine.safeParse({
     medicine: 'Amoxicillin',
     dose: '500mg',
@@ -105,7 +91,6 @@ try {
   }).success;
   assertOk('Prescription', rxOk);
 
-  // User
   const userOk = User.safeParse({
     userId: 'USER001',
     email: 'doctor@example.com',
@@ -116,7 +101,6 @@ try {
   }).success;
   assertOk('User', userOk);
 
-  // AuditEvent
   const auditOk = AuditEvent.safeParse({
     auditId: 'AUD001',
     actorUserId: 'USER001',

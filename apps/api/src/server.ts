@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import { randomUUID } from 'node:crypto';
 import { parseEnv } from '@dms/config';
 import type { HealthResponse } from '@dms/types';
+
 import authRoutes from './routes/auth';
 import patientRoutes from './routes/patients';
 import visitRoutes from './routes/visits';
@@ -78,6 +79,7 @@ export const createApp = () => {
     requireRole('RECEPTION', 'DOCTOR', 'ADMIN'),
     patientRoutes,
   );
+
   app.use(
     '/visits',
     genericSensitiveRateLimiter,
@@ -85,6 +87,7 @@ export const createApp = () => {
     requireRole('RECEPTION', 'DOCTOR', 'ADMIN'),
     visitRoutes,
   );
+
   app.use(
     '/reports',
     genericSensitiveRateLimiter,
@@ -92,6 +95,7 @@ export const createApp = () => {
     requireRole('ADMIN', 'DOCTOR', 'RECEPTION'),
     reportsRoutes,
   );
+
   app.use(
     '/xrays',
     genericSensitiveRateLimiter,
@@ -100,12 +104,21 @@ export const createApp = () => {
     xrayRouter,
   );
   app.use(
+    '/xray',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
+    xrayRouter,
+  );
+
+  app.use(
     '/rx',
     genericSensitiveRateLimiter,
     authMiddleware,
     requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
     rxRouter,
   );
+
   app.use(
     '/medicines',
     genericSensitiveRateLimiter,
@@ -113,6 +126,7 @@ export const createApp = () => {
     requireRole('DOCTOR', 'ADMIN'),
     medicinesRouter,
   );
+
   app.use(
     '/rx-presets',
     genericSensitiveRateLimiter,
@@ -128,6 +142,7 @@ export const createApp = () => {
     requireRole('ADMIN', 'RECEPTION'),
     adminDoctorsRouter,
   );
+
   app.use(
     '/admin/rx-presets',
     genericSensitiveRateLimiter,

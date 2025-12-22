@@ -1,4 +1,3 @@
-// apps/web/src/store/api.ts
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import type { BaseQueryFn } from '@reduxjs/toolkit/query';
 import type { FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query';
@@ -25,6 +24,7 @@ import type {
 import { createDoctorQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
 import type { RootState } from './index';
 import { setTokensFromRefresh, setUnauthenticated } from './authSlice';
+import type { Xray, XrayContentType } from '@dms/types';
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL && process.env.NEXT_PUBLIC_API_BASE_URL.length > 0
@@ -56,6 +56,7 @@ export const TAG_TYPES = [
   'Doctors',
   'UserPreferences',
   'Followups',
+  'Xrays',
 ] as const;
 type TagType = (typeof TAG_TYPES)[number];
 
@@ -167,9 +168,6 @@ export const api = createApi({
       }),
     }),
 
-    /**
-     * Reception panel (click date → show details)
-     */
     getDailyVisitsBreakdown: builder.query<DailyVisitsBreakdownResponse, string>({
       query: (date) => ({
         url: '/reports/daily/visits-breakdown',
@@ -177,9 +175,6 @@ export const api = createApi({
       }),
     }),
 
-    /**
-     * ✅ Doctor panel: same "Visitors Ratio" series (N/F/Z + total), but filtered for logged-in doctor
-     */
     getDoctorDailyPatientSummarySeries: builder.query<
       DailyPatientSummarySeries,
       { startDate: string; endDate: string }
@@ -190,9 +185,6 @@ export const api = createApi({
       }),
     }),
 
-    /**
-     * ✅ Doctor panel: daily breakdown (logged-in doctor only)
-     */
     getDoctorDailyVisitsBreakdown: builder.query<DoctorDailyVisitsBreakdownResponse, string>({
       query: (date) => ({
         url: '/reports/daily/doctor/visits-breakdown',
@@ -264,7 +256,6 @@ export const api = createApi({
       providesTags: (_result, _error, patientId) => [{ type: 'Patient' as const, id: patientId }],
     }),
 
-    // ✅ UPDATED TYPE: items include patientName from backend hydration
     getDoctorQueue: builder.query<
       { items: (Visit & { patientName?: string })[] },
       { doctorId: string; date?: string; status?: 'QUEUED' | 'IN_PROGRESS' | 'DONE' }
@@ -370,9 +361,6 @@ export const api = createApi({
       providesTags: (_result, _error, date) => [{ type: 'Followups' as const, id: date }],
     }),
 
-    /**
-     * (Legacy) If you still use this elsewhere, keep it.
-     */
     getDoctorPatientsCountSeries: builder.query<
       DoctorPatientsCountSeries,
       { startDate: string; endDate: string }
@@ -393,6 +381,63 @@ export const api = createApi({
           ...(date ? { date } : {}),
           ...(typeof limit === 'number' ? { limit } : {}),
         },
+      }),
+    }),
+
+    presignXrayUpload: builder.mutation<
+      {
+        xrayId: string;
+        key: string;
+        uploadUrl: string;
+        headers: Record<string, string>;
+        expiresInSeconds: number;
+      },
+      { visitId: string; contentType: XrayContentType; size: number }
+    >({
+      query: (body) => ({
+        url: '/xrays/presign',
+        method: 'POST',
+        body,
+      }),
+    }),
+
+    registerXrayMetadata: builder.mutation<
+      Xray,
+      {
+        visitId: string;
+        xrayId: string;
+        contentType: XrayContentType;
+        size: number;
+        takenAt: number;
+        contentKey: string;
+      }
+    >({
+      query: ({ visitId, ...body }) => ({
+        url: `/visits/${visitId}/xrays`,
+        method: 'POST',
+        body: {
+          ...body,
+        },
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: 'Xrays' as const, id: arg.visitId }],
+    }),
+
+    listVisitXrays: builder.query<{ items: Xray[] }, { visitId: string }>({
+      query: ({ visitId }) => ({
+        url: `/visits/${visitId}/xrays`,
+        method: 'GET',
+      }),
+      providesTags: (_r, _e, arg) => [{ type: 'Xrays' as const, id: arg.visitId }],
+    }),
+
+    getXrayUrl: builder.query<
+      { url: string; variant: 'thumb' | 'original' },
+      { xrayId: string; size?: 'thumb' | 'original' }
+    >({
+      query: ({ xrayId, size }) => ({
+        url: `/xrays/${xrayId}/url`,
+        method: 'GET',
+        params: size ? { size } : undefined,
       }),
     }),
   }),
@@ -420,4 +465,8 @@ export const {
   useGetDailyFollowupsQuery,
   useGetDoctorPatientsCountSeriesQuery,
   useGetDoctorRecentCompletedQuery,
+  usePresignXrayUploadMutation,
+  useRegisterXrayMetadataMutation,
+  useListVisitXraysQuery,
+  useGetXrayUrlQuery,
 } = api;

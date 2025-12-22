@@ -1,4 +1,3 @@
-// apps/web/components/doctor/dashboard/DoctorQueueCard.tsx
 'use client';
 
 import * as React from 'react';
@@ -18,11 +17,9 @@ const statusDotClass: Record<VisitStatus, string> = {
 };
 
 function getVisitLabel(visit: QueueVisit): string {
-  // ✅ Prefer patient name, then fallback to reason, then patientId
   return visit.patientName || visit.reason || `Patient: ${visit.patientId}`;
 }
 
-/** Matches your “pill row” style in the design */
 function QueuePill({
   label,
   status,
@@ -106,7 +103,6 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
 
   return (
     <Card className="w-full rounded-2xl border-none bg-white px-6 py-2 shadow-sm">
-      {/* Header row with View all */}
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-3xl font-semibold text-gray-900">{doctorName}</h2>

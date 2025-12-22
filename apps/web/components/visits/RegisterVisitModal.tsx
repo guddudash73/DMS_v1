@@ -38,7 +38,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleClose = () => {
@@ -75,16 +74,13 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
   });
 
   React.useEffect(() => {
-    // ensure patientId is always set
     setValue('patientId', patientId as any);
   }, [patientId, setValue]);
 
   React.useEffect(() => {
-    // set default doctor when doctors load
     if (doctors?.length && !watch('doctorId')) {
       setValue('doctorId', doctors[0].doctorId as any);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doctors]);
 
   const selectedTag = watch('tag');
@@ -137,7 +133,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
               onSubmit={handleSubmit(onSubmit, onSubmitError)}
               noValidate
             >
-              {/* Read-only summary */}
               <div className="grid gap-2 text-sm text-gray-800">
                 <div className="flex justify-between gap-3">
                   <span className="text-gray-500">Name</span>
@@ -157,7 +152,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
                 </div>
               </div>
 
-              {/* Doctor */}
               <div>
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-800">Doctor</label>
@@ -178,7 +172,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
                   <p className="h-3 text-xs">&nbsp;</p>
                 </div>
 
-                {/* Reason */}
                 <div className="space-y-1">
                   <label className="text-sm font-medium text-gray-800">Reason</label>
                   <Input
@@ -194,7 +187,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
                 </div>
               </div>
 
-              {/* Tag */}
               <div className="flex items-center justify-end gap-4 pb-2">
                 {(['N', 'F', 'Z'] as VisitTag[]).map((t) => (
                   <label key={t} className="flex items-center gap-2 text-sm text-gray-700">

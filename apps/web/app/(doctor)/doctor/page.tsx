@@ -16,19 +16,15 @@ export default function DoctorDashboardPage() {
   const [selectedDate, setSelectedDate] = React.useState<string | null>(null);
   const [viewMode, setViewMode] = React.useState<ViewMode>('dashboard');
 
-  // If chart date selected -> chart mode
   React.useEffect(() => {
     if (selectedDate) setViewMode('chart');
     else if (viewMode === 'chart') setViewMode('dashboard');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate]);
 
-  // QUEUE FULL VIEW MODE
   if (viewMode === 'queue') {
     return <DoctorQueueFullPanel onBack={() => setViewMode('dashboard')} />;
   }
 
-  // CHART DETAIL MODE (existing)
   if (viewMode === 'chart' && selectedDate) {
     return (
       <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
@@ -44,17 +40,14 @@ export default function DoctorDashboardPage() {
     );
   }
 
-  // NORMAL DASHBOARD MODE
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
       <div className="grid h-full grid-cols-1 gap-6 2xl:gap-10 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,3fr)]">
-        {/* Left column */}
         <div className="flex flex-col gap-6 2xl:gap-10">
           <DoctorQueueCard onViewAll={() => setViewMode('queue')} />
           <QueueSummaryCard />
         </div>
 
-        {/* Right column */}
         <div className="flex h-full flex-col gap-6 2xl:gap-10">
           <DoctorPatientsChart onDateSelect={(dateIso) => setSelectedDate(dateIso)} />
 

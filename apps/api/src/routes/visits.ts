@@ -1,4 +1,3 @@
-// apps/api/src/routes/visits.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
@@ -25,7 +24,7 @@ import { followupRepository, FollowUpRuleViolationError } from '../repositories/
 import { xrayRepository, XrayConflictError } from '../repositories/xrayRepository';
 import { prescriptionRepository } from '../repositories/prescriptionRepository';
 import { buildXrayObjectKey } from './xray';
-import { s3Client } from '../lib/s3';
+import { s3Client } from '../config/aws';
 import { XRAY_BUCKET_NAME } from '../config/env';
 import { requireRole } from '../middlewares/auth';
 import { patientRepository } from '../repositories/patientRepository';
@@ -104,7 +103,6 @@ router.get(
 
     const visits = await visitRepository.getDoctorQueue(parsed.data);
 
-    // ✅ Hydrate patient names so Doctor UI can show Patient Name in pills
     const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
     const patientResults = await Promise.all(
       uniquePatientIds.map((id) => patientRepository.getById(id)),
@@ -561,6 +559,38 @@ router.post(
       }
       throw err;
     }
+  }),
+);
+
+router.get(
+  '/:visitId/xrays',
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    if (!id.success) {
+      return handleValidationError(req, res, id.error.issues);
+    }
+
+    const visit = await visitRepository.getById(id.data);
+    if (!visit) {
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Visit not found',
+        traceId: req.requestId,
+      });
+    }
+
+    const patient = await patientRepository.getById(visit.patientId);
+    if (!patient || patient.isDeleted) {
+      return res.status(404).json({
+        error: 'PATIENT_NOT_FOUND',
+        message: 'Patient not found or has been deleted',
+        traceId: req.requestId,
+      });
+    }
+
+    const items = await xrayRepository.listByVisit(visit.visitId);
+
+    return res.status(200).json({ items });
   }),
 );
 

@@ -18,6 +18,7 @@ realtimeWs.route('$connect', {
     NODE_ENV: 'production',
     DYNAMO_ENDPOINT: 'https://dynamodb.us-east-1.amazonaws.com',
     S3_ENDPOINT: 'https://s3.us-east-1.amazonaws.com',
+    S3_PUBLIC_ENDPOINT: 'http://localhost:4566',
     DDB_TABLE_NAME: 'dms-dev-table',
     XRAY_BUCKET_NAME: 'dms-xray-dev',
 

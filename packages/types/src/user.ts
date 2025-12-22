@@ -57,18 +57,12 @@ export const AdminDoctorListItem = DoctorProfile.extend({
 });
 export type AdminDoctorListItem = z.infer<typeof AdminDoctorListItem>;
 
-// -------------------
-// Dashboard / User preferences
-// -------------------
-
 export const DashboardPreferences = z.object({
-  // Up to 3 doctors pinned on the reception dashboard
   selectedDoctorIds: z.array(DoctorId).max(3),
 });
 export type DashboardPreferences = z.infer<typeof DashboardPreferences>;
 
 export const UserPreferences = z.object({
-  // Optional so we can gradually roll this out
   dashboard: DashboardPreferences.optional(),
 });
 export type UserPreferences = z.infer<typeof UserPreferences>;

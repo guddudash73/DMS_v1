@@ -2,7 +2,7 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { z } from 'zod';
 import { VisitId, XrayId, XrayContentType } from '@dms/types';
 import { visitRepository } from '../repositories/visitRepository';
-import { xrayRepository } from '../repositories/xrayRepository';
+import { xrayRepository, XrayConflictError } from '../repositories/xrayRepository';
 import { XRAY_BUCKET_NAME } from '../config/env';
 import { getPresignedUploadUrl, getPresignedDownloadUrl } from '../lib/s3';
 import { patientRepository } from '../repositories/patientRepository';
@@ -67,13 +67,21 @@ export const buildXrayObjectKey = (
   return `xray/${visitId}/${xrayId}/${variant}.${ext}`;
 };
 
+const RegisterXrayBody = z.object({
+  xrayId: XrayId,
+  contentType: XrayContentType,
+  size: z.number().int().min(MIN_SIZE_BYTES).max(MAX_SIZE_BYTES),
+  takenAt: z.number().int().nonnegative(),
+  takenByUserId: z.string().min(1).optional(),
+  contentKey: z.string().min(1),
+  thumbKey: z.string().min(1).optional(),
+});
+
 router.post(
   '/presign',
   asyncHandler(async (req, res) => {
     const parsed = PresignRequest.safeParse(req.body);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
     const { visitId, contentType, size } = parsed.data;
 
@@ -131,15 +139,8 @@ router.post(
       logAudit({
         actorUserId: req.auth.userId,
         action: 'XRAY_PRESIGN_UPLOAD',
-        entity: {
-          type: 'VISIT',
-          id: visit.visitId,
-        },
-        meta: {
-          xrayId,
-          contentType,
-          size,
-        },
+        entity: { type: 'VISIT', id: visit.visitId },
+        meta: { xrayId, contentType, size },
       });
     }
 
@@ -147,10 +148,139 @@ router.post(
       xrayId,
       key: contentKey,
       uploadUrl,
-      Headers: {
+      headers: {
         'Content-Type': contentType,
       },
       expiresInSeconds: 90,
+    });
+  }),
+);
+
+router.post(
+  '/visits/:visitId',
+  asyncHandler(async (req, res) => {
+    const visitIdResult = VisitId.safeParse(req.params.visitId);
+    if (!visitIdResult.success) return handleValidationError(req, res, visitIdResult.error.issues);
+
+    const body = RegisterXrayBody.safeParse(req.body);
+    if (!body.success) return handleValidationError(req, res, body.error.issues);
+
+    const visitId = visitIdResult.data;
+
+    const visit = await visitRepository.getById(visitId);
+    if (!visit) {
+      return res.status(404).json({
+        error: 'VISIT_NOT_FOUND',
+        message: 'Visit must exist to attach X-rays',
+        traceId: req.requestId,
+      });
+    }
+
+    const patient = await patientRepository.getById(visit.patientId);
+    if (!patient || patient.isDeleted) {
+      return res.status(404).json({
+        error: 'PATIENT_NOT_FOUND',
+        message: 'Cannot register X-rays for a deleted or missing patient',
+        traceId: req.requestId,
+      });
+    }
+
+    const takenByUserId = body.data.takenByUserId ?? req.auth?.userId ?? 'UNKNOWN';
+
+    const expectedKey = buildXrayObjectKey(
+      visit.visitId,
+      body.data.xrayId,
+      'original',
+      body.data.contentType,
+    );
+    if (body.data.contentKey !== expectedKey) {
+      return res.status(400).json({
+        error: 'INVALID_XRAY_KEY',
+        message: 'contentKey does not match expected key layout for this visit/xrayId',
+        traceId: req.requestId,
+      });
+    }
+
+    try {
+      const meta = await xrayRepository.putMetadata({
+        visit,
+        xrayId: body.data.xrayId,
+        contentType: body.data.contentType,
+        size: body.data.size,
+        takenAt: body.data.takenAt,
+        takenByUserId,
+        contentKey: body.data.contentKey,
+        thumbKey: body.data.thumbKey,
+      });
+
+      if (req.auth) {
+        logAudit({
+          actorUserId: req.auth.userId,
+          action: 'XRAY_REGISTER_METADATA',
+          entity: { type: 'XRAY', id: meta.xrayId },
+          meta: { visitId: visit.visitId, patientId: visit.patientId },
+        });
+      }
+
+      return res.status(201).json(meta);
+    } catch (err) {
+      if (err instanceof XrayConflictError) {
+        return res.status(409).json({
+          error: err.code,
+          message: err.message,
+          traceId: req.requestId,
+        });
+      }
+
+      logError('xray_register_failed', {
+        reqId: req.requestId,
+        visitId,
+        xrayId: body.data.xrayId,
+        error:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      });
+
+      return res.status(500).json({
+        error: 'XRAY_REGISTER_FAILED',
+        message: 'Unable to register X-ray metadata',
+        traceId: req.requestId,
+      });
+    }
+  }),
+);
+
+router.get(
+  '/visits/:visitId',
+  asyncHandler(async (req, res) => {
+    const visitIdResult = VisitId.safeParse(req.params.visitId);
+    if (!visitIdResult.success) return handleValidationError(req, res, visitIdResult.error.issues);
+
+    const visitId = visitIdResult.data;
+
+    const visit = await visitRepository.getById(visitId);
+    if (!visit) {
+      return res.status(404).json({
+        error: 'VISIT_NOT_FOUND',
+        message: 'Visit not found',
+        traceId: req.requestId,
+      });
+    }
+
+    const patient = await patientRepository.getById(visit.patientId);
+    if (!patient || patient.isDeleted) {
+      return res.status(404).json({
+        error: 'PATIENT_NOT_FOUND',
+        message: 'Patient not found or has been deleted',
+        traceId: req.requestId,
+      });
+    }
+
+    const items = await xrayRepository.listByVisit(visitId);
+
+    return res.status(200).json({
+      items,
     });
   }),
 );
@@ -159,14 +289,10 @@ router.get(
   '/:xrayId/url',
   asyncHandler(async (req, res) => {
     const idResult = XrayId.safeParse(req.params.xrayId);
-    if (!idResult.success) {
-      return handleValidationError(req, res, idResult.error.issues);
-    }
+    if (!idResult.success) return handleValidationError(req, res, idResult.error.issues);
 
     const queryResult = UrlQuery.safeParse(req.query);
-    if (!queryResult.success) {
-      return handleValidationError(req, res, queryResult.error.issues);
-    }
+    if (!queryResult.success) return handleValidationError(req, res, queryResult.error.issues);
 
     const { size } = queryResult.data;
 
@@ -231,15 +357,8 @@ router.get(
       logAudit({
         actorUserId: req.auth.userId,
         action: 'XRAY_URL_REQUEST',
-        entity: {
-          type: 'XRAY',
-          id: meta.xrayId,
-        },
-        meta: {
-          visitId: meta.visitId,
-          variant: size,
-          hasThumb: !!meta.thumbKey,
-        },
+        entity: { type: 'XRAY', id: meta.xrayId },
+        meta: { visitId: meta.visitId, variant: size, hasThumb: !!meta.thumbKey },
       });
     }
 

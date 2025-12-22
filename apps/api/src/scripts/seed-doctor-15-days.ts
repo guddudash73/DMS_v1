@@ -6,10 +6,6 @@ import { dynamoClient, TABLE_NAME } from '../config/aws';
 import { patientRepository } from '../repositories/patientRepository';
 import type { Visit, VisitStatus, VisitTag } from '@dms/types';
 
-/* ---------------------------------- */
-/* CONFIG                              */
-/* ---------------------------------- */
-
 const DOCTOR_ID = '41fb7b06-c9b4-413e-b660-fd521e21dc25';
 const DAYS_BACK = 15;
 const VISITS_MIN = 6;
@@ -30,10 +26,6 @@ const REASONS = [
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: { removeUndefinedValues: true },
 });
-
-/* ---------------------------------- */
-/* HELPERS                             */
-/* ---------------------------------- */
 
 const toDateString = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
@@ -61,11 +53,6 @@ const rand = (min: number, max: number) => Math.floor(Math.random() * (max - min
 
 const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
-/**
- * STATUS LOGIC (IMPORTANT)
- * - Past days: DONE only
- * - Today: 1 IN_PROGRESS, some QUEUED, rest DONE
- */
 function statusForDay(dayOffset: number, index: number, total: number): VisitStatus {
   if (dayOffset > 0) return 'DONE';
 
@@ -76,10 +63,6 @@ function statusForDay(dayOffset: number, index: number, total: number): VisitSta
 
   return 'DONE';
 }
-
-/* ---------------------------------- */
-/* SEEDING                             */
-/* ---------------------------------- */
 
 async function ensurePatients(count = 20) {
   console.log(`Ensuring ${count} demo patients...`);
@@ -179,10 +162,6 @@ async function seedVisitsForDoctor(patients: { patientId: string; name: string }
     }
   }
 }
-
-/* ---------------------------------- */
-/* MAIN                                */
-/* ---------------------------------- */
 
 async function main() {
   console.log('Seeding doctor dashboard (15-day history)...');

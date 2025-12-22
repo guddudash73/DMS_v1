@@ -25,7 +25,6 @@ export default function RecentlyCompletedCard() {
   const showDots = isLoading || isFetching;
   const items = data?.items ?? [];
 
-  // Always render 5 rows so the card/table never shrinks
   const rows = Array.from({ length: ROWS }).map((_, i) => items[i] ?? null);
 
   return (
@@ -34,14 +33,12 @@ export default function RecentlyCompletedCard() {
       <p className="text-xs text-gray-400">Last 5 completed visits (today).</p>
 
       <div className="mt-4 overflow-hidden rounded-xl border bg-white">
-        {/* Header */}
         <div className="grid grid-cols-[1fr_64px_64px] bg-gray-50 px-3 py-3 text-[11px] font-semibold text-gray-600">
           <div>Patient</div>
           <div className="text-center">Rx</div>
           <div className="text-center">X-ray</div>
         </div>
 
-        {/* Body - fixed height via fixed row count */}
         <div className="divide-y">
           {isError && !showDots ? (
             <div className="px-3 py-3 text-xs text-red-500">Couldn&apos;t load recent visits.</div>
@@ -54,7 +51,6 @@ export default function RecentlyCompletedCard() {
                   key={row?.visitId ?? `placeholder-${idx}`}
                   className="grid h-8 grid-cols-[1fr_64px_64px] items-center px-3 text-xs"
                 >
-                  {/* Patient */}
                   <div className="truncate text-gray-900">
                     {showDots ? (
                       <span className="inline-block h-3 w-36 rounded bg-gray-100" />
@@ -65,7 +61,6 @@ export default function RecentlyCompletedCard() {
                     )}
                   </div>
 
-                  {/* Rx */}
                   <div className="flex justify-center">
                     {showDots ? (
                       <span className="inline-block h-3 w-3 rounded bg-gray-100" />
@@ -81,7 +76,6 @@ export default function RecentlyCompletedCard() {
                     )}
                   </div>
 
-                  {/* X-ray */}
                   <div className="flex justify-center">
                     {showDots ? (
                       <span className="inline-block h-3 w-3 rounded bg-gray-100" />
@@ -99,7 +93,6 @@ export default function RecentlyCompletedCard() {
           )}
         </div>
 
-        {/* Optional footer note (keeps layout calm, doesn't change height much) */}
         {!showDots && !isError && items.length === 0 && (
           <div className="border-t bg-gray-50 px-3 py-2 text-[11px] text-gray-500">
             No completed visits yet today.

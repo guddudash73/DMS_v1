@@ -51,13 +51,11 @@ function ensureSocket() {
 
     ws.onopen = () => {
       isConnecting = false;
-      // Optionally: we could re-send subscriptions here in future.
     };
 
     ws.onclose = () => {
       socket = null;
       isConnecting = false;
-      // For now we do not auto-reconnect to avoid loops without a backend.
     };
 
     ws.onerror = () => {

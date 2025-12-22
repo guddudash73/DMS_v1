@@ -48,7 +48,7 @@ function currency(v?: number) {
 }
 
 type Props = {
-  date: string; // YYYY-MM-DD
+  date: string;
   onBack: () => void;
 };
 
@@ -56,10 +56,8 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
   const { data, isLoading, isFetching, isError } = useGetDailyVisitsBreakdownQuery(date);
   const loading = isLoading || isFetching;
 
-  // Doctor filter
   const [selectedDoctorId, setSelectedDoctorId] = React.useState<string>('ALL');
 
-  // Reset filter when date changes
   React.useEffect(() => {
     setSelectedDoctorId('ALL');
   }, [date]);
@@ -75,7 +73,6 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
   const totalDoctors = loading ? '…' : (doctors.length ?? 0);
   const totalVisits = loading ? '…' : (data?.totalVisits ?? 0);
 
-  // For the dropdown label
   const selectedDoctorName = React.useMemo(() => {
     if (selectedDoctorId === 'ALL') return 'All doctors';
     const doc = doctors.find((d) => d.doctorId === selectedDoctorId);
@@ -85,7 +82,6 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
   return (
     <Card className="rounded-2xl border-none bg-white shadow-sm">
       <div className="p-4 md:p-5">
-        {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-xs text-muted-foreground">Daily breakdown</div>
@@ -103,7 +99,6 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
           </button>
         </div>
 
-        {/* Top stats + filter */}
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="rounded-xl bg-slate-50 px-3 py-2">
             <div className="text-[11px] text-muted-foreground">Doctors</div>
@@ -146,7 +141,6 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
           </div>
         </div>
 
-        {/* Body */}
         <div className="mt-4">
           {isError ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -170,12 +164,10 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
             <div className="space-y-4">
               {filteredDoctors.map((doc) => (
                 <div key={doc.doctorId} className="rounded-2xl border bg-white">
-                  {/* Doctor header */}
                   <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold">{doc.doctorName}</div>
 
-                      {/* Optional: keep doctorId, but shorter + subtle */}
                       <div className="truncate text-[11px] text-muted-foreground">
                         {doc.doctorId.slice(0, 8)}…{doc.doctorId.slice(-6)}
                       </div>
@@ -186,7 +178,6 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
                     </div>
                   </div>
 
-                  {/* Scroll INSIDE the doctor card */}
                   <div className="max-h-[480px] overflow-y-auto">
                     <div className="divide-y">
                       {doc.items.map((v) => (
@@ -209,7 +200,6 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
                               </div>
 
                               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-                                {/* Removed Patient ID */}
                                 {v.patientPhone ? (
                                   <span>
                                     <span className="text-slate-700">Phone:</span> {v.patientPhone}
@@ -238,8 +228,6 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
                               </div>
                             </div>
                           </div>
-
-                          {/* Removed Visit ID + Updated At row completely */}
                         </div>
                       ))}
                     </div>

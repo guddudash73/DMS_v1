@@ -94,7 +94,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
   const dispatch = useDispatch();
   const auth = useAuth();
 
-  // ---- LIVE DATE/TIME ----
   const [now, setNow] = useState<Date>(() => new Date());
   useEffect(() => {
     const id = window.setInterval(() => setNow(new Date()), 1000);
@@ -116,7 +115,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
 
   const todayIso = now.toISOString().slice(0, 10);
 
-  // ---- SUMMARY (reuse existing API) ----
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
   const { data: patientSummary, isLoading: summaryLoading } = useGetDailyPatientSummaryQuery(
     todayIso,
@@ -127,10 +125,8 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
 
   const totalPatients = patientSummary?.totalPatients ?? 0;
 
-  // ---- ACTIVE STATUS (UI only for now) ----
   const [activeStatus, setActiveStatus] = useState(true);
 
-  // ---- LOGOUT ----
   const handleLogout = async () => {
     try {
       dispatch(setUnauthenticated());
@@ -147,7 +143,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
     }
   };
 
-  // ---- Dynamic doctor display ----
   const doctorDisplay = useMemo(() => {
     const id = auth.userId ?? '';
     const short = id ? id.slice(0, 8) : 'Doctor';
@@ -158,15 +153,11 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
     };
   }, [auth.role, auth.userId]);
 
-  // ---- NAV ACTIVE ----
   const isActive = (href: string) => {
     if (href === '/doctor' && pathname === '/doctor') return true;
     return href !== '/doctor' && pathname.startsWith(href);
   };
 
-  // ----------------------------
-  // GLOBAL PATIENT SEARCH (same logic as ClinicShell)
-  // ----------------------------
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -280,7 +271,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
 
   return (
     <div className="flex h-screen bg-white">
-      {/* Sidebar */}
       <aside className="flex w-70 flex-col bg-white pb-5.5">
         <div className="flex w-full flex-col items-center justify-center px-6 pb-4 pt-6">
           <div className="relative h-18 w-32">
@@ -390,14 +380,11 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
         </div>
       </aside>
 
-      {/* Main content */}
       <div className="flex h-full grow items-center justify-start pr-6 min-w-auto lg:min-w-[84.4%]">
         <div className="flex h-[94%] flex-1 flex-col rounded-2xl bg-[#f1f3f5]">
-          {/* Top header */}
           <header className="flex items-center gap-4 rounded-t-2xl border-b bg-[#f1f3f5] px-4 py-2 shadow-inner 2xl:px-12">
             <h1 className="text-2xl font-semibold text-gray-900">Doctor&apos;s Panel</h1>
 
-            {/* Search */}
             <div className="flex flex-1 justify-center 2xl:px-12">
               <form
                 className="relative flex w-full max-w-2xl items-center gap-2 rounded-full border bg-white py-1 pl-2 pr-1"
@@ -421,7 +408,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
                   Search
                 </Button>
 
-                {/* Results dropdown */}
                 {dropdownOpen && (
                   <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-2xl border bg-white shadow-lg">
                     <div ref={resultsContainerRef} className="max-h-64 overflow-y-auto rounded-2xl">
@@ -499,7 +485,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
               </form>
             </div>
 
-            {/* Right-side widgets */}
             <div className="flex items-center gap-4">
               <div className="flex h-12 items-center justify-center gap-2 rounded-xl bg-gray-50 px-4 py-1">
                 <Users className="h-5 w-5 text-gray-700" />
@@ -532,7 +517,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
             </div>
           </header>
 
-          {/* Content */}
           <main className="flex-1 overflow-y-auto dms-scroll">
             <div className="relative min-h-full rounded-b-2xl bg-[#f1f3f5]">{children}</div>
           </main>

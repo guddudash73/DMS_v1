@@ -16,7 +16,7 @@ function statusBadge(status: string) {
     'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset';
   if (status === 'DONE') return `${base} bg-emerald-50 text-emerald-700 ring-emerald-200`;
   if (status === 'IN_PROGRESS') return `${base} bg-amber-50 text-amber-700 ring-amber-200`;
-  return `${base} bg-slate-50 text-slate-700 ring-slate-200`; // QUEUED
+  return `${base} bg-slate-50 text-slate-700 ring-slate-200`;
 }
 
 function tagBadge(tag?: string) {
@@ -41,7 +41,7 @@ function currency(v?: number) {
 }
 
 type Props = {
-  date: string; // YYYY-MM-DD
+  date: string;
   onBack: () => void;
 };
 
@@ -54,7 +54,6 @@ export default function DoctorDailyVisitsBreakdownPanel({ date, onBack }: Props)
   return (
     <Card className="rounded-2xl border-none bg-white shadow-sm">
       <div className="p-4 md:p-5">
-        {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-xs text-muted-foreground">Daily breakdown</div>
@@ -72,7 +71,6 @@ export default function DoctorDailyVisitsBreakdownPanel({ date, onBack }: Props)
           </button>
         </div>
 
-        {/* Top stats (same style, no dropdown) */}
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
           <div className="rounded-xl bg-slate-50 px-3 py-2">
             <div className="text-[11px] text-muted-foreground">Doctor</div>
@@ -96,7 +94,6 @@ export default function DoctorDailyVisitsBreakdownPanel({ date, onBack }: Props)
           </div>
         </div>
 
-        {/* Body */}
         <div className="mt-4">
           {isError ? (
             <div className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700">
@@ -114,7 +111,6 @@ export default function DoctorDailyVisitsBreakdownPanel({ date, onBack }: Props)
             </div>
           ) : (
             <div className="rounded-2xl border bg-white">
-              {/* Doctor header (same look as reception doctor card header) */}
               <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
                 <div className="min-w-0">
                   <div className="truncate text-sm font-semibold">{data.doctorName}</div>
@@ -128,7 +124,6 @@ export default function DoctorDailyVisitsBreakdownPanel({ date, onBack }: Props)
                 </div>
               </div>
 
-              {/* Scroll INSIDE card */}
               <div className="max-h-[480px] overflow-y-auto">
                 <div className="divide-y">
                   {data.items.map((v) => (
@@ -175,8 +170,6 @@ export default function DoctorDailyVisitsBreakdownPanel({ date, onBack }: Props)
                           </div>
                         </div>
                       </div>
-
-                      {/* Removed: patientId, visitId, updatedAt */}
                     </div>
                   ))}
                 </div>

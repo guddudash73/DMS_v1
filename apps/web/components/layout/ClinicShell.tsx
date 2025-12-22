@@ -95,7 +95,6 @@ const asErrorResponse = (data: unknown): ErrorResponse | null => {
 const deriveTitleFromPath = (pathname: string): string => {
   if (pathname === '/') return 'Dashboard';
 
-  // NOTE: we still derive title if user navigates, but in your setup New Patient opens modal.
   if (pathname.startsWith('/patients/new')) return 'New Patient';
   if (pathname.startsWith('/patients/')) return 'Patient';
   if (pathname.startsWith('/patients')) return 'Patients';
@@ -120,7 +119,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
 
   const pageTitle = deriveTitleFromPath(pathname);
 
-  // ---- LIVE DATE/TIME ----
   const [now, setNow] = useState<Date>(() => new Date());
 
   useEffect(() => {
@@ -143,7 +141,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
 
   const todayIso = now.toISOString().slice(0, 10);
 
-  // ---- SUMMARY ----
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
   const { data: patientSummary, isLoading: summaryLoading } = useGetDailyPatientSummaryQuery(
@@ -179,7 +176,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
     }
   };
 
-  // ---- GLOBAL PATIENT SEARCH ----
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -296,7 +292,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
 
   return (
     <div className="flex h-screen bg-white">
-      {/* Sidebar */}
       <aside className="flex w-70 flex-col bg-white pb-5.5">
         <div className="flex w-full flex-col items-center justify-center px-6 pb-4 pt-6">
           <div className="relative h-18 w-32">
@@ -427,14 +422,11 @@ export default function ClinicShell({ children }: ClinicShellProps) {
         </div>
       </aside>
 
-      {/* Main content */}
       <div className="flex h-full grow items-center justify-start pr-6 min-w-auto lg:min-w-[84.4%]">
         <div className="flex h-[94%] flex-1 flex-col rounded-2xl bg-[#f1f3f5]">
-          {/* Top header */}
           <header className="flex items-center gap-4 rounded-t-2xl border-b bg-[#f1f3f5] px-4 py-2 shadow-inner 2xl:px-12">
             <h1 className="m4-8 text-2xl font-semibold text-gray-900">{pageTitle}</h1>
 
-            {/* Search */}
             <div className="flex flex-1 justify-center 2xl:px-12">
               <form
                 className="relative flex w-full max-w-2xl items-center gap-2 rounded-full border bg-white py-1 pl-2 pr-1"
@@ -458,7 +450,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
                   Search
                 </Button>
 
-                {/* Results dropdown */}
                 {dropdownOpen && (
                   <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-2xl border bg-white shadow-lg">
                     <div ref={resultsContainerRef} className="max-h-64 overflow-y-auto rounded-2xl">
@@ -536,7 +527,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
               </form>
             </div>
 
-            {/* Summary */}
             <div className="flex items-center gap-3 text-[11px] text-gray-700">
               <div className="flex h-12 w-34 flex-col items-center justify-center rounded-xl bg-gray-50 px-3">
                 <div className="flex w-full items-center justify-start gap-2 pl-0.5">
@@ -580,7 +570,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
             </div>
           </header>
 
-          {/* Content */}
           <main
             className={[
               'flex-1 overflow-y-auto dms-scroll ',
@@ -588,7 +577,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
               isAnyModalOpen ? 'overflow-hidden' : '',
             ].join(' ')}
           >
-            {/* ✅ This is the overlay root: relative */}
             <div
               className={[
                 'relative min-h-full rounded-b-2xl bg-[#f1f3f5]  ',
@@ -597,7 +585,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
             >
               {children}
 
-              {/* ✅ Content-area overlays */}
               {isNewPatientOpen && <NewPatientModal onClose={() => setIsNewPatientOpen(false)} />}
 
               {visitModalPatientId && (

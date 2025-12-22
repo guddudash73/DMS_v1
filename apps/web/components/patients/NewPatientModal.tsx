@@ -58,7 +58,6 @@ export default function NewPatientModal({ onClose }: Props) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const {
@@ -109,11 +108,8 @@ export default function NewPatientModal({ onClose }: Props) {
   return (
     <div
       className={[
-        // ✅ content-area overlay (NOT full screen)
         'absolute inset-0 z-30 flex items-center justify-center',
-        // backdrop
         'bg-black/10 backdrop-blur-sm',
-        // fade in/out
         mounted && !closing ? 'opacity-100' : 'opacity-0',
         'transition-opacity duration-200',
       ].join(' ')}
@@ -125,7 +121,6 @@ export default function NewPatientModal({ onClose }: Props) {
     >
       <div
         className={[
-          // pop in/out
           mounted && !closing ? 'scale-100 translate-y-0' : 'scale-[0.98] translate-y-1',
           'transition-transform duration-200 ease-out',
         ].join(' ')}
@@ -141,7 +136,6 @@ export default function NewPatientModal({ onClose }: Props) {
               onSubmit={handleSubmit(onSubmit, onSubmitError)}
               noValidate
             >
-              {/* Name */}
               <div className="space-y-1">
                 <Label htmlFor="name" className="text-sm font-medium text-gray-800">
                   Name
@@ -160,7 +154,6 @@ export default function NewPatientModal({ onClose }: Props) {
                 <p className="h-3 text-xs">&nbsp;</p>
               </div>
 
-              {/* Phone */}
               <div className="space-y-1">
                 <Label htmlFor="phone" className="text-sm font-medium text-gray-800">
                   Contact No.
@@ -179,7 +172,6 @@ export default function NewPatientModal({ onClose }: Props) {
                 <p className="h-3 text-xs">&nbsp;</p>
               </div>
 
-              {/* Gender + DOB */}
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1">
                   <Label htmlFor="gender" className="text-sm font-medium text-gray-800">
@@ -220,7 +212,6 @@ export default function NewPatientModal({ onClose }: Props) {
                 </div>
               </div>
 
-              {/* Address */}
               <div className="space-y-1">
                 <Label htmlFor="address" className="text-sm font-medium text-gray-800">
                   Address
@@ -229,12 +220,12 @@ export default function NewPatientModal({ onClose }: Props) {
                   id="address"
                   placeholder="Type patient address here..."
                   className={`min-h-[90px] rounded-xl text-sm ${
-                    // @ts-expect-error address exists in your form shape even if schema may lag
+                    // @ts-expect-error address exists in form shape even if schema may lag
                     errors.address
                       ? 'border-red-500 focus-visible:ring-red-500'
                       : 'border-gray-200 focus-visible:ring-gray-300'
                   }`}
-                  // @ts-expect-error address exists in your form shape even if schema may lag
+                  // @ts-expect-error address exists in form shape even if schema may lag
                   {...register('address')}
                 />
                 <p className="h-3 text-xs">&nbsp;</p>

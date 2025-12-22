@@ -139,7 +139,7 @@ function VisitorsTooltip({ active, payload, label }: TooltipProps) {
 }
 
 export type VisitorsRatioChartProps = {
-  onDateSelect?: (dateIso: string) => void; // YYYY-MM-DD
+  onDateSelect?: (dateIso: string) => void;
 };
 
 export default function VisitorsRatioChart({ onDateSelect }: VisitorsRatioChartProps) {
@@ -228,7 +228,6 @@ export default function VisitorsRatioChart({ onDateSelect }: VisitorsRatioChartP
           >
             <AreaChart
               data={chartData}
-              // Works well with tooltip: click a point/area => use activePayload date
               onClick={(e: any) => {
                 const dateFromPayload = e?.activePayload?.[0]?.payload?.date;
                 const dateFromLabel = e?.activeLabel;

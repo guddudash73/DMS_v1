@@ -1,4 +1,3 @@
-// apps/web/components/doctor/dashboard/DoctorQueueFullPanel.tsx
 'use client';
 
 import * as React from 'react';
@@ -32,12 +31,10 @@ function Row({ v }: { v: QueueVisit }) {
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border bg-white px-4 py-3">
       <div className="min-w-0">
-        {/* Patient name */}
         <div className="truncate text-sm font-medium text-gray-900">
           {v.patientName || `Patient: ${v.patientId}`}
         </div>
 
-        {/* Reason */}
         <div className="mt-0.5 truncate text-[11px] text-gray-500">{v.reason ? v.reason : '—'}</div>
       </div>
 
@@ -83,7 +80,6 @@ export default function DoctorQueueFullPanel({
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
       <div className="mx-auto flex h-full w-full max-w-[1200px] flex-col gap-6 2xl:gap-10">
-        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-semibold text-gray-900">Today&apos;s Queue</h2>
@@ -103,9 +99,7 @@ export default function DoctorQueueFullPanel({
           </Button>
         </div>
 
-        {/* Columns */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          {/* Waiting */}
           <Card className="flex h-[520px] flex-col rounded-2xl border-none bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between pb-3">
               <div className="text-lg font-semibold text-gray-900">Waiting</div>
@@ -124,7 +118,6 @@ export default function DoctorQueueFullPanel({
             </div>
           </Card>
 
-          {/* On-chair */}
           <Card className="flex h-[520px] flex-col rounded-2xl border-none bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between pb-3">
               <div className="text-lg font-semibold text-gray-900">On-chair</div>
@@ -140,7 +133,6 @@ export default function DoctorQueueFullPanel({
             </div>
           </Card>
 
-          {/* Completed */}
           <Card className="flex h-[520px] flex-col rounded-2xl border-none bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between pb-3">
               <div className="text-lg font-semibold text-gray-900">Completed</div>

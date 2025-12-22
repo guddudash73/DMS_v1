@@ -12,7 +12,6 @@ export default function DoctorLayout({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (auth.status !== 'authenticated') return;
 
-    // Hard RBAC: Only DOCTOR can see this panel
     if (auth.role === 'RECEPTION') router.replace('/');
     if (auth.role === 'ADMIN') router.replace('/admin');
   }, [auth.status, auth.role, router]);

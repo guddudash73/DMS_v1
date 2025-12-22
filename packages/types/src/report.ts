@@ -1,4 +1,3 @@
-// packages/types/src/report.ts
 import { z } from 'zod';
 import { VisitStatus, VisitTag } from './visit';
 
@@ -22,30 +21,26 @@ export const DailyReport = z.object({
 });
 export type DailyReport = z.infer<typeof DailyReport>;
 
-// Summary based on N/F/Z tags
 export const DailyPatientSummary = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   newPatients: z.number().int().nonnegative(),
   followupPatients: z.number().int().nonnegative(),
   zeroBilledVisits: z.number().int().nonnegative(),
-  totalPatients: z.number().int().nonnegative(), // N + F + Z
+  totalPatients: z.number().int().nonnegative(),
 });
 export type DailyPatientSummary = z.infer<typeof DailyPatientSummary>;
 
-// Range query for a series of daily patient summaries
 export const DailyPatientSummaryRangeQuery = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   endDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 export type DailyPatientSummaryRangeQuery = z.infer<typeof DailyPatientSummaryRangeQuery>;
 
-// Time series of daily summaries
 export const DailyPatientSummarySeries = z.object({
   points: z.array(DailyPatientSummary),
 });
 export type DailyPatientSummarySeries = z.infer<typeof DailyPatientSummarySeries>;
 
-// Doctor panel chart series (patients count per day for logged-in doctor)
 export const DoctorPatientsCountPoint = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   patients: z.number().int().nonnegative(),
@@ -57,17 +52,12 @@ export const DoctorPatientsCountSeries = z.object({
 });
 export type DoctorPatientsCountSeries = z.infer<typeof DoctorPatientsCountSeries>;
 
-/**
- * Reception panel: breakdown of visits for a selected date,
- * grouped by doctor, including patient + visit details.
- */
 export const DailyVisitsBreakdownQuery = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
 export type DailyVisitsBreakdownQuery = z.infer<typeof DailyVisitsBreakdownQuery>;
 
 export const DailyVisitBreakdownItem = z.object({
-  // visit details
   visitId: z.string().min(1),
   visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   status: VisitStatus,
@@ -77,13 +67,11 @@ export const DailyVisitBreakdownItem = z.object({
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 
-  // patient details
   patientId: z.string().min(1),
   patientName: z.string().min(1),
   patientPhone: z.string().optional(),
   patientGender: z.string().optional(),
 
-  // doctor details
   doctorId: z.string().min(1),
   doctorName: z.string().min(1),
 });
@@ -104,9 +92,6 @@ export const DailyVisitsBreakdownResponse = z.object({
 });
 export type DailyVisitsBreakdownResponse = z.infer<typeof DailyVisitsBreakdownResponse>;
 
-/**
- * ✅ Doctor panel: breakdown of visits for logged-in doctor on a date
- */
 export const DoctorDailyVisitsBreakdownQuery = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });

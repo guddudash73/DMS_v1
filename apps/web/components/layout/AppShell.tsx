@@ -12,12 +12,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   const isAuthPage = AUTH_PAGES.includes(pathname);
 
-  // For auth pages (login, root) we render children WITHOUT sidebar/topbar
   if (isAuthPage) {
     return <>{children}</>;
   }
 
-  // For all other routes we keep the existing app shell
   return (
     <div className="grid min-h-screen grid-cols-1 md:grid-cols-[260px_1fr]">
       <aside className="border-r bg-white">

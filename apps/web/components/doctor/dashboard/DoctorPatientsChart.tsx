@@ -140,7 +140,7 @@ function DoctorVisitorsTooltip({ active, payload, label }: TooltipProps) {
 }
 
 export type DoctorPatientsChartProps = {
-  onDateSelect?: (dateIso: string) => void; // YYYY-MM-DD
+  onDateSelect?: (dateIso: string) => void;
 };
 
 export default function DoctorPatientsChart({ onDateSelect }: DoctorPatientsChartProps) {
