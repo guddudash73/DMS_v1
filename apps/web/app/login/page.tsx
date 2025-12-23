@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm, type SubmitErrorHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
@@ -21,6 +21,9 @@ import { toast } from 'react-toastify';
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const from = searchParams.get('from');
+
   const dispatch = useDispatch<AppDispatch>();
   const [login, { isLoading }] = useLoginMutation();
 
@@ -33,6 +36,13 @@ export default function LoginPage() {
     mode: 'onBlur',
   });
 
+  const defaultRouteByRole = (role: LoginResponse['role']) => {
+    if (role === 'RECEPTION') return '/';
+    if (role === 'DOCTOR') return '/doctor';
+    if (role === 'ADMIN') return '/admin';
+    return '/';
+  };
+
   const onSubmit = async (values: LoginRequest) => {
     dispatch(setAuthError(undefined));
 
@@ -40,21 +50,10 @@ export default function LoginPage() {
       const response = (await login(values).unwrap()) as LoginResponse;
 
       dispatch(setCredentials(response));
-      const refreshMaxAgeSec = response.tokens.refreshExpiresInSec;
-
-      await fetch(`${window.location.origin}/api/session`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ maxAgeSec: refreshMaxAgeSec }),
-      });
-
       toast.success('Logged in successfully.');
 
-      if (response.role === 'RECEPTION') router.push('/');
-      else if (response.role === 'DOCTOR') router.push('/doctor');
-      else if (response.role === 'ADMIN') router.push('/admin');
-      else router.push('/');
+      const target = from && from.startsWith('/') ? from : defaultRouteByRole(response.role);
+      router.replace(target);
     } catch (err) {
       const msg = 'Invalid credentials.';
       console.error(err);

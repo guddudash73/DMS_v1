@@ -23,7 +23,7 @@ const EnvSchema = z.object({
     .number()
     .int()
     .positive()
-    .default(60 * 60 * 24 * 14),
+    .default(60 * 60 * 24),
 
   JWT_ACCESS_SECRET: z.string().min(32),
   JWT_REFRESH_SECRET: z.string().min(32),

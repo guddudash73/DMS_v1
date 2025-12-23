@@ -1,31 +1,32 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
-const COOKIE_NAME = 'dms_logged_in';
+const REFRESH_COOKIE = 'refreshToken';
 
-export function middleware(req: NextRequest) {
+export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
+
   const isLogin = pathname === '/login';
 
   if (
     pathname.startsWith('/_next') ||
-    pathname.startsWith('/favicon.ico') ||
-    pathname.startsWith('/public') ||
-    pathname.startsWith('/api/session')
+    pathname === '/favicon.ico' ||
+    pathname.startsWith('/images') ||
+    pathname.startsWith('/public')
   ) {
     return NextResponse.next();
   }
 
-  const isLoggedIn = req.cookies.get(COOKIE_NAME)?.value === '1';
+  const hasRefreshCookie = Boolean(req.cookies.get(REFRESH_COOKIE)?.value);
 
-  if (!isLoggedIn && !isLogin) {
+  if (!hasRefreshCookie && !isLogin) {
     const url = req.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('from', pathname);
     return NextResponse.redirect(url);
   }
 
-  if (isLoggedIn && isLogin) {
+  if (hasRefreshCookie && isLogin) {
     const url = req.nextUrl.clone();
     url.pathname = '/';
     return NextResponse.redirect(url);

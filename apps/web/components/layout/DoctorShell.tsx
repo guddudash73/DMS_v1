@@ -23,11 +23,6 @@ import { Card } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
-
-import { useDispatch } from 'react-redux';
-import { setUnauthenticated } from '@/src/store/authSlice';
-import { toast } from 'react-toastify';
-
 import type { Patient } from '@dms/types';
 import { useAuth } from '@/src/hooks/useAuth';
 import {
@@ -35,6 +30,7 @@ import {
   useGetDailyPatientSummaryQuery,
   type ErrorResponse,
 } from '@/src/store/api';
+import LogoutButton from '@/components/auth/LogoutButton';
 
 type NavItem = {
   label: string;
@@ -91,7 +87,6 @@ const asErrorResponse = (data: unknown): ErrorResponse | null => {
 export default function DoctorShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const dispatch = useDispatch();
   const auth = useAuth();
 
   const [now, setNow] = useState<Date>(() => new Date());
@@ -126,22 +121,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
   const totalPatients = patientSummary?.totalPatients ?? 0;
 
   const [activeStatus, setActiveStatus] = useState(true);
-
-  const handleLogout = async () => {
-    try {
-      dispatch(setUnauthenticated());
-
-      if (typeof window !== 'undefined') window.localStorage.removeItem('dms_auth');
-
-      await fetch('/api/session', { method: 'DELETE' });
-
-      toast.success('Logged out successfully.');
-    } catch {
-      toast.error('Failed to properly log out, but your local session was cleared.');
-    } finally {
-      router.push('/login');
-    }
-  };
 
   const doctorDisplay = useMemo(() => {
     const id = auth.userId ?? '';
@@ -368,14 +347,12 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
               </div>
             </div>
 
-            <Button
-              onClick={handleLogout}
+            <LogoutButton
+              className="h-7 w-7 rounded-full text-gray-500 hover:bg-gray-100"
               variant="ghost"
               size="icon"
-              className="h-7 w-7 rounded-full text-gray-500 hover:bg-gray-100"
-            >
-              <LogOut className="h-3 w-3" />
-            </Button>
+              iconOnly
+            />
           </Card>
         </div>
       </aside>

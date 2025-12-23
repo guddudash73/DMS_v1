@@ -12,7 +12,6 @@ import {
   Headphones,
   FileStack,
   Bell,
-  LogOut,
   Users,
   Search,
   Calendar,
@@ -23,9 +22,6 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Card } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { useDispatch } from 'react-redux';
-import { setUnauthenticated } from '@/src/store/authSlice';
-import { toast } from 'react-toastify';
 import type { Patient } from '@dms/types';
 import {
   useGetPatientsQuery,
@@ -35,6 +31,7 @@ import {
 import { useAuth } from '@/src/hooks/useAuth';
 import NewPatientModal from '@/components/patients/NewPatientModal';
 import RegisterVisitModal from '@/components/visits/RegisterVisitModal';
+import LogoutButton from '@/components/auth/LogoutButton';
 
 type ClinicShellProps = {
   children: React.ReactNode;
@@ -110,7 +107,6 @@ const deriveTitleFromPath = (pathname: string): string => {
 export default function ClinicShell({ children }: ClinicShellProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const dispatch = useDispatch();
 
   const auth = useAuth();
 
@@ -158,22 +154,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
   const isActive = (href: string) => {
     if (href === '/' && pathname === '/') return true;
     return href !== '/' && pathname.startsWith(href);
-  };
-
-  const handleLogout = async () => {
-    try {
-      dispatch(setUnauthenticated());
-
-      if (typeof window !== 'undefined') window.localStorage.removeItem('dms_auth');
-
-      await fetch('/api/session', { method: 'DELETE' });
-
-      toast.success('Logged out successfully.');
-    } catch {
-      toast.error('Failed to properly log out, but your local session was cleared.');
-    } finally {
-      router.push('/login');
-    }
   };
 
   const [searchTerm, setSearchTerm] = useState('');
@@ -410,14 +390,12 @@ export default function ClinicShell({ children }: ClinicShellProps) {
               </div>
             </div>
 
-            <Button
-              onClick={handleLogout}
+            <LogoutButton
+              className="h-7 w-7 rounded-full text-gray-500 hover:bg-gray-100"
               variant="ghost"
               size="icon"
-              className="h-7 w-7 rounded-full text-gray-500 hover:bg-gray-100"
-            >
-              <LogOut className="h-3 w-3" />
-            </Button>
+              iconOnly
+            />
           </Card>
         </div>
       </aside>

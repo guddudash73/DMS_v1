@@ -9,6 +9,14 @@ declare module "sst" {
       "name": string
       "type": "sst.aws.Dynamo"
     }
+    "JWT_ACCESS_SECRET": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "JWT_REFRESH_SECRET": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
     "RealtimeWs": {
       "managementEndpoint": string
       "type": "sst.aws.ApiGatewayWebSocket"

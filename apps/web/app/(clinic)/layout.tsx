@@ -12,12 +12,10 @@ export default function ClinicLayout({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (auth.status !== 'authenticated') return;
 
-    // Hard RBAC: Doctors should never see the clinic shell
     if (auth.role === 'DOCTOR') router.replace('/doctor');
     if (auth.role === 'ADMIN') router.replace('/admin');
   }, [auth.status, auth.role, router]);
 
-  // While redirecting, avoid flashing the clinic UI
   if (auth.status === 'authenticated' && auth.role && auth.role !== 'RECEPTION') {
     return (
       <div className="flex h-screen items-center justify-center text-sm text-gray-700">

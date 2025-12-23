@@ -1,3 +1,4 @@
+// apps/web/src/store/api.ts
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import type { BaseQueryFn } from '@reduxjs/toolkit/query';
 import type { FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query';
@@ -5,6 +6,7 @@ import type { FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query';
 import type {
   LoginRequest as LoginRequestBody,
   LoginResponse,
+  RefreshResponse,
   Patient,
   PatientCreate,
   PatientSearchQuery,
@@ -19,12 +21,13 @@ import type {
   DailyVisitsBreakdownResponse,
   DoctorDailyVisitsBreakdownResponse,
   DoctorRecentCompletedResponse,
+  Xray,
+  XrayContentType,
 } from '@dms/types';
 
 import { createDoctorQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
 import type { RootState } from './index';
 import { setTokensFromRefresh, setUnauthenticated } from './authSlice';
-import type { Xray, XrayContentType } from '@dms/types';
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL && process.env.NEXT_PUBLIC_API_BASE_URL.length > 0
@@ -43,13 +46,6 @@ export interface ErrorResponse {
   traceId?: string;
 }
 
-type RootStateShape = RootState & {
-  auth?: {
-    accessToken?: string;
-    refreshToken?: string;
-  };
-};
-
 export const TAG_TYPES = [
   'Patients',
   'Patient',
@@ -58,84 +54,111 @@ export const TAG_TYPES = [
   'Followups',
   'Xrays',
 ] as const;
-type TagType = (typeof TAG_TYPES)[number];
 
 const rawBaseQuery = fetchBaseQuery({
   baseUrl: API_BASE_URL,
   credentials: 'include',
   prepareHeaders: (headers, { getState }) => {
-    const state = getState() as RootStateShape;
-    const token = state.auth?.accessToken;
+    const state = getState() as unknown as RootState;
+    const token = state.auth.accessToken;
+
     if (token) headers.set('authorization', `Bearer ${token}`);
     headers.set('accept', 'application/json');
     return headers;
   },
 });
 
+/**
+ * Important: Avoid reauth recursion and avoid noisy auth endpoints triggering refresh.
+ */
+const isAuthEndpoint = (args: string | FetchArgs) => {
+  const url = typeof args === 'string' ? args : args.url;
+  // Normalize to path-only checks
+  return (
+    url === '/auth/login' ||
+    url === '/auth/refresh' ||
+    url === '/auth/logout' ||
+    url.startsWith('/auth/login?') ||
+    url.startsWith('/auth/refresh?') ||
+    url.startsWith('/auth/logout?')
+  );
+};
+
+/**
+ * Single-flight refresh across concurrent 401s.
+ * (Module-level, not on the `api` object — which is not a stable shared storage.)
+ */
+let refreshInFlight: Promise<boolean> | null = null;
+
 const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = async (
   args,
   api,
   extraOptions,
 ) => {
+  // Never attempt refresh logic for auth endpoints themselves.
+  if (isAuthEndpoint(args)) {
+    return rawBaseQuery(args, api, extraOptions);
+  }
+
   let result = await rawBaseQuery(args, api, extraOptions);
 
   if (result.error?.status !== 401) return result;
 
-  const state = api.getState() as RootStateShape;
-  const refreshToken = state.auth?.refreshToken;
-
-  if (!refreshToken) {
-    api.dispatch(setUnauthenticated());
-    return result;
-  }
-
-  const refreshKey = '__dms_refresh_in_flight__';
-  const anyApi = api as unknown as { [k: string]: any };
-
-  if (!anyApi[refreshKey]) {
-    anyApi[refreshKey] = (async () => {
+  // If we get 401, attempt refresh once (single-flight).
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
       const refreshResult = await rawBaseQuery(
-        {
-          url: '/auth/refresh',
-          method: 'POST',
-          body: { refreshToken },
-        },
+        { url: '/auth/refresh', method: 'POST' },
         api,
         extraOptions,
       );
 
       if (refreshResult.data) {
-        api.dispatch(setTokensFromRefresh(refreshResult.data as any));
+        api.dispatch(setTokensFromRefresh(refreshResult.data as RefreshResponse));
         return true;
       }
 
+      /**
+       * DO NOT call /auth/logout here.
+       * If cookie is missing/blocked/mismatched host, logout call adds more noise and can
+       * create redirect loops. We simply mark unauthenticated and let the UI redirect.
+       */
       api.dispatch(setUnauthenticated());
+      api.dispatch(apiSlice.util.resetApiState());
       return false;
     })().finally(() => {
-      anyApi[refreshKey] = null;
+      refreshInFlight = null;
     });
   }
 
-  await anyApi[refreshKey];
+  const ok = await refreshInFlight;
 
+  if (!ok) {
+    return result; // original 401 stands; UI will handle unauth state
+  }
+
+  // retry original call once after refresh
   result = await rawBaseQuery(args, api, extraOptions);
 
+  // If still 401 after refresh, mark unauthenticated (no logout call here either)
   if (result.error?.status === 401) {
     api.dispatch(setUnauthenticated());
+    api.dispatch(apiSlice.util.resetApiState());
   }
 
   return result;
 };
 
-export const api = createApi({
+export const apiSlice = createApi({
   reducerPath: 'api',
   baseQuery: baseQueryWithReauth,
   refetchOnFocus: true,
   refetchOnReconnect: true,
-  refetchOnMountOrArgChange: true,
+  refetchOnMountOrArgChange: false,
   tagTypes: TAG_TYPES,
 
   endpoints: (builder) => ({
+    // --- Auth ---
     login: builder.mutation<LoginResponse, LoginRequestBody>({
       query: (body) => ({
         url: '/auth/login',
@@ -144,6 +167,37 @@ export const api = createApi({
       }),
     }),
 
+    refresh: builder.mutation<RefreshResponse, void>({
+      query: () => ({
+        url: '/auth/refresh',
+        method: 'POST',
+      }),
+      async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
+        try {
+          const { data } = await queryFulfilled;
+          dispatch(setTokensFromRefresh(data));
+        } catch {
+          // callers decide what to do; baseQuery will NOT recursively refresh now
+        }
+      },
+    }),
+
+    logout: builder.mutation<{ ok: true }, void>({
+      query: () => ({
+        url: '/auth/logout',
+        method: 'POST',
+      }),
+      async onQueryStarted(_arg, { dispatch, queryFulfilled }) {
+        try {
+          await queryFulfilled;
+        } finally {
+          dispatch(setUnauthenticated());
+          dispatch(apiSlice.util.resetApiState());
+        }
+      },
+    }),
+
+    // --- Reports / Dashboard ---
     getDailyReport: builder.query<DailyReport, string>({
       query: (date) => ({
         url: '/reports/daily',
@@ -199,6 +253,7 @@ export const api = createApi({
       providesTags: ['Doctors'],
     }),
 
+    // --- Me ---
     getMyPreferences: builder.query<UserPreferences, void>({
       query: () => ({
         url: '/me/preferences',
@@ -215,6 +270,7 @@ export const api = createApi({
       invalidatesTags: ['UserPreferences'],
     }),
 
+    // --- Patients ---
     getPatients: builder.query<PatientsListResponse, Partial<PatientSearchQuery>>({
       query: ({ query, limit, cursor } = {}) => ({
         url: '/patients',
@@ -256,6 +312,7 @@ export const api = createApi({
       providesTags: (_result, _error, patientId) => [{ type: 'Patient' as const, id: patientId }],
     }),
 
+    // --- Visits / Queue ---
     getDoctorQueue: builder.query<
       { items: (Visit & { patientName?: string })[] },
       { doctorId: string; date?: string; status?: 'QUEUED' | 'IN_PROGRESS' | 'DONE' }
@@ -270,36 +327,151 @@ export const api = createApi({
       }),
       providesTags: (_result, _error, args) => [{ type: 'Doctors' as const, id: args.doctorId }],
 
+      /**
+       * Token-aware WS connection.
+       * Reconnects when accessToken changes (refresh flow), preventing stale-token sockets.
+       */
       async onCacheEntryAdded(arg, { cacheDataLoaded, cacheEntryRemoved, dispatch, getState }) {
         await cacheDataLoaded;
 
-        const state = getState() as RootStateShape;
-        const token = state.auth?.accessToken;
-        if (!token) {
-          await cacheEntryRemoved;
-          return;
+        type SocketT = ReturnType<typeof createDoctorQueueWebSocket>;
+        let socket: SocketT = null;
+
+        const HEARTBEAT_MS = 5 * 60 * 1000; // 5 min
+        const IDLE_CLOSE_MS = 10 * 60 * 1000; // 10 min inactivity
+        const EXPIRY_SKEW_MS = 30_000; // refresh 30s early
+
+        let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+        let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+        const safeClose = () => {
+          if (!socket) return;
+          try {
+            socket.close();
+          } catch {}
+          socket = null;
+        };
+
+        const stopTimers = () => {
+          if (heartbeatTimer) clearInterval(heartbeatTimer);
+          if (idleTimer) clearTimeout(idleTimer);
+          heartbeatTimer = null;
+          idleTimer = null;
+        };
+
+        const getAuth = () => {
+          const state = getState() as unknown as RootState;
+          return {
+            token: state.auth.accessToken,
+            expiresAt: state.auth.accessExpiresAt,
+          };
+        };
+
+        /**
+         * Ensure access token is valid before WS connect.
+         * Refresh ONLY when required.
+         */
+        const ensureFreshAccessToken = async (): Promise<string | null> => {
+          const { token, expiresAt } = getAuth();
+          if (!token || !expiresAt) return null;
+
+          if (Date.now() < expiresAt - EXPIRY_SKEW_MS) {
+            return token;
+          }
+
+          const refreshResult = await rawBaseQuery(
+            { url: '/auth/refresh', method: 'POST' },
+            { dispatch, getState } as any,
+            {} as any,
+          );
+
+          if (refreshResult.data) {
+            dispatch(setTokensFromRefresh(refreshResult.data as RefreshResponse));
+            const s2 = getState() as unknown as RootState;
+            return s2.auth.accessToken ?? null;
+          }
+
+          dispatch(setUnauthenticated());
+          dispatch(apiSlice.util.resetApiState());
+          return null;
+        };
+
+        const openSocketIfActive = async () => {
+          if (document.visibilityState !== 'visible') return;
+
+          const token = await ensureFreshAccessToken();
+          if (!token) return;
+
+          safeClose();
+
+          socket = createDoctorQueueWebSocket({
+            token,
+            onMessage: (data: RealtimeMessage) => {
+              if (data.type !== 'DoctorQueueUpdated') return;
+              if (data.payload.doctorId !== arg.doctorId) return;
+              if (arg.date && arg.date !== data.payload.visitDate) return;
+
+              dispatch(
+                apiSlice.util.invalidateTags([{ type: 'Doctors' as const, id: arg.doctorId }]),
+              );
+            },
+          });
+
+          if (!socket) return;
+
+          heartbeatTimer = setInterval(() => {
+            try {
+              socket?.send(JSON.stringify({ type: 'ping' }));
+            } catch {}
+          }, HEARTBEAT_MS);
+
+          resetIdleTimer();
+        };
+
+        const resetIdleTimer = () => {
+          if (idleTimer) clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            stopTimers();
+            safeClose();
+          }, IDLE_CLOSE_MS);
+        };
+
+        const markActivity = () => {
+          resetIdleTimer();
+          if (!socket) {
+            void openSocketIfActive();
+          }
+        };
+
+        // initial connect if visible
+        if (document.visibilityState === 'visible') {
+          void openSocketIfActive();
         }
 
-        const socket = createDoctorQueueWebSocket({
-          token,
-          onMessage: (data: RealtimeMessage) => {
-            if (data.type !== 'DoctorQueueUpdated') return;
+        // activity listeners
+        const activityEvents = ['mousemove', 'keydown', 'mousedown', 'touchstart'];
+        activityEvents.forEach((e) => window.addEventListener(e, markActivity));
 
-            const { doctorId, visitDate } = data.payload;
-            if (doctorId !== arg.doctorId) return;
-            if (arg.date && arg.date !== visitDate) return;
+        const onVisibility = () => {
+          if (document.visibilityState === 'visible') {
+            resetIdleTimer();
+            if (!socket) {
+              void openSocketIfActive();
+            }
+          }
+          // when hidden → do nothing
+          // idle timer will handle closing
+        };
 
-            dispatch(api.util.invalidateTags([{ type: 'Doctors' as const, id: arg.doctorId }]));
-          },
-        });
-
-        if (!socket) {
-          await cacheEntryRemoved;
-          return;
-        }
+        document.addEventListener('visibilitychange', onVisibility);
 
         await cacheEntryRemoved;
-        socket.close();
+
+        // cleanup
+        activityEvents.forEach((e) => window.removeEventListener(e, markActivity));
+        document.removeEventListener('visibilitychange', onVisibility);
+        stopTimers();
+        safeClose();
       },
     }),
 
@@ -337,6 +509,7 @@ export const api = createApi({
       invalidatesTags: (_result, _error, arg) => [{ type: 'Doctors' as const, id: arg.doctorId }],
     }),
 
+    // --- Followups ---
     getDailyFollowups: builder.query<
       {
         items: {
@@ -361,6 +534,7 @@ export const api = createApi({
       providesTags: (_result, _error, date) => [{ type: 'Followups' as const, id: date }],
     }),
 
+    // --- Doctor charts ---
     getDoctorPatientsCountSeries: builder.query<
       DoctorPatientsCountSeries,
       { startDate: string; endDate: string }
@@ -384,6 +558,7 @@ export const api = createApi({
       }),
     }),
 
+    // --- Xray ---
     presignXrayUpload: builder.mutation<
       {
         xrayId: string;
@@ -415,9 +590,7 @@ export const api = createApi({
       query: ({ visitId, ...body }) => ({
         url: `/visits/${visitId}/xrays`,
         method: 'POST',
-        body: {
-          ...body,
-        },
+        body: { ...body },
       }),
       invalidatesTags: (_r, _e, arg) => [{ type: 'Xrays' as const, id: arg.visitId }],
     }),
@@ -445,28 +618,40 @@ export const api = createApi({
 
 export const {
   useLoginMutation,
+  useRefreshMutation,
+  useLogoutMutation,
+
   useGetPatientsQuery,
   useCreatePatientMutation,
   useGetPatientByIdQuery,
   useGetPatientVisitsQuery,
+
   useGetDailyReportQuery,
   useGetDailyPatientSummaryQuery,
   useGetDailyPatientSummarySeriesQuery,
   useGetDailyVisitsBreakdownQuery,
+
   useGetDoctorDailyPatientSummarySeriesQuery,
   useGetDoctorDailyVisitsBreakdownQuery,
   useGetDoctorsQuery,
+
   useGetMyPreferencesQuery,
   useUpdateMyPreferencesMutation,
+
   useGetDoctorQueueQuery,
   useCreateVisitMutation,
   useTakeSeatMutation,
   useUpdateVisitStatusMutation,
+
   useGetDailyFollowupsQuery,
+
   useGetDoctorPatientsCountSeriesQuery,
   useGetDoctorRecentCompletedQuery,
+
   usePresignXrayUploadMutation,
   useRegisterXrayMetadataMutation,
   useListVisitXraysQuery,
   useGetXrayUrlQuery,
-} = api;
+} = apiSlice;
+
+export const api = apiSlice;

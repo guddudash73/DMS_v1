@@ -1,14 +1,19 @@
-export type RealtimeMessage = {
-  type: 'DoctorQueueUpdated';
-  payload: {
-    doctorId: string;
-    visitDate: string;
-  };
-};
+// apps/web/lib/realtime.ts
+export type RealtimeMessage =
+  | {
+      type: 'DoctorQueueUpdated';
+      payload: { doctorId: string; visitDate: string };
+    }
+  // allow ping/pong shapes without breaking parsing
+  | { type: 'pong' }
+  | { type: 'ping' };
 
 export function createDoctorQueueWebSocket(params: {
   token: string;
   onMessage?: (msg: RealtimeMessage) => void;
+  onOpen?: (ev: Event) => void;
+  onClose?: (ev: CloseEvent) => void;
+  onError?: (ev: Event) => void;
 }): WebSocket | null {
   if (typeof window === 'undefined') return null;
 
@@ -28,32 +33,34 @@ export function createDoctorQueueWebSocket(params: {
 
   const socket = new WebSocket(url.toString());
 
-  socket.onopen = () => {
+  socket.onopen = (ev) => {
     console.log('[realtime] WebSocket open');
+    params.onOpen?.(ev);
   };
 
-  socket.onerror = (event) => {
-    console.error('[realtime] WebSocket error', event);
+  socket.onerror = (ev) => {
+    console.error('[realtime] WebSocket error', ev);
+    params.onError?.(ev);
   };
 
-  socket.onclose = (event) => {
+  socket.onclose = (ev) => {
     console.warn('[realtime] WebSocket closed', {
-      code: event.code,
-      reason: event.reason,
-      wasClean: event.wasClean,
+      code: ev.code,
+      reason: ev.reason,
+      wasClean: ev.wasClean,
     });
+    params.onClose?.(ev);
   };
 
-  if (params.onMessage) {
-    socket.onmessage = (event) => {
-      try {
-        const data: RealtimeMessage = JSON.parse(event.data);
-        params.onMessage?.(data);
-      } catch (err) {
-        console.error('[realtime] failed to parse message', err, event.data);
-      }
-    };
-  }
+  socket.onmessage = (event) => {
+    if (!params.onMessage) return;
+    try {
+      const data: RealtimeMessage = JSON.parse(event.data);
+      params.onMessage(data);
+    } catch (err) {
+      console.error('[realtime] failed to parse message', err, event.data);
+    }
+  };
 
   return socket;
 }

@@ -1,3 +1,4 @@
+// apps/api/src/routes/auth.ts
 import { Router, type Response } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';
@@ -15,14 +16,37 @@ const r = Router();
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCK_WINDOW_MS = 15 * 60 * 1000;
 
+const COOKIE_NAME = 'refreshToken';
+
 const setRefreshCookie = (res: Response, refreshToken: string) => {
-  res.cookie('refreshToken', refreshToken, {
+  // Keep both paths as you already do (good for cleanup / compatibility)
+  res.cookie(COOKIE_NAME, refreshToken, {
     httpOnly: true,
     secure: NODE_ENV === 'production',
-    sameSite: 'strict',
+    sameSite: 'lax',
+    maxAge: REFRESH_TOKEN_TTL_SEC * 1000,
+    path: '/',
+  });
+
+  res.cookie(COOKIE_NAME, refreshToken, {
+    httpOnly: true,
+    secure: NODE_ENV === 'production',
+    sameSite: 'lax',
     maxAge: REFRESH_TOKEN_TTL_SEC * 1000,
     path: '/auth',
   });
+};
+
+const clearRefreshCookie = (res: Response) => {
+  for (const path of ['/', '/auth']) {
+    res.cookie(COOKIE_NAME, '', {
+      httpOnly: true,
+      secure: NODE_ENV === 'production',
+      sameSite: 'lax',
+      maxAge: 0,
+      path,
+    });
+  }
 };
 
 r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next) => {
@@ -31,10 +55,7 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
 
     const user = await userRepository.getByEmail(email);
     if (!user) {
-      logInfo('auth_login_invalid_user', {
-        reqId: req.requestId,
-        email,
-      });
+      logInfo('auth_login_invalid_user', { reqId: req.requestId, email });
       return res.status(401).json({
         error: 'INVALID_CREDENTIALS',
         message: 'Invalid credentials',
@@ -49,7 +70,6 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
         userId: user.userId,
         lockUntil: user.lockUntil,
       });
-
       return res.status(423).json({
         error: 'ACCOUNT_LOCKED',
         message: 'Too many failed attempts. Please try again later.',
@@ -61,12 +81,7 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) {
       await userRepository.recordFailedLogin(user.userId, MAX_LOGIN_ATTEMPTS, LOCK_WINDOW_MS);
-
-      logInfo('auth_login_bad_password', {
-        reqId: req.requestId,
-        userId: user.userId,
-      });
-
+      logInfo('auth_login_bad_password', { reqId: req.requestId, userId: user.userId });
       return res.status(401).json({
         error: 'INVALID_CREDENTIALS',
         message: 'Invalid credentials',
@@ -84,6 +99,7 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
       expiresAt: pair.refresh.exp * 1000,
     });
 
+    // refresh token ONLY via HttpOnly cookie
     setRefreshCookie(res, pair.refresh.token);
 
     const response: LoginResponse = {
@@ -91,23 +107,15 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
       role: user.role,
       tokens: {
         accessToken: pair.access.token,
-        refreshToken: pair.refresh.token,
         expiresInSec: ACCESS_TOKEN_TTL_SEC,
-        refreshExpiresInSec: REFRESH_TOKEN_TTL_SEC,
       },
     };
 
     logAudit({
       actorUserId: user.userId,
       action: 'AUTH_LOGIN_SUCCESS',
-      entity: {
-        type: 'USER',
-        id: user.userId,
-      },
-      meta: {
-        ip: req.ip,
-        userAgent: req.get('user-agent') ?? undefined,
-      },
+      entity: { type: 'USER', id: user.userId },
+      meta: { ip: req.ip, userAgent: req.get('user-agent') ?? undefined },
     });
 
     return res.status(200).json(response);
@@ -116,12 +124,18 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
   }
 });
 
-r.post('/refresh', validate(RefreshRequest), async (req, res, next) => {
+r.post('/refresh', async (req, res, next) => {
   try {
-    const bodyToken = (req.body as RefreshRequest).refreshToken;
-    const cookieToken = req.cookies?.refreshToken as string | undefined;
-    const refreshToken = bodyToken ?? cookieToken;
+    // We will keep accepting body.refreshToken for now for compatibility,
+    // but cookie is the intended primary mechanism.
+    const body = RefreshRequest.safeParse(req.body);
+    const bodyToken = body.success ? body.data.refreshToken : undefined;
+
+    const cookieToken = req.cookies?.[COOKIE_NAME] as string | undefined;
+    const refreshToken = cookieToken ?? bodyToken;
+
     if (!refreshToken) {
+      clearRefreshCookie(res);
       throw new AuthError('Missing refresh token', 401, 'INVALID_REFRESH_TOKEN');
     }
 
@@ -129,19 +143,19 @@ r.post('/refresh', validate(RefreshRequest), async (req, res, next) => {
     try {
       decoded = verifyRefreshToken(refreshToken);
     } catch {
+      clearRefreshCookie(res);
       throw new AuthError('Invalid refresh token', 401, 'INVALID_REFRESH_TOKEN');
     }
 
-    const record = await refreshTokenRepository.consume({
-      userId: decoded.sub,
-      jti: decoded.jti,
-    });
+    const record = await refreshTokenRepository.consume({ userId: decoded.sub, jti: decoded.jti });
     if (!record) {
+      clearRefreshCookie(res);
       throw new AuthError('Refresh token expired or already used', 401, 'INVALID_REFRESH_TOKEN');
     }
 
     const user = await userRepository.getById(decoded.sub);
     if (!user) {
+      clearRefreshCookie(res);
       throw new AuthError('User not found', 401, 'INVALID_REFRESH_TOKEN');
     }
 
@@ -156,28 +170,42 @@ r.post('/refresh', validate(RefreshRequest), async (req, res, next) => {
     setRefreshCookie(res, pair.refresh.token);
 
     const response: RefreshResponse = {
+      userId: user.userId,
+      role: user.role,
       tokens: {
         accessToken: pair.access.token,
-        refreshToken: pair.refresh.token,
         expiresInSec: ACCESS_TOKEN_TTL_SEC,
-        refreshExpiresInSec: REFRESH_TOKEN_TTL_SEC,
       },
     };
 
     logAudit({
       actorUserId: user.userId,
       action: 'AUTH_REFRESH_SUCCESS',
-      entity: {
-        type: 'USER',
-        id: user.userId,
-      },
-      meta: {
-        ip: req.ip,
-        userAgent: req.get('user-agent') ?? undefined,
-      },
+      entity: { type: 'USER', id: user.userId },
+      meta: { ip: req.ip, userAgent: req.get('user-agent') ?? undefined },
     });
 
     return res.status(200).json(response);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+r.post('/logout', async (req, res, next) => {
+  try {
+    const cookieToken = req.cookies?.[COOKIE_NAME] as string | undefined;
+
+    if (cookieToken) {
+      try {
+        const decoded = verifyRefreshToken(cookieToken);
+        await refreshTokenRepository.consume({ userId: decoded.sub, jti: decoded.jti });
+      } catch {
+        // ignore
+      }
+    }
+
+    clearRefreshCookie(res);
+    return res.status(200).json({ ok: true });
   } catch (err) {
     return next(err);
   }

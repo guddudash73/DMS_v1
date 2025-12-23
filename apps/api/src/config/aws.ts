@@ -19,6 +19,8 @@ export const dynamoClient = new DynamoDBClient({
   maxAttempts: 3,
 });
 
+export const dynamoLocalClient = dynamoClient;
+
 export const s3Client = new S3Client({
   region: AWS_REGION,
   endpoint: S3_ENDPOINT,

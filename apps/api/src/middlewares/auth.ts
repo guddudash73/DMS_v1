@@ -7,7 +7,8 @@ declare module 'express-serve-static-core' {
     auth?: {
       userId: string;
       role: Role;
-      token: string;
+      // Prefer not to store raw token unless you truly need it.
+      // token?: string;
     };
     requestId?: string;
   }
@@ -26,37 +27,35 @@ export class AuthError extends Error {
 }
 
 export const authMiddleware = (req: Request, _res: Response, next: NextFunction) => {
-  const header = req.header('Authorization');
-  if (!header || !header.startsWith('Bearer ')) {
-    return next(new AuthError('Missing Authorization header'));
+  const header = req.header('Authorization') ?? req.header('authorization');
+
+  if (!header || !header.toLowerCase().startsWith('bearer ')) {
+    return next(new AuthError('UNAUTHORIZED', 401, 'UNAUTHORIZED'));
   }
 
   const token = header.slice('Bearer '.length).trim();
   if (!token) {
-    return next(new AuthError('Empty Authorization token'));
+    return next(new AuthError('UNAUTHORIZED', 401, 'UNAUTHORIZED'));
   }
 
   try {
     const decoded = verifyAccessToken(token);
+
     req.auth = {
       userId: decoded.sub,
       role: decoded.role,
-      token,
     };
+
     return next();
   } catch {
-    return next(new AuthError('Invalid or expired access token'));
+    return next(new AuthError('UNAUTHORIZED', 401, 'UNAUTHORIZED'));
   }
 };
 
 export const requireRole =
   (...allowed: Role[]) =>
   (req: Request, _res: Response, next: NextFunction) => {
-    if (!req.auth) {
-      return next(new AuthError('Missing auth context'));
-    }
-    if (!allowed.includes(req.auth.role)) {
-      return next(new AuthError('Forbidden', 403, 'FORBIDDEN'));
-    }
+    if (!req.auth) return next(new AuthError('UNAUTHORIZED', 401, 'UNAUTHORIZED'));
+    if (!allowed.includes(req.auth.role)) return next(new AuthError('FORBIDDEN', 403, 'FORBIDDEN'));
     return next();
   };
