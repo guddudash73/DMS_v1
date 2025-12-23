@@ -25,6 +25,16 @@ export const Visit = z.object({
 });
 export type Visit = z.infer<typeof Visit>;
 
+export const DoctorQueueItem = Visit.extend({
+  patientName: z.string().min(1).optional(),
+});
+export type DoctorQueueItem = z.infer<typeof DoctorQueueItem>;
+
+export const DoctorQueueResponse = z.object({
+  items: z.array(DoctorQueueItem),
+});
+export type DoctorQueueResponse = z.infer<typeof DoctorQueueResponse>;
+
 export const VisitCreate = z.object({
   patientId: PatientId,
   doctorId: UserId,

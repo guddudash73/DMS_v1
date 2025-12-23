@@ -23,6 +23,10 @@ import type {
   DoctorRecentCompletedResponse,
   Xray,
   XrayContentType,
+  DoctorQueueResponse,
+  MedicineTypeaheadItem,
+  QuickAddMedicineInput,
+  RxLineType,
 } from '@dms/types';
 
 import { createDoctorQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
@@ -53,6 +57,9 @@ export const TAG_TYPES = [
   'UserPreferences',
   'Followups',
   'Xrays',
+  'Medicines',
+  'Rx',
+  'Visit',
 ] as const;
 
 const rawBaseQuery = fetchBaseQuery({
@@ -314,7 +321,7 @@ export const apiSlice = createApi({
 
     // --- Visits / Queue ---
     getDoctorQueue: builder.query<
-      { items: (Visit & { patientName?: string })[] },
+      DoctorQueueResponse,
       { doctorId: string; date?: string; status?: 'QUEUED' | 'IN_PROGRESS' | 'DONE' }
     >({
       query: ({ doctorId, date, status }) => ({
@@ -613,6 +620,49 @@ export const apiSlice = createApi({
         params: size ? { size } : undefined,
       }),
     }),
+
+    searchMedicines: builder.query<
+      { items: MedicineTypeaheadItem[] },
+      { query: string; limit?: number }
+    >({
+      query: ({ query, limit }) => ({
+        url: '/medicines',
+        params: {
+          query,
+          ...(typeof limit === 'number' ? { limit } : {}),
+        },
+      }),
+      providesTags: (_r, _e, arg) => [{ type: 'Medicines' as const, id: arg.query }],
+    }),
+
+    quickAddMedicine: builder.mutation<MedicineTypeaheadItem, QuickAddMedicineInput>({
+      query: (body) => ({
+        url: '/medicines/quick-add',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: ['Medicines'],
+    }),
+
+    upsertVisitRx: builder.mutation<
+      { rxId: string; visitId: string; version: number; createdAt: number; updatedAt: number },
+      { visitId: string; lines: RxLineType[] }
+    >({
+      query: ({ visitId, lines }) => ({
+        url: `/visits/${visitId}/rx`,
+        method: 'POST',
+        body: { lines },
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
+    }),
+
+    getVisitById: builder.query<Visit, string>({
+      query: (visitId) => ({
+        url: `/visits/${visitId}`,
+        method: 'GET',
+      }),
+      providesTags: (_result, _error, visitId) => [{ type: 'Visit' as const, id: visitId }],
+    }),
   }),
 });
 
@@ -652,6 +702,12 @@ export const {
   useRegisterXrayMetadataMutation,
   useListVisitXraysQuery,
   useGetXrayUrlQuery,
+
+  useSearchMedicinesQuery,
+  useLazySearchMedicinesQuery,
+  useQuickAddMedicineMutation,
+  useUpsertVisitRxMutation,
+  useGetVisitByIdQuery,
 } = apiSlice;
 
 export const api = apiSlice;

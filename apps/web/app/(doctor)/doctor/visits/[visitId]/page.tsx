@@ -2,10 +2,11 @@
 
 import { useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
-import { Card } from '@/components/ui/card';
+import { PrescriptionWorkspace } from '@/components/prescription/PrescriptionWorkspace';
 import { XrayUploader } from '@/components/xray/XrayUploader';
 import { XrayGallery } from '@/components/xray/XrayGallery';
-import { Button } from '@/components/ui/button';
+import { useGetVisitByIdQuery, useGetPatientByIdQuery } from '@/src/store/api';
+import { useAuth } from '@/src/hooks/useAuth';
 
 export default function DoctorVisitHandlingPage() {
   const params = useParams();
@@ -13,48 +14,34 @@ export default function DoctorVisitHandlingPage() {
 
   const [refreshTick, setRefreshTick] = useState(0);
 
+  const auth = useAuth();
+  const doctorName = auth.userId ? `Doctor (${auth.userId})` : 'Doctor';
+
+  const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
+  const patientId = visitQuery.data?.patientId;
+  const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
+
   return (
     <div className="p-4 2xl:p-8">
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <Card className="rounded-2xl border bg-white p-4">
-          <div className="text-sm font-semibold text-gray-900">
-            Prescription Preview (placeholder)
-          </div>
-          <div className="mt-3 h-[520px] rounded-xl border bg-gray-50 p-4 text-xs text-gray-500">
-            This area will render the printable prescription preview next day.
-            <div className="mt-2 text-[10px]">VisitId: {visitId}</div>
-          </div>
-        </Card>
+      <PrescriptionWorkspace
+        visitId={visitId}
+        patientName={patientQuery.data?.name}
+        patientPhone={patientQuery.data?.phone}
+        doctorName={doctorName}
+        visitDateLabel={
+          visitQuery.data?.visitDate ? `Visit: ${visitQuery.data.visitDate}` : undefined
+        }
+      />
 
-        <Card className="rounded-2xl border bg-white p-4">
-          <div className="flex items-center justify-between border-b pb-3">
-            <div className="text-lg font-semibold text-gray-900">Medicines</div>
-            <div className="flex items-center gap-2">
-              <XrayUploader visitId={visitId} onUploaded={() => setRefreshTick((t) => t + 1)} />
-              <Button type="button" variant="outline" className="rounded-xl">
-                Import Preset
-              </Button>
-            </div>
-          </div>
+      <div className="mt-6 rounded-2xl border bg-white p-4">
+        <div className="flex items-center justify-between border-b pb-3">
+          <div className="text-lg font-semibold text-gray-900">X-Rays</div>
+          <XrayUploader visitId={visitId} onUploaded={() => setRefreshTick((t) => t + 1)} />
+        </div>
 
-          <div className="mt-4 rounded-xl border">
-            <div className="grid grid-cols-5 gap-2 border-b bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-600">
-              <div>Medicine Name</div>
-              <div>Frequency</div>
-              <div>Duration</div>
-              <div>Timing</div>
-              <div>Notes</div>
-            </div>
-
-            <div className="px-3 py-3 text-xs text-gray-500">
-              Static medicines UI placeholder for today. Next day we’ll make this dynamic.
-            </div>
-          </div>
-
-          <div className="mt-6">
-            <XrayGallery key={refreshTick} visitId={visitId} />
-          </div>
-        </Card>
+        <div className="mt-4">
+          <XrayGallery key={refreshTick} visitId={visitId} />
+        </div>
       </div>
     </div>
   );

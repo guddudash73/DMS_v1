@@ -500,7 +500,7 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
         </div>
       </div>
 
-      <footer className="absolute bottom-0 right-0 px-8 pb-1 text-[10px] text-gray-400">
+      <footer className="absolute bottom-0 right-0 px-8 text-[10px] text-gray-400">
         Designed and Developed by @TCPL Group
       </footer>
     </div>
