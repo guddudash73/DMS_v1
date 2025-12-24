@@ -38,6 +38,9 @@ import { logAudit, logError } from '../lib/logger';
 import { sendZodValidationError } from '../lib/validation';
 import { generateXrayThumbnail } from '../services/xrayThumbnails';
 import { publishDoctorQueueUpdated } from '../realtime/publisher';
+import { GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
+import { dynamoClient, TABLE_NAME } from '../config/aws';
 
 const router = express.Router();
 
@@ -350,22 +353,16 @@ router.post(
   requireRole('DOCTOR', 'ADMIN'),
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
-    if (!id.success) {
-      return handleValidationError(req, res, id.error.issues);
-    }
+    if (!id.success) return handleValidationError(req, res, id.error.issues);
 
     const parsedBody = RxCreateBody.safeParse(req.body);
-    if (!parsedBody.success) {
-      return handleValidationError(req, res, parsedBody.error.issues);
-    }
+    if (!parsedBody.success) return handleValidationError(req, res, parsedBody.error.issues);
 
     const visit = await visitRepository.getById(id.data);
     if (!visit) {
-      return res.status(404).json({
-        error: 'NOT_FOUND',
-        message: 'Visit not found',
-        traceId: req.requestId,
-      });
+      return res
+        .status(404)
+        .json({ error: 'NOT_FOUND', message: 'Visit not found', traceId: req.requestId });
     }
 
     const patient = await patientRepository.getById(visit.patientId);
@@ -373,6 +370,14 @@ router.post(
       return res.status(404).json({
         error: 'PATIENT_NOT_FOUND',
         message: 'Cannot create prescriptions for deleted or missing patient',
+        traceId: req.requestId,
+      });
+    }
+
+    if (visit.status === 'DONE') {
+      return res.status(409).json({
+        error: 'RX_REVISION_REQUIRED',
+        message: 'Visit is DONE. Start a revision to edit prescription.',
         traceId: req.requestId,
       });
     }
@@ -410,30 +415,14 @@ router.post(
             ? { name: err.name, message: err.message }
             : { message: String(err) },
       });
-
       throw new PrescriptionStorageError();
     }
 
-    const prescription = await prescriptionRepository.createForVisit({
+    const prescription = await prescriptionRepository.upsertDraftForVisit({
       visit,
       lines,
       jsonKey,
     });
-
-    if (req.auth) {
-      logAudit({
-        actorUserId: req.auth.userId,
-        action: 'RX_CREATED',
-        entity: {
-          type: 'RX',
-          id: prescription.rxId,
-        },
-        meta: {
-          visitId: prescription.visitId,
-          version: prescription.version,
-        },
-      });
-    }
 
     return res.status(201).json({
       rxId: prescription.rxId,
@@ -686,6 +675,141 @@ router.get(
       });
     }
     return res.status(200).json(billing);
+  }),
+);
+
+router.get(
+  '/:visitId/rx',
+  requireRole('DOCTOR', 'ADMIN'),
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    if (!id.success) return handleValidationError(req, res, id.error.issues);
+
+    const visit = await visitRepository.getById(id.data);
+    if (!visit) {
+      return res
+        .status(404)
+        .json({ error: 'NOT_FOUND', message: 'Visit not found', traceId: req.requestId });
+    }
+
+    const patient = await patientRepository.getById(visit.patientId);
+    if (!patient || patient.isDeleted) {
+      return res.status(404).json({
+        error: 'PATIENT_NOT_FOUND',
+        message: 'Patient not found or deleted',
+        traceId: req.requestId,
+      });
+    }
+
+    const rx = await prescriptionRepository.getCurrentForVisit(visit.visitId);
+    if (!rx) {
+      return res.status(200).json({ rx: null });
+    }
+
+    return res.status(200).json({ rx });
+  }),
+);
+
+router.get(
+  '/:visitId/rx/versions',
+  requireRole('DOCTOR', 'ADMIN'),
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    if (!id.success) return handleValidationError(req, res, id.error.issues);
+
+    const visit = await visitRepository.getById(id.data);
+    if (!visit) {
+      return res
+        .status(404)
+        .json({ error: 'NOT_FOUND', message: 'Visit not found', traceId: req.requestId });
+    }
+
+    const items = await prescriptionRepository.listByVisit(visit.visitId);
+    return res.status(200).json({ items });
+  }),
+);
+
+router.post(
+  '/:visitId/rx/revisions',
+  requireRole('DOCTOR', 'ADMIN'),
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    if (!id.success) return handleValidationError(req, res, id.error.issues);
+
+    const visit = await visitRepository.getById(id.data);
+    if (!visit) {
+      return res
+        .status(404)
+        .json({ error: 'NOT_FOUND', message: 'Visit not found', traceId: req.requestId });
+    }
+
+    if (visit.status !== 'DONE') {
+      return res.status(409).json({
+        error: 'RX_REVISION_NOT_ALLOWED',
+        message: 'Revisions can be created only after visit is DONE',
+        traceId: req.requestId,
+      });
+    }
+
+    // start from current rx if exists, else allow blank? (safe default: require existing)
+    const current = await prescriptionRepository.getCurrentForVisit(visit.visitId);
+    if (!current) {
+      return res.status(409).json({
+        error: 'RX_MISSING',
+        message: 'No existing prescription found to revise',
+        traceId: req.requestId,
+      });
+    }
+
+    // copy existing lines into new version (doctor can edit afterwards)
+    const now = Date.now();
+    const jsonKey = `rx/${visit.visitId}/${randomUUID()}.json`;
+
+    const jsonPayload = {
+      visitId: visit.visitId,
+      doctorId: visit.doctorId,
+      lines: current.lines,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    try {
+      await withRetry(() =>
+        s3Client.send(
+          new PutObjectCommand({
+            Bucket: XRAY_BUCKET_NAME,
+            Key: jsonKey,
+            Body: JSON.stringify(jsonPayload),
+            ContentType: 'application/json',
+            ServerSideEncryption: 'AES256',
+          }),
+        ),
+      );
+    } catch (err) {
+      logError('rx_revision_s3_put_failed', {
+        reqId: req.requestId,
+        visitId: visit.visitId,
+        error:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      });
+      throw new PrescriptionStorageError();
+    }
+
+    const created = await prescriptionRepository.createNewVersionForVisit({
+      visit,
+      lines: current.lines,
+      jsonKey,
+    });
+
+    return res.status(201).json({
+      rxId: created.rxId,
+      visitId: created.visitId,
+      version: created.version,
+      createdAt: created.createdAt,
+      updatedAt: created.updatedAt,
+    });
   }),
 );
 

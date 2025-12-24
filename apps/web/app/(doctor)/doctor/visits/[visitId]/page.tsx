@@ -31,6 +31,7 @@ export default function DoctorVisitHandlingPage() {
         visitDateLabel={
           visitQuery.data?.visitDate ? `Visit: ${visitQuery.data.visitDate}` : undefined
         }
+        visitStatus={visitQuery.data?.status}
       />
 
       <div className="mt-6 rounded-2xl border bg-white p-4">

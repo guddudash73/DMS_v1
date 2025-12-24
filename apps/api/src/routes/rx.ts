@@ -8,6 +8,7 @@ import { visitRepository } from '../repositories/visitRepository';
 import { patientRepository } from '../repositories/patientRepository';
 import { sendZodValidationError } from '../lib/validation';
 import { logError } from '../lib/logger';
+import { RxLine } from '@dms/types';
 
 const router = express.Router();
 
@@ -38,6 +39,11 @@ const RxIdParam = z.object({
   rxId: RxId,
 });
 type RxIdParam = z.infer<typeof RxIdParam>;
+
+const RxUpdateBody = z.object({
+  lines: z.array(RxLine).min(1),
+  jsonKey: z.string().min(1).optional(), // allow server to set, but can accept if needed
+});
 
 router.get(
   '/:rxId/json-url',
@@ -127,6 +133,46 @@ router.get(
     return res.status(200).json({
       status: 'NOT_IMPLEMENTED',
       message: 'PDF generation for prescriptions is not implemented yet.',
+    });
+  }),
+);
+
+router.put(
+  '/:rxId',
+  asyncHandler(async (req, res) => {
+    const parsedId = RxIdParam.safeParse(req.params);
+    if (!parsedId.success) return handleValidationError(req, res, parsedId.error.issues);
+
+    const body = RxUpdateBody.safeParse(req.body);
+    if (!body.success) return handleValidationError(req, res, body.error.issues);
+
+    const rxId = parsedId.data.rxId;
+    const existing = await prescriptionRepository.getById(rxId);
+    if (!existing) {
+      return res
+        .status(404)
+        .json({ error: 'RX_NOT_FOUND', message: 'Prescription not found', traceId: req.requestId });
+    }
+
+    // If jsonKey not provided, keep old jsonKey (you can also generate a new one if you want)
+    const updated = await prescriptionRepository.updateById({
+      rxId,
+      lines: body.data.lines,
+      jsonKey: body.data.jsonKey ?? existing.jsonKey,
+    });
+
+    if (!updated) {
+      return res
+        .status(404)
+        .json({ error: 'RX_NOT_FOUND', message: 'Prescription not found', traceId: req.requestId });
+    }
+
+    return res.status(200).json({
+      rxId: updated.rxId,
+      visitId: updated.visitId,
+      version: updated.version,
+      createdAt: updated.createdAt,
+      updatedAt: updated.updatedAt,
     });
   }),
 );

@@ -1,3 +1,5 @@
+// apps/api/src/repositories/visitRepository.ts
+
 import { randomUUID } from 'node:crypto';
 import {
   ConditionalCheckFailedException,
@@ -75,6 +77,20 @@ export interface VisitRepository {
   updateStatus(visitId: string, nextStatus: VisitStatus): Promise<Visit | null>;
   getDoctorQueue(params: VisitQueueQuery): Promise<Visit[]>;
   listByDate(date: string): Promise<Visit[]>;
+
+  /**
+   * Persist the “current” prescription pointer for a visit.
+   *
+   * - Updates VISIT meta item
+   * - Updates PATIENT visit item (recommended for list views)
+   * - Enforces monotonic version moves (won’t overwrite a newer pointer)
+   */
+  setCurrentRxPointer(params: {
+    visitId: string;
+    patientId: string;
+    rxId: string;
+    version: number;
+  }): Promise<void>;
 }
 
 export class DynamoDBVisitRepository implements VisitRepository {
@@ -177,7 +193,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
 
     if (!this.isValidTransition(current.status, nextStatus)) {
       throw new InvalidStatusTransitionError(
-        `Invalid status transaction ${current.status} -> ${nextStatus}`,
+        `Invalid status transition ${current.status} -> ${nextStatus}`,
       );
     }
 
@@ -343,12 +359,13 @@ export class DynamoDBVisitRepository implements VisitRepository {
           err instanceof ConditionalCheckFailedException
         ) {
           throw new InvalidStatusTransitionError(
-            `Invalid status transaction ${current.status} -> ${nextStatus}`,
+            `Invalid status transition ${current.status} -> ${nextStatus}`,
           );
         }
         throw err;
       }
     }
+
     await docClient.send(
       new UpdateCommand({
         TableName: TABLE_NAME,
@@ -415,6 +432,76 @@ export class DynamoDBVisitRepository implements VisitRepository {
 
     if (!Items || Items.length === 0) return [];
     return Items as Visit[];
+  }
+
+  async setCurrentRxPointer(params: {
+    visitId: string;
+    patientId: string;
+    rxId: string;
+    version: number;
+  }): Promise<void> {
+    const now = Date.now();
+
+    const metaKey = buildVisitMetaKeys(params.visitId);
+    const patientVisitKey = buildPatientVisitKeys(params.patientId, params.visitId);
+
+    // Monotonic pointer update: only move forward (or set if missing).
+    const condition =
+      'attribute_exists(PK) AND (attribute_not_exists(#currentRxVersion) OR :version >= #currentRxVersion)';
+
+    const names = {
+      '#currentRxId': 'currentRxId',
+      '#currentRxVersion': 'currentRxVersion',
+      '#currentRxUpdatedAt': 'currentRxUpdatedAt',
+      '#updatedAt': 'updatedAt',
+    };
+
+    const values = {
+      ':rxId': params.rxId,
+      ':version': params.version,
+      ':now': now,
+    };
+
+    try {
+      await docClient.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Update: {
+                TableName: TABLE_NAME,
+                Key: metaKey,
+                UpdateExpression:
+                  'SET #currentRxId = :rxId, #currentRxVersion = :version, #currentRxUpdatedAt = :now, #updatedAt = :now',
+                ExpressionAttributeNames: names,
+                ExpressionAttributeValues: values,
+                ConditionExpression: condition,
+              },
+            },
+            {
+              Update: {
+                TableName: TABLE_NAME,
+                Key: patientVisitKey,
+                UpdateExpression:
+                  'SET #currentRxId = :rxId, #currentRxVersion = :version, #currentRxUpdatedAt = :now, #updatedAt = :now',
+                ExpressionAttributeNames: names,
+                ExpressionAttributeValues: values,
+                ConditionExpression: 'attribute_exists(PK)',
+              },
+            },
+          ],
+        }),
+      );
+    } catch (err) {
+      // If the monotonic condition fails (newer pointer already set) this will cancel the transaction.
+      // Treat that case as a no-op.
+      if (
+        err instanceof TransactionCanceledException ||
+        err instanceof ConditionalCheckFailedException
+      ) {
+        return;
+      }
+      throw err;
+    }
   }
 }
 

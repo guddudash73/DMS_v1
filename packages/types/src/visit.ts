@@ -22,6 +22,8 @@ export const Visit = z.object({
   updatedAt: z.number().int().nonnegative(),
   billingAmount: z.number().nonnegative().optional(),
   tag: VisitTag.optional(),
+  currentRxId: z.string().min(1).optional(),
+  currentRxVersion: z.number().int().min(1).optional(),
 });
 export type Visit = z.infer<typeof Visit>;
 

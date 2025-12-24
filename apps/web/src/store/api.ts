@@ -27,6 +27,7 @@ import type {
   MedicineTypeaheadItem,
   QuickAddMedicineInput,
   RxLineType,
+  Prescription,
 } from '@dms/types';
 
 import { createDoctorQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
@@ -663,6 +664,36 @@ export const apiSlice = createApi({
       }),
       providesTags: (_result, _error, visitId) => [{ type: 'Visit' as const, id: visitId }],
     }),
+
+    getVisitRx: builder.query<{ rx: Prescription | null }, { visitId: string }>({
+      query: ({ visitId }) => ({
+        url: `/visits/${visitId}/rx`,
+        method: 'GET',
+      }),
+      providesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
+    }),
+
+    startVisitRxRevision: builder.mutation<
+      { rxId: string; visitId: string; version: number; createdAt: number; updatedAt: number },
+      { visitId: string }
+    >({
+      query: ({ visitId }) => ({
+        url: `/visits/${visitId}/rx/revisions`,
+        method: 'POST',
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
+    }),
+
+    updateRxById: builder.mutation<
+      { rxId: string; visitId: string; version: number; createdAt: number; updatedAt: number },
+      { rxId: string; lines: RxLineType[] }
+    >({
+      query: ({ rxId, lines }) => ({
+        url: `/rx/${rxId}`,
+        method: 'PUT',
+        body: { lines },
+      }),
+    }),
   }),
 });
 
@@ -708,6 +739,10 @@ export const {
   useQuickAddMedicineMutation,
   useUpsertVisitRxMutation,
   useGetVisitByIdQuery,
+
+  useGetVisitRxQuery,
+  useStartVisitRxRevisionMutation,
+  useUpdateRxByIdMutation,
 } = apiSlice;
 
 export const api = apiSlice;
