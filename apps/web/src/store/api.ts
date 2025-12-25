@@ -404,6 +404,14 @@ export const apiSlice = createApi({
           return null;
         };
 
+        const resetIdleTimer = () => {
+          if (idleTimer) clearTimeout(idleTimer);
+          idleTimer = setTimeout(() => {
+            stopTimers();
+            safeClose();
+          }, IDLE_CLOSE_MS);
+        };
+
         const openSocketIfActive = async () => {
           if (document.visibilityState !== 'visible') return;
 
@@ -434,14 +442,6 @@ export const apiSlice = createApi({
           }, HEARTBEAT_MS);
 
           resetIdleTimer();
-        };
-
-        const resetIdleTimer = () => {
-          if (idleTimer) clearTimeout(idleTimer);
-          idleTimer = setTimeout(() => {
-            stopTimers();
-            safeClose();
-          }, IDLE_CLOSE_MS);
         };
 
         const markActivity = () => {
@@ -611,6 +611,14 @@ export const apiSlice = createApi({
       providesTags: (_r, _e, arg) => [{ type: 'Xrays' as const, id: arg.visitId }],
     }),
 
+    deleteXray: builder.mutation<{ ok: true }, { visitId: string; xrayId: string }>({
+      query: ({ xrayId }) => ({
+        url: `/xrays/${xrayId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: 'Xrays' as const, id: arg.visitId }],
+    }),
+
     getXrayUrl: builder.query<
       { url: string; variant: 'thumb' | 'original' },
       { xrayId: string; size?: 'thumb' | 'original' }
@@ -622,6 +630,7 @@ export const apiSlice = createApi({
       }),
     }),
 
+    // --- Medicines ---
     searchMedicines: builder.query<
       { items: MedicineTypeaheadItem[] },
       { query: string; limit?: number }
@@ -645,6 +654,7 @@ export const apiSlice = createApi({
       invalidatesTags: ['Medicines'],
     }),
 
+    // --- Prescription (Rx) ---
     upsertVisitRx: builder.mutation<
       { rxId: string; visitId: string; version: number; createdAt: number; updatedAt: number },
       { visitId: string; lines: RxLineType[] }
@@ -671,6 +681,19 @@ export const apiSlice = createApi({
         method: 'GET',
       }),
       providesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
+    }),
+
+    // ✅ NEW: Reception notes for Rx (front desk)
+    updateVisitRxReceptionNotes: builder.mutation<
+      { rx: Prescription },
+      { visitId: string; receptionNotes: string }
+    >({
+      query: ({ visitId, receptionNotes }) => ({
+        url: `/visits/${visitId}/rx/reception-notes`,
+        method: 'PATCH',
+        body: { receptionNotes },
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
     }),
 
     startVisitRxRevision: builder.mutation<
@@ -732,6 +755,7 @@ export const {
   usePresignXrayUploadMutation,
   useRegisterXrayMetadataMutation,
   useListVisitXraysQuery,
+  useDeleteXrayMutation,
   useGetXrayUrlQuery,
 
   useSearchMedicinesQuery,
@@ -741,6 +765,7 @@ export const {
   useGetVisitByIdQuery,
 
   useGetVisitRxQuery,
+  useUpdateVisitRxReceptionNotesMutation, // ✅ NEW export
   useStartVisitRxRevisionMutation,
   useUpdateRxByIdMutation,
 } = apiSlice;

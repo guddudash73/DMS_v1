@@ -53,6 +53,10 @@ const asyncHandler =
   (req: Request, res: Response, next: NextFunction) =>
     void fn(req, res, next).catch(next);
 
+const RxReceptionNotesBody = z.object({
+  receptionNotes: z.string().max(2000),
+});
+
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 100): Promise<T> {
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
@@ -680,7 +684,7 @@ router.get(
 
 router.get(
   '/:visitId/rx',
-  requireRole('DOCTOR', 'ADMIN'),
+  requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) return handleValidationError(req, res, id.error.issues);
@@ -810,6 +814,51 @@ router.post(
       createdAt: created.createdAt,
       updatedAt: created.updatedAt,
     });
+  }),
+);
+
+router.patch(
+  '/:visitId/rx/reception-notes',
+  requireRole('RECEPTION', 'ADMIN'),
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    if (!id.success) return handleValidationError(req, res, id.error.issues);
+
+    const parsedBody = RxReceptionNotesBody.safeParse(req.body);
+    if (!parsedBody.success) return handleValidationError(req, res, parsedBody.error.issues);
+
+    const visit = await visitRepository.getById(id.data);
+    if (!visit) {
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Visit not found',
+        traceId: req.requestId,
+      });
+    }
+
+    const rx = await prescriptionRepository.getCurrentForVisit(visit.visitId);
+    if (!rx) {
+      return res.status(409).json({
+        error: 'RX_MISSING',
+        message: 'No prescription found for this visit',
+        traceId: req.requestId,
+      });
+    }
+
+    const updated = await prescriptionRepository.updateReceptionNotesById({
+      rxId: rx.rxId,
+      receptionNotes: parsedBody.data.receptionNotes,
+    });
+
+    if (!updated) {
+      return res.status(404).json({
+        error: 'RX_NOT_FOUND',
+        message: 'Prescription not found',
+        traceId: req.requestId,
+      });
+    }
+
+    return res.status(200).json({ rx: updated });
   }),
 );
 

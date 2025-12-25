@@ -7,8 +7,10 @@ type Props = {
   patientName?: string;
   patientPhone?: string;
   doctorName?: string;
-  visitDateLabel?: string; // we'll show this as "Regd. Date"
+  visitDateLabel?: string;
   lines: RxLineType[];
+  // ✅ NEW
+  receptionNotes?: string;
 };
 
 const FREQ_LABEL: Record<RxLineType['frequency'], string> = {
@@ -28,27 +30,16 @@ const TIMING_LABEL: Record<NonNullable<RxLineType['timing']>, string> = {
 
 function buildLineText(l: RxLineType) {
   const parts: string[] = [];
-
   const med = [l.medicine, l.dose].filter(Boolean).join(' ').trim();
   if (med) parts.push(med);
 
-  // Frequency like: QD(Once Daily)
   const freq = l.frequency ? `${l.frequency}(${FREQ_LABEL[l.frequency]})` : '';
   const timing = l.timing ? TIMING_LABEL[l.timing] : '';
-
-  // Compose: "QD(Once Daily) After food"
   const freqTiming = [freq, timing].filter(Boolean).join(' ').trim();
-
   if (freqTiming) parts.push(`- ${freqTiming}`);
 
-  // Duration: "For 3 days."
-  if (typeof l.duration === 'number' && l.duration > 0) {
-    parts.push(`For ${l.duration} days.`);
-  }
-
-  // Notes (optional)
+  if (typeof l.duration === 'number' && l.duration > 0) parts.push(`For ${l.duration} days.`);
   if (l.notes?.trim()) parts.push(l.notes.trim());
-
   return parts.join(' ');
 }
 
@@ -58,16 +49,16 @@ export function PrescriptionPreview({
   doctorName,
   visitDateLabel,
   lines,
+  receptionNotes,
 }: Props) {
+  const hasNotes = !!receptionNotes?.trim();
+
   return (
     <div className="mx-auto w-full max-w-[760px]">
-      {/* A4 sheet */}
       <div className="aspect-210/297 w-full overflow-hidden rounded-xl border bg-white shadow-sm">
         <div className="flex h-full flex-col">
-          {/* ===== Fixed Header ===== */}
           <div className="shrink-0 px-6 pt-4">
             <div className="flex items-start gap-4 justify-between">
-              {/* Left: tooth logo */}
               <div className="relative h-16 w-16">
                 <Image
                   src="/rx-logo-r.png"
@@ -79,7 +70,6 @@ export function PrescriptionPreview({
                 />
               </div>
 
-              {/* Center: CONTACT / EMERGENCY */}
               <div className="mt-2 flex items-center justify-center w-full gap-10">
                 <div>
                   <div className="text-[10px] 2xl:text-[14px] font-semibold tracking-[0.25em] text-emerald-600">
@@ -99,7 +89,6 @@ export function PrescriptionPreview({
                 </div>
               </div>
 
-              {/* Right: Sarangi Dentistry logo */}
               <div className="relative h-14 w-38">
                 <Image
                   src="/dashboard-logo.png"
@@ -112,14 +101,11 @@ export function PrescriptionPreview({
               </div>
             </div>
 
-            {/* green divider */}
             <div className="mt-1 h-px w-full bg-emerald-600/60" />
           </div>
 
-          {/* ===== Fixed Patient/Doctor Block ===== */}
           <div className="shrink-0 px-6 pt-3">
             <div className="flex flex-col items-start justify-between">
-              {/* Left column */}
               <div className="min-w-[360px] flex flex-col">
                 <div className="2xl:text-xs text-[0.6rem] font-bold text-gray-900">
                   {doctorName ?? 'Dr. Soumendra Sarangi'}
@@ -147,7 +133,6 @@ export function PrescriptionPreview({
                   </div>
                 </div>
 
-                {/* Right column */}
                 <div className="2xl:space-y-1 space-y-0 2xl:text-[0.7rem] text-[0.5rem] 2xl:w-50 w-40 justify-start">
                   <div className="flex gap-3 ">
                     <div className="2xl:w-18 w-12 text-gray-600">Regd. Date</div>
@@ -173,15 +158,14 @@ export function PrescriptionPreview({
             <div className="mt-3 h-px w-full bg-gray-900/30" />
           </div>
 
-          {/* ===== Scroll/Expand Area (ONLY medicines content changes) ===== */}
           <div className="min-h-0 flex-1 px-6 pt-4">
             {lines.length === 0 ? (
               <div className="text-[13px] text-gray-500">No medicines added yet.</div>
             ) : (
-              <ol className="space-y-6 text-[16px] leading-7 text-gray-900">
+              <ol className="2xl:text-xs text-[0.7rem] leading-4 2xl:leading-6 text-gray-900">
                 {lines.map((l, idx) => (
-                  <li key={idx} className="flex gap-3">
-                    <div className="w-6 shrink-0 text-right font-medium">{idx + 1}.</div>
+                  <li key={idx} className="flex gap-1">
+                    <div className="w-4 shrink-0 text-right font-medium">{idx + 1}.</div>
                     <div className="font-medium">{buildLineText(l)}</div>
                   </li>
                 ))}
@@ -189,7 +173,20 @@ export function PrescriptionPreview({
             )}
           </div>
 
-          {/* ===== Fixed Footer ===== */}
+          {/* ✅ Notes (reception) */}
+          {hasNotes ? (
+            <div className="shrink-0 px-6 pb-2">
+              <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+                <div className="text-[10px] 2xl:text-[12px] font-semibold text-gray-700">
+                  Reception Notes
+                </div>
+                <div className="mt-1 text-[10px] 2xl:text-[12px] leading-4 text-gray-900 whitespace-pre-wrap">
+                  {receptionNotes}
+                </div>
+              </div>
+            </div>
+          ) : null}
+
           <div className="shrink-0 px-6 pb-4">
             <div className="mt-2 h-px w-full bg-emerald-600/60" />
             <div className="mt-2 2xl:text-xs text-[0.5rem] font-medium text-gray-900">

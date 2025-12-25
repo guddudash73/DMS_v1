@@ -1,10 +1,10 @@
+// apps/api/src/repositories/prescriptionRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
   GetCommand,
   QueryCommand,
   TransactWriteCommand,
-  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 import type { Visit, Prescription, RxId, RxLineType } from '@dms/types';
@@ -29,25 +29,26 @@ const buildVisitMetaKey = (visitId: string) => ({
 });
 
 export interface PrescriptionRepository {
-  /** Draft flow: one current rx per visit (same rxId) */
   upsertDraftForVisit(params: {
     visit: Visit;
     lines: RxLineType[];
     jsonKey: string;
   }): Promise<Prescription>;
-
-  /** Explicit revision after DONE: creates new rxId with version = max+1 and updates visit pointer */
   createNewVersionForVisit(params: {
     visit: Visit;
     lines: RxLineType[];
     jsonKey: string;
   }): Promise<Prescription>;
-
-  /** Update an existing rxId (used after revision starts) */
   updateById(params: {
     rxId: RxId;
     lines: RxLineType[];
     jsonKey: string;
+  }): Promise<Prescription | null>;
+
+  // ✅ NEW
+  updateReceptionNotesById(params: {
+    rxId: RxId;
+    receptionNotes: string;
   }): Promise<Prescription | null>;
 
   getById(rxId: RxId): Promise<Prescription | null>;
@@ -64,7 +65,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
         ConsistentRead: true,
       }),
     );
-    if (!Item || Item.entityType !== 'RX') return null;
+    if (!Item || (Item as any).entityType !== 'RX') return null;
     return Item as Prescription;
   }
 
@@ -95,14 +96,13 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       }),
     );
 
-    if (!Item || Item.entityType !== 'VISIT') return null;
+    if (!Item || (Item as any).entityType !== 'VISIT') return null;
     const currentRxId = (Item as any).currentRxId as string | undefined;
     if (!currentRxId) return null;
 
     return this.getById(currentRxId);
   }
 
-  /** Draft: create once (v1) and keep updating same rxId */
   async upsertDraftForVisit(params: {
     visit: Visit;
     lines: RxLineType[];
@@ -110,7 +110,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
   }): Promise<Prescription> {
     const { visit, lines, jsonKey } = params;
 
-    // Read visit meta to see if we already have a current Rx pointer
     const { Item: visitMeta } = await docClient.send(
       new GetCommand({
         TableName: TABLE_NAME,
@@ -121,14 +120,11 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
 
     const currentRxId = (visitMeta as any)?.currentRxId as string | undefined;
 
-    // If exists, just update same rxId (no new version)
     if (currentRxId) {
       const updated = await this.updateById({ rxId: currentRxId, lines, jsonKey });
       if (updated) return updated;
-      // If pointer is stale (shouldn't happen), fall through to create
     }
 
-    // Create initial draft v1
     const now = Date.now();
     const rxId = randomUUID();
     const version = 1;
@@ -140,6 +136,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       lines,
       version,
       jsonKey,
+      receptionNotes: undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -160,16 +157,10 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       ...base,
     };
 
-    // Transaction: create RX + set visit pointer iff not already set
     await docClient.send(
       new TransactWriteCommand({
         TransactItems: [
-          {
-            Put: {
-              TableName: TABLE_NAME,
-              Item: visitScopedItem,
-            },
-          },
+          { Put: { TableName: TABLE_NAME, Item: visitScopedItem } },
           {
             Put: {
               TableName: TABLE_NAME,
@@ -192,7 +183,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
                 ':v': version,
                 ':u': now,
               },
-              // ✅ Only set pointer if not already present
               ConditionExpression: 'attribute_exists(PK) AND attribute_not_exists(#currentRxId)',
             },
           },
@@ -203,7 +193,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     return base;
   }
 
-  /** Revision: compute next version, create new rxId, update visit pointer (always overwrites pointer) */
   async createNewVersionForVisit(params: {
     visit: Visit;
     lines: RxLineType[];
@@ -211,7 +200,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
   }): Promise<Prescription> {
     const { visit, lines, jsonKey } = params;
 
-    // Determine next version by scanning visit scoped RX items
     const existing = await this.listByVisit(visit.visitId);
     const maxVersion = existing.reduce((m, p) => (p.version > m ? p.version : m), 0);
     const version = maxVersion + 1;
@@ -226,6 +214,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       lines,
       version,
       jsonKey,
+      receptionNotes: undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -299,7 +288,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       updatedAt: now,
     };
 
-    // Update BOTH items: RX meta + VISIT scoped RX
     await docClient.send(
       new TransactWriteCommand({
         TransactItems: [
@@ -334,6 +322,64 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
               ExpressionAttributeValues: {
                 ':l': lines,
                 ':j': jsonKey,
+                ':u': now,
+              },
+              ConditionExpression: 'attribute_exists(PK)',
+            },
+          },
+        ],
+      }),
+    );
+
+    return next;
+  }
+
+  // ✅ NEW: receptionist notes update
+  async updateReceptionNotesById(params: {
+    rxId: RxId;
+    receptionNotes: string;
+  }): Promise<Prescription | null> {
+    const { rxId, receptionNotes } = params;
+    const existing = await this.getById(rxId);
+    if (!existing) return null;
+
+    const now = Date.now();
+    const next: Prescription = {
+      ...existing,
+      receptionNotes,
+      updatedAt: now,
+    };
+
+    await docClient.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Update: {
+              TableName: TABLE_NAME,
+              Key: buildRxMetaKey(rxId),
+              UpdateExpression: 'SET #receptionNotes = :n, #updatedAt = :u',
+              ExpressionAttributeNames: {
+                '#receptionNotes': 'receptionNotes',
+                '#updatedAt': 'updatedAt',
+              },
+              ExpressionAttributeValues: {
+                ':n': receptionNotes,
+                ':u': now,
+              },
+              ConditionExpression: 'attribute_exists(PK)',
+            },
+          },
+          {
+            Update: {
+              TableName: TABLE_NAME,
+              Key: buildVisitRxKey(existing.visitId, rxId),
+              UpdateExpression: 'SET #receptionNotes = :n, #updatedAt = :u',
+              ExpressionAttributeNames: {
+                '#receptionNotes': 'receptionNotes',
+                '#updatedAt': 'updatedAt',
+              },
+              ExpressionAttributeValues: {
+                ':n': receptionNotes,
                 ':u': now,
               },
               ConditionExpression: 'attribute_exists(PK)',

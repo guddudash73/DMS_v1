@@ -1,14 +1,18 @@
 'use client';
 
 import * as React from 'react';
+import { useRouter } from 'next/navigation';
+
 import { Card } from '@/components/ui/card';
 import DoctorQueuePreferencesDialog from '@/components/dashboard/DoctorQueuePreferencesDialog';
+
 import {
   useGetDoctorsQuery,
   useGetMyPreferencesQuery,
   useGetDoctorQueueQuery,
 } from '@/src/store/api';
-import type { UserPreferences, AdminDoctorListItem, Visit } from '@dms/types';
+
+import type { UserPreferences, AdminDoctorListItem, Visit, DoctorQueueItem } from '@dms/types';
 import { useAuth } from '@/src/hooks/useAuth';
 
 const MAX_COLUMNS = 3 as const;
@@ -21,14 +25,33 @@ const statusDotClass: Record<VisitStatus, string> = {
   DONE: 'bg-emerald-500',
 };
 
-function DoctorQueueItem({ label, status }: { label: string; status: VisitStatus }) {
+function getVisitLabel(v: DoctorQueueItem): string {
+  // ✅ show patient name (fallback to patientId)
+  const name = v.patientName?.trim();
+  return name && name.length > 0 ? name : `Patient: ${v.patientId}`;
+}
+
+function DoctorQueueItemRow({
+  label,
+  status,
+  onClick,
+}: {
+  label: string;
+  status: VisitStatus;
+  onClick: () => void;
+}) {
   return (
-    <div className="flex h-8 items-center justify-between rounded-xl bg-white px-3 text-xs text-gray-800 shadow-[0_0_0_1px_rgba(0,0,0,0.04)]">
-      <span className="truncate">{label}</span>
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex h-10 w-full items-center justify-between rounded-xl bg-white px-3 text-left text-xs text-gray-800 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black/10"
+      title="Open visit"
+    >
+      <span className="truncate font-medium">{label}</span>
       <span
         className={`ml-2 inline-block h-2 w-2 shrink-0 rounded-full ${statusDotClass[status]}`}
       />
-    </div>
+    </button>
   );
 }
 
@@ -37,26 +60,26 @@ type ColumnConfig = {
   doctor?: AdminDoctorListItem;
 };
 
-const getVisitLabel = (visit: Visit): string => visit.reason || `Patient: ${visit.patientId}`;
-
 const PlaceholderBlock = () => (
   <>
-    <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
+    <div className="flex h-10 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
       No visits done yet.
     </div>
-    <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
+    <div className="flex h-10 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
       No on-going visits.
     </div>
-    <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
+    <div className="flex h-10 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
       No waiting visits.
     </div>
-    <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
+    <div className="flex h-10 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
       No waiting visits.
     </div>
   </>
 );
 
 export default function DoctorQueueCard() {
+  const router = useRouter();
+
   const auth = useAuth();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
@@ -78,9 +101,7 @@ export default function DoctorQueueCard() {
     (prefs as UserPreferences | undefined)?.dashboard?.selectedDoctorIds ?? [];
 
   const effectiveSelectedIds = React.useMemo(() => {
-    if (selectedIdsFromPrefs.length > 0) {
-      return selectedIdsFromPrefs.slice(0, MAX_COLUMNS);
-    }
+    if (selectedIdsFromPrefs.length > 0) return selectedIdsFromPrefs.slice(0, MAX_COLUMNS);
     return [] as string[];
   }, [selectedIdsFromPrefs]);
 
@@ -101,29 +122,28 @@ export default function DoctorQueueCard() {
 
   const queue1 = useGetDoctorQueueQuery(
     { doctorId: effectiveSelectedIds[0]!, date: todayIso },
-    {
-      skip: !canUseApi || !effectiveSelectedIds[0],
-    },
+    { skip: !canUseApi || !effectiveSelectedIds[0] },
   );
 
   const queue2 = useGetDoctorQueueQuery(
     { doctorId: effectiveSelectedIds[1]!, date: todayIso },
-    {
-      skip: !canUseApi || !effectiveSelectedIds[1],
-    },
+    { skip: !canUseApi || !effectiveSelectedIds[1] },
   );
 
   const queue3 = useGetDoctorQueueQuery(
     { doctorId: effectiveSelectedIds[2]!, date: todayIso },
-    {
-      skip: !canUseApi || !effectiveSelectedIds[2],
-    },
+    { skip: !canUseApi || !effectiveSelectedIds[2] },
   );
 
   const queues = [queue1, queue2, queue3];
 
+  const openClinicVisit = (visitId: string) => {
+    // ✅ routes to apps/web/app/(clinic)/visits/[visitId]/page.tsx
+    router.push(`/visits/${visitId}`);
+  };
+
   return (
-    <Card className="w-full rounded-2xl border border-none bg-white px-4 pb-4 pt-2 shadow-sm gap-4">
+    <Card className="w-full rounded-2xl border-none bg-white px-4 pb-4 pt-2 shadow-sm">
       <div className="mb-1 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-900">Doctor&apos;s Queue</h2>
         <DoctorQueuePreferencesDialog />
@@ -140,9 +160,10 @@ export default function DoctorQueueCard() {
                 <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
                   {col.headerLabel}
                 </div>
+
                 <div className="space-y-2">
                   {isInitialLoading ? (
-                    <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
+                    <div className="flex h-10 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
                       Loading…
                     </div>
                   ) : (
@@ -153,7 +174,7 @@ export default function DoctorQueueCard() {
             );
           }
 
-          const visits: Visit[] = queueHook?.data?.items ?? [];
+          const visits: DoctorQueueItem[] = (queueHook?.data?.items ?? []) as DoctorQueueItem[];
 
           const doneVisit = [...visits].reverse().find((v) => v.status === 'DONE');
           const inProgressVisit = visits.find((v) => v.status === 'IN_PROGRESS');
@@ -167,47 +188,55 @@ export default function DoctorQueueCard() {
 
               <div className="space-y-2">
                 {isInitialLoading ? (
-                  <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
+                  <div className="flex h-10 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
                     Loading…
                   </div>
                 ) : (
                   <>
                     {doneVisit ? (
-                      <DoctorQueueItem label={getVisitLabel(doneVisit)} status={doneVisit.status} />
+                      <DoctorQueueItemRow
+                        label={getVisitLabel(doneVisit)}
+                        status={doneVisit.status}
+                        onClick={() => openClinicVisit(doneVisit.visitId)}
+                      />
                     ) : (
-                      <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
+                      <div className="flex h-10 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
                         No visits done yet.
                       </div>
                     )}
 
                     {inProgressVisit ? (
-                      <DoctorQueueItem
+                      <DoctorQueueItemRow
                         label={getVisitLabel(inProgressVisit)}
                         status={inProgressVisit.status}
+                        onClick={() => openClinicVisit(inProgressVisit.visitId)}
                       />
                     ) : (
-                      <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
+                      <div className="flex h-10 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
                         No on-going visits.
                       </div>
                     )}
 
                     {queuedVisits[0] ? (
-                      <DoctorQueueItem
+                      <DoctorQueueItemRow
                         label={getVisitLabel(queuedVisits[0])}
                         status={queuedVisits[0].status}
+                        onClick={() => openClinicVisit(queuedVisits[0].visitId)}
                       />
                     ) : (
-                      <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
+                      <div className="flex h-10 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
                         No waiting visits.
                       </div>
                     )}
+
                     {queuedVisits[1] ? (
-                      <DoctorQueueItem
+                      <DoctorQueueItemRow
                         label={getVisitLabel(queuedVisits[1])}
                         status={queuedVisits[1].status}
+                        onClick={() => openClinicVisit(queuedVisits[1].visitId)}
                       />
                     ) : (
-                      <div className="flex h-8 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
+                      <div className="flex h-10 items-center rounded-xl bg-gray-50 px-3 text-[11px] text-gray-400">
                         No waiting visits.
                       </div>
                     )}

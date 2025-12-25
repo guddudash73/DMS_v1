@@ -23,16 +23,34 @@ type Props = {
 };
 
 type Frequency = RxLineType['frequency'];
-type Timing = NonNullable<RxLineType['timing']>;
+type TimingBackend = NonNullable<RxLineType['timing']>; // 'BEFORE_MEAL' | 'AFTER_MEAL' | 'ANY'
+type TimingUI = 'BE_MEAL' | 'AF_MEAL' | 'ANY';
 
 const FREQUENCY = ['QD', 'BID', 'TID', 'QID', 'HS', 'PRN'] as const satisfies readonly Frequency[];
-const TIMING = ['BEFORE_MEAL', 'AFTER_MEAL', 'ANY'] as const satisfies readonly Timing[];
+
+// UI shows these:
+const TIMING_UI = ['BE_MEAL', 'AF_MEAL', 'ANY'] as const satisfies readonly TimingUI[];
+
+// UI <-> backend mapping
+const timingToUi = (t?: TimingBackend): TimingUI | undefined => {
+  if (!t) return undefined;
+  if (t === 'BEFORE_MEAL') return 'BE_MEAL';
+  if (t === 'AFTER_MEAL') return 'AF_MEAL';
+  return 'ANY';
+};
+
+const timingToBackend = (t?: TimingUI): TimingBackend | undefined => {
+  if (!t) return undefined;
+  if (t === 'BE_MEAL') return 'BEFORE_MEAL';
+  if (t === 'AF_MEAL') return 'AFTER_MEAL';
+  return 'ANY';
+};
 
 function isFrequency(v: string): v is Frequency {
   return (FREQUENCY as readonly string[]).includes(v);
 }
-function isTiming(v: string): v is Timing {
-  return (TIMING as readonly string[]).includes(v);
+function isTimingUi(v: string): v is TimingUI {
+  return (TIMING_UI as readonly string[]).includes(v);
 }
 
 export function MedicinesEditor({ lines, onChange }: Props) {
@@ -40,7 +58,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
   const [dose, setDose] = useState('');
   const [frequency, setFrequency] = useState<Frequency | undefined>(undefined);
   const [durationDays, setDurationDays] = useState('');
-  const [timing, setTiming] = useState<Timing | undefined>(undefined);
+  const [timingUi, setTimingUi] = useState<TimingUI | undefined>(undefined);
 
   // new-line notes popover
   const [notesOpen, setNotesOpen] = useState(false);
@@ -81,12 +99,14 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     if (!freq) return;
     if (!Number.isFinite(durNum) || durNum < 1) return;
 
+    const timing = timingToBackend(timingUi);
+
     const next: RxLineType = {
       medicine: med,
       dose: d,
       frequency: freq,
       duration: durNum,
-      ...(timing ? { timing } : {}),
+      ...(timing ? { timing } : {}), // ✅ backend values stored
       ...(notes.trim() ? { notes: notes.trim() } : {}),
     };
 
@@ -96,7 +116,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     setDose('');
     setFrequency(undefined);
     setDurationDays('');
-    setTiming(undefined);
+    setTimingUi(undefined);
 
     setNotes('');
     setNotesOpen(false);
@@ -122,7 +142,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     setDose(row.dose ?? '');
     setFrequency(row.frequency);
     setDurationDays(String(row.duration ?? ''));
-    setTiming(row.timing ?? undefined);
+    setTimingUi(timingToUi(row.timing ?? undefined)); // ✅ map backend -> UI
     setNotes(row.notes ?? '');
     setNotesOpen(Boolean(row.notes?.trim()));
     remove(idx);
@@ -163,117 +183,18 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     requestAnimationFrame(() => addBtnRef.current?.focus());
   };
 
+  const shouldScroll = lines.length > 4;
+
+  // For showing timing inside existing rows (UI labels)
+  const timingLabel = (t?: TimingBackend) => {
+    const ui = timingToUi(t);
+    return ui ?? '—';
+  };
+
   return (
-    <div className="mt-4 w-full overflow-hidden rounded-xl border bg-white">
-      {/* Header (flex, but keeps same column widths as before) */}
-      <div className="flex items-center gap-2 border-b bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-600">
-        <div className="w-[25%]">Medicine</div>
-        <div className="w-[16.666%] pl-3">Frequency</div>
-        <div className="w-[16.666%]">Duration</div>
-        <div className="w-[16.666%] pl-2">Timing</div>
-        <div className="w-[16.666%] pl-3">Notes</div>
-        <div className="w-[8.333%]">Actions</div>
-      </div>
-
-      {/* Existing lines */}
-      <div className="divide-y">
-        {lines.map((l, idx) => (
-          <div key={idx} className="flex items-start gap-2 px-3 py-3 text-sm">
-            <div className="w-[25%]">
-              <div className="font-medium text-gray-900">{l.medicine}</div>
-              <div className="text-[12px] text-gray-500">{l.dose}</div>
-            </div>
-
-            <div className="w-[16.666%] pl-3 text-gray-800">{l.frequency}</div>
-            <div className="w-[16.666%] text-gray-800">{l.duration}</div>
-            <div className="w-[16.666%] pl-2 text-gray-800">{l.timing ?? '—'}</div>
-
-            <div className="w-[16.666%]">
-              <Popover
-                open={rowNotesIndex === idx}
-                onOpenChange={(open) => {
-                  if (open) {
-                    setRowNotesIndex(idx);
-                    setRowNotesDraft(lines[idx]?.notes ?? '');
-                  } else {
-                    setRowNotesIndex(null);
-                    setRowNotesDraft('');
-                  }
-                }}
-              >
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="link"
-                    className="h-auto p-0 pl-3 text-xs font-semibold text-gray-800 underline decoration-gray-200 underline-offset-2 hover:decoration-gray-400"
-                  >
-                    View
-                  </Button>
-                </PopoverTrigger>
-
-                <PopoverContent side="bottom" align="start" className="w-80 rounded-2xl p-3">
-                  <div className="mb-2 text-sm font-semibold text-gray-900">Notes</div>
-                  <Textarea
-                    className="min-h-[90px] resize-none rounded-xl"
-                    value={rowNotesIndex === idx ? rowNotesDraft : ''}
-                    onChange={(e) => setRowNotesDraft(e.target.value)}
-                    placeholder="Add or edit notes…"
-                  />
-                  <div className="mt-2 flex items-center justify-between">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="h-8 rounded-xl px-3 text-xs"
-                      onClick={() => {
-                        setRowNotesIndex(null);
-                        setRowNotesDraft('');
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      type="button"
-                      className="h-8 rounded-xl px-3 text-xs"
-                      onClick={saveRowNotes}
-                    >
-                      Save
-                    </Button>
-                  </div>
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="w-[8.333%]">
-              <div className="flex justify-end">
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 rounded-xl"
-                  onClick={() => edit(idx)}
-                  aria-label="Edit"
-                >
-                  <Pencil className="h-4 w-4" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 rounded-xl text-gray-600 hover:text-gray-900"
-                  onClick={() => remove(idx)}
-                  aria-label="Delete"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Add row (flex, same layout as your grid version) */}
-      <div className="border-t bg-white px-3 py-3">
-        {/* Row 1 */}
+    <div className=" w-full overflow-hidden rounded-xl border bg-white">
+      {/* Add row */}
+      <div className="border-b bg-white px-3 py-3">
         <div className="flex items-center gap-2">
           <div className="w-[25%]">
             <MedicineCombobox
@@ -299,7 +220,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
             >
               <SelectTrigger
                 ref={freqTriggerRef}
-                className="h-10 rounded-xl"
+                className="h-10 rounded-xl w-full"
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter') return;
                   if (frequency) {
@@ -323,7 +244,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
           <div className="w-[16.666%]">
             <Input
               ref={durationRef}
-              className="h-9 w-20 rounded-xl"
+              className="h-9 rounded-xl"
               value={durationDays}
               onChange={(e) => setDurationDays(e.target.value)}
               placeholder="Days"
@@ -338,9 +259,9 @@ export function MedicinesEditor({ lines, onChange }: Props) {
 
           <div className="w-[16.666%] pl-1">
             <Select
-              value={timing ?? ''}
+              value={timingUi ?? ''}
               onValueChange={(v) => {
-                setTiming(isTiming(v) ? v : undefined);
+                setTimingUi(isTimingUi(v) ? v : undefined);
                 goNext(notesBtnRef.current);
               }}
             >
@@ -349,7 +270,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
                 className="h-10 rounded-xl"
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter') return;
-                  if (timing) {
+                  if (timingUi) {
                     e.preventDefault();
                     goNext(notesBtnRef.current);
                   }
@@ -358,7 +279,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
                 <SelectValue placeholder="Timing" />
               </SelectTrigger>
               <SelectContent>
-                {TIMING.map((t) => (
+                {TIMING_UI.map((t) => (
                   <SelectItem key={t} value={t}>
                     {t}
                   </SelectItem>
@@ -376,7 +297,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
               }}
             >
               <PopoverTrigger asChild>
-                <div className="flex items-center justify-center">
+                <div className="flex items-center justify-start">
                   <Button
                     ref={notesBtnRef}
                     type="button"
@@ -449,12 +370,11 @@ export function MedicinesEditor({ lines, onChange }: Props) {
           </div>
         </div>
 
-        {/* Row 2 (Dose under Medicine only) */}
         <div className="mt-2 flex items-center gap-2">
-          <div className="w-[25%]">
+          <div className="w-[24%]">
             <Input
               ref={doseRef}
-              className="h-10 rounded-xl"
+              className="h-9 rounded-xl"
               value={dose}
               onChange={(e) => setDose(e.target.value)}
               placeholder="Dose"
@@ -465,10 +385,126 @@ export function MedicinesEditor({ lines, onChange }: Props) {
               }}
             />
           </div>
-
-          {/* filler to match layout (same as grid col-span-8) */}
           <div className="flex-1" />
         </div>
+      </div>
+
+      {/* Header for existing list */}
+      <div className="flex items-center gap-2 border-b bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-600">
+        <div className="w-[25%]">Medicine</div>
+        <div className="w-[16.666%]">Frequency</div>
+        <div className="w-[16.666%]">Duration</div>
+        <div className="w-[16.666%] pl-2">Timing</div>
+        <div className="w-[16.666%] pl-5">Notes</div>
+        <div className="w-[8.333%]">Actions</div>
+      </div>
+
+      {/* Scroll existing items only when > 4 */}
+      <div
+        className={[
+          'divide-y',
+          shouldScroll ? 'max-h-[200px] 2xl:max-h-full overflow-y-auto' : '',
+          'dms-scroll',
+        ].join(' ')}
+      >
+        {lines.length === 0 ? (
+          <div className="px-3 py-6 text-sm text-gray-500">No medicines added yet.</div>
+        ) : (
+          lines.map((l, idx) => (
+            <div key={idx} className="flex items-start gap-2 px-3 py-1 text-sm">
+              <div className="w-[25%]">
+                <div className="font-medium text-gray-900">{l.medicine}</div>
+                <div className="text-[12px] text-gray-500">{l.dose}</div>
+              </div>
+
+              <div className="w-[16.666%] pl-3 text-gray-800">{l.frequency}</div>
+              <div className="w-[16.666%] text-gray- pl-3">{l.duration}</div>
+
+              {/* ✅ UI label only (BE_MEAL / AF_MEAL), backend remains BEFORE_MEAL / AFTER_MEAL */}
+              <div className="w-[16.666%] pl-2 text-gray-800">{timingLabel(l.timing)}</div>
+
+              <div className="w-[16.666%]">
+                <Popover
+                  open={rowNotesIndex === idx}
+                  onOpenChange={(open) => {
+                    if (open) {
+                      setRowNotesIndex(idx);
+                      setRowNotesDraft(lines[idx]?.notes ?? '');
+                    } else {
+                      setRowNotesIndex(null);
+                      setRowNotesDraft('');
+                    }
+                  }}
+                >
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 pl-6 text-xs font-semibold text-gray-800 underline decoration-gray-200 underline-offset-2 hover:decoration-gray-400"
+                    >
+                      View
+                    </Button>
+                  </PopoverTrigger>
+
+                  <PopoverContent side="bottom" align="start" className="w-80 rounded-2xl p-3">
+                    <div className="mb-2 text-sm font-semibold text-gray-900">Notes</div>
+                    <Textarea
+                      className="min-h-[90px] resize-none rounded-xl"
+                      value={rowNotesIndex === idx ? rowNotesDraft : ''}
+                      onChange={(e) => setRowNotesDraft(e.target.value)}
+                      placeholder="Add or edit notes…"
+                    />
+                    <div className="mt-2 flex items-center justify-between">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        className="h-8 rounded-xl px-3 text-xs"
+                        onClick={() => {
+                          setRowNotesIndex(null);
+                          setRowNotesDraft('');
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        type="button"
+                        className="h-8 rounded-xl px-3 text-xs"
+                        onClick={saveRowNotes}
+                      >
+                        Save
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div className="w-[8.333%]">
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 rounded-xl"
+                    onClick={() => edit(idx)}
+                    aria-label="Edit"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 rounded-xl text-gray-600 hover:text-gray-900"
+                    onClick={() => remove(idx)}
+                    aria-label="Delete"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          ))
+        )}
       </div>
     </div>
   );

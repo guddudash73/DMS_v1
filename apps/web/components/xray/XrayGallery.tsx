@@ -1,18 +1,27 @@
+// apps/web/components/xray/XrayGallery.tsx
 'use client';
 
 import { useMemo, useState } from 'react';
 import Image from 'next/image';
-import { useListVisitXraysQuery, useGetXrayUrlQuery } from '@/src/store/api';
+import { toast } from 'react-toastify';
+import { Trash2 } from 'lucide-react';
+import { useListVisitXraysQuery, useGetXrayUrlQuery, useDeleteXrayMutation } from '@/src/store/api';
 import { XrayViewerModal } from './XrayViewerModal';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 type Props = {
   visitId: string;
-  refreshKey?: number;
+  /**
+   * embedded: no internal header (best for Medicines card)
+   * standalone: includes internal title + refresh (old behavior)
+   */
+  variant?: 'embedded' | 'standalone';
 };
 
 function Thumb({ xrayId }: { xrayId: string }) {
   const { data } = useGetXrayUrlQuery({ xrayId, size: 'thumb' });
-  if (!data?.url) return <div className="h-24 w-24 rounded-lg bg-gray-100" />;
+  if (!data?.url) return <div className="h-18 w-18 rounded-xl bg-gray-100" />;
 
   return (
     <Image
@@ -20,26 +29,60 @@ function Thumb({ xrayId }: { xrayId: string }) {
       alt="X-ray thumb"
       width={160}
       height={160}
-      className="h-24 w-24 rounded-lg object-cover"
+      className="h-18 w-18 rounded-xl object-cover cursor-pointer"
       unoptimized
     />
   );
 }
 
-export function XrayGallery({ visitId }: Props) {
+export function XrayGallery({ visitId, variant = 'standalone' }: Props) {
   const { data, isLoading, isError, refetch } = useListVisitXraysQuery({ visitId });
   const items = data?.items ?? [];
 
   const [viewerOpen, setViewerOpen] = useState(false);
   const [activeId, setActiveId] = useState<string | null>(null);
 
+  const [deleteXray, deleteState] = useDeleteXrayMutation();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+
   const empty = useMemo(
     () => !isLoading && !isError && items.length === 0,
     [isLoading, isError, items.length],
   );
 
+  const openViewer = (xrayId: string) => {
+    setActiveId(xrayId);
+    setViewerOpen(true);
+  };
+
+  const openDeleteConfirm = (xrayId: string) => {
+    setPendingDeleteId(xrayId);
+    setConfirmOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDeleteId) return;
+
+    try {
+      await deleteXray({ visitId, xrayId: pendingDeleteId }).unwrap();
+
+      if (activeId === pendingDeleteId) {
+        setViewerOpen(false);
+        setActiveId(null);
+      }
+
+      toast.success('X-ray deleted.');
+      setConfirmOpen(false);
+      setPendingDeleteId(null);
+    } catch (err: any) {
+      toast.error(err?.data?.message ?? err?.message ?? 'Failed to delete X-ray.');
+    }
+  };
+
   return (
-    <div className="space-y-3">
+    <div className={variant === 'embedded' ? 'rounded-xl border bg-white p-3' : 'space-y-3'}>
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold text-gray-900">X-rays</div>
         <button
@@ -51,30 +94,50 @@ export function XrayGallery({ visitId }: Props) {
         </button>
       </div>
 
-      {isLoading && <div className="text-xs text-gray-500">Loading…</div>}
-      {isError && <div className="text-xs text-red-600">Failed to load X-rays.</div>}
-      {empty && <div className="text-xs text-gray-500">No X-rays uploaded yet.</div>}
+      {isLoading && <div className="mt-2 text-xs text-gray-500">Loading…</div>}
+      {isError && <div className="mt-2 text-xs text-red-600">Failed to load X-rays.</div>}
+      {empty && <div className="mt-2 text-xs text-gray-500">No X-rays uploaded yet.</div>}
 
       {items.length > 0 && (
-        <div className="flex flex-wrap gap-3">
+        <div className="mt-3 flex flex-wrap gap-3">
           {items.map((x) => (
-            <button
+            <div
               key={x.xrayId}
-              type="button"
-              className="group rounded-xl border bg-white p-2 hover:shadow-sm"
-              onClick={() => {
-                setActiveId(x.xrayId);
-                setViewerOpen(true);
-              }}
+              className="group relative rounded-2xl border bg-white p-2 pb-4 transition hover:shadow-sm "
             >
-              <Thumb xrayId={x.xrayId} />
+              {/* ✅ Viewer open is its own button (no nesting with delete button) */}
+              <button
+                type="button"
+                className="relative block rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900/20"
+                onClick={() => openViewer(x.xrayId)}
+                aria-label="Open X-ray"
+              >
+                <Thumb xrayId={x.xrayId} />
+              </button>
+
+              {/* ✅ Delete icon: bottom-left, always visible, not nested */}
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute bottom-0 right-0 h-8 w-8 rounded-2xl cursor-pointer"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  openDeleteConfirm(x.xrayId);
+                }}
+                aria-label="Delete X-ray"
+              >
+                <Trash2 className="h-4 w-4" />
+              </Button>
+
               <div className="mt-2 text-left">
                 <div className="text-[11px] font-medium text-gray-800">
                   {new Date(x.takenAt).toLocaleString()}
                 </div>
                 <div className="text-[10px] text-gray-500">{Math.round(x.size / 1024)} KB</div>
               </div>
-            </button>
+            </div>
           ))}
         </div>
       )}
@@ -89,6 +152,46 @@ export function XrayGallery({ visitId }: Props) {
           }}
         />
       )}
+
+      {/* Confirm delete dialog */}
+      <Dialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          setConfirmOpen(open);
+          if (!open) setPendingDeleteId(null);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete X-ray?</DialogTitle>
+          </DialogHeader>
+
+          <div className="text-sm text-gray-600">
+            This will permanently delete the X-ray for this visit. You can’t undo this action.
+          </div>
+
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              className="rounded-xl"
+              onClick={() => setConfirmOpen(false)}
+              disabled={deleteState.isLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              className="rounded-xl"
+              onClick={() => void confirmDelete()}
+              disabled={deleteState.isLoading}
+            >
+              {deleteState.isLoading ? 'Deleting…' : 'Delete'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 
 import type { PatientId, Visit } from '@dms/types';
 import {
@@ -10,9 +10,27 @@ import {
   useGetDoctorsQuery,
   type ErrorResponse,
 } from '@/src/store/api';
+
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { RegisterVisitDrawer } from '@/components/patients/RegisterVisitDrawer';
+
+// ✅ shadcn table
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+
+// ✅ shadcn calendar + popover
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+
+import { ArrowRight, Calendar as CalendarIcon } from 'lucide-react';
 
 type ApiError = {
   status?: number;
@@ -46,9 +64,68 @@ const formatVisitDate = (dateStr: string) => {
   });
 };
 
+const toISODate = (d: Date) => d.toISOString().slice(0, 10);
+
+// ✅ local pagination (simple + aesthetic)
+function SimplePagination(props: {
+  page: number;
+  totalPages: number;
+  onPageChange: (next: number) => void;
+}) {
+  const { page, totalPages, onPageChange } = props;
+
+  const canPrev = page > 1;
+  const canNext = page < totalPages;
+
+  return (
+    <div className="flex items-center justify-end gap-2">
+      <Button
+        type="button"
+        variant="outline"
+        className="h-9 rounded-xl px-3 text-xs"
+        disabled={!canPrev}
+        onClick={() => onPageChange(page - 1)}
+      >
+        Previous
+      </Button>
+
+      <div className="px-2 text-xs text-gray-600">
+        Page <span className="font-semibold text-gray-900">{page}</span> of{' '}
+        <span className="font-semibold text-gray-900">{totalPages}</span>
+      </div>
+
+      <Button
+        type="button"
+        variant="outline"
+        className="h-9 rounded-xl px-3 text-xs"
+        disabled={!canNext}
+        onClick={() => onPageChange(page + 1)}
+      >
+        Next
+      </Button>
+    </div>
+  );
+}
+
+function stageLabel(status?: Visit['status']) {
+  if (status === 'QUEUED') return 'Waiting';
+  if (status === 'IN_PROGRESS') return 'In Progress';
+  if (status === 'DONE') return 'Done';
+  return '—';
+}
+
+// ✅ Pink / Yellow / Green badges like your screenshot
+function stageBadgeClass(status?: Visit['status']) {
+  if (status === 'QUEUED') return 'bg-pink-100 text-pink-700 border-pink-200';
+  if (status === 'IN_PROGRESS') return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+  if (status === 'DONE') return 'bg-green-100 text-green-700 border-green-200';
+  return 'bg-gray-100 text-gray-700 border-gray-200';
+}
+
 export default function PatientDetailPage() {
   const params = useParams<{ id: string }>();
   const rawId = params?.id;
+  const router = useRouter();
 
   if (!rawId || typeof rawId !== 'string') {
     return (
@@ -74,7 +151,15 @@ export default function PatientDetailPage() {
 
   const { data: doctors } = useGetDoctorsQuery();
 
+  // date filter (stored as YYYY-MM-DD)
   const [selectedDate, setSelectedDate] = React.useState<string>('');
+  const selectedDateObj = React.useMemo(() => {
+    if (!selectedDate) return undefined;
+    const d = new Date(selectedDate);
+    return Number.isNaN(d.getTime()) ? undefined : d;
+  }, [selectedDate]);
+
+  const [datePopoverOpen, setDatePopoverOpen] = React.useState(false);
 
   const loading = patientLoading;
 
@@ -94,10 +179,17 @@ export default function PatientDetailPage() {
 
   const visits: Visit[] = visitsData?.items ?? [];
 
+  // ✅ Sort newest first (nice UX)
+  const sortedVisits = React.useMemo(() => {
+    const items = [...visits];
+    items.sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0));
+    return items;
+  }, [visits]);
+
   const filteredVisits = React.useMemo(() => {
-    if (!selectedDate) return visits;
-    return visits.filter((v) => v.visitDate === selectedDate);
-  }, [visits, selectedDate]);
+    if (!selectedDate) return sortedVisits;
+    return sortedVisits.filter((v) => v.visitDate === selectedDate);
+  }, [sortedVisits, selectedDate]);
 
   const doctorNameById = React.useMemo(() => {
     const map = new Map<string, string>();
@@ -107,12 +199,28 @@ export default function PatientDetailPage() {
     return map;
   }, [doctors]);
 
+  // ✅ pagination state (max 4 rows)
+  const PAGE_SIZE = 4;
+  const [page, setPage] = React.useState<number>(1);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [selectedDate, visitsData?.items]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredVisits.length / PAGE_SIZE));
+  const pageSafe = Math.min(page, totalPages);
+
+  const pageItems = React.useMemo(() => {
+    const start = (pageSafe - 1) * PAGE_SIZE;
+    return filteredVisits.slice(start, start + PAGE_SIZE);
+  }, [filteredVisits, pageSafe]);
+
   const followupLabel = 'No Follow Up Scheduled';
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
       <div className="flex flex-col gap-4">
-        <div className="flex flex-row justify-end items-center gap-6">
+        <div className="flex flex-row items-center justify-end gap-6">
           <div className="text-sm">
             <span className="font-medium text-gray-700">Follow up:&nbsp;</span>
             <span className="font-semibold text-red-500">{followupLabel}</span>
@@ -161,10 +269,7 @@ export default function PatientDetailPage() {
                 </div>
                 <div className="flex gap-3">
                   <dt className="w-28 shrink-0 text-gray-600">Address</dt>
-                  <dd className="whitespace-pre-line text-gray-900">
-                    : {/* placeholder until address fields are wired */}
-                    {/* Match multi-line style from design if/when data is present */}
-                  </dd>
+                  <dd className="whitespace-pre-line text-gray-900">:</dd>
                 </div>
               </dl>
               <dl className="space-y-2 md:justify-self-end">
@@ -199,132 +304,152 @@ export default function PatientDetailPage() {
         </Card>
       </div>
 
+      {/* ---------------- Visits table section ---------------- */}
       <div className="flex flex-col gap-4 pt-10">
+        {/* ✅ shadcn date picker */}
         <div className="flex items-center justify-end gap-6">
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs text-gray-600">
-              <span className="text-gray-500">Pick a date</span>
-              <input
-                type="date"
-                className="h-7 rounded-full border border-gray-200 bg-gray-50 px-2 text-xs text-gray-800 focus:outline-none focus:ring-1 focus:ring-black"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
+          <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-full border-gray-200 bg-white px-4 text-xs text-gray-800 hover:bg-gray-100"
+              >
+                <CalendarIcon className="mr-2 h-4 w-4" />
+                {selectedDate ? formatVisitDate(selectedDate) : 'Pick a date'}
+              </Button>
+            </PopoverTrigger>
+
+            <PopoverContent align="end" className="w-auto rounded-2xl p-2">
+              <Calendar
+                mode="single"
+                selected={selectedDateObj}
+                onSelect={(d) => {
+                  if (!d) {
+                    setSelectedDate('');
+                    return;
+                  }
+                  setSelectedDate(toISODate(d));
+                  setDatePopoverOpen(false);
+                }}
               />
-            </div>
-          </div>
+
+              {selectedDate ? (
+                <div className="flex justify-end px-2 pb-2 pt-1">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="h-8 rounded-xl px-3 text-xs"
+                    onClick={() => {
+                      setSelectedDate('');
+                      setDatePopoverOpen(false);
+                    }}
+                  >
+                    Clear
+                  </Button>
+                </div>
+              ) : null}
+            </PopoverContent>
+          </Popover>
         </div>
 
+        {/* ✅ Updated Table */}
         <div>
-          <Card className="rounded-2xl border-none bg-white px-0 py-0 shadow-sm">
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="border-b bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  <tr>
-                    <th className="px-6 py-3">Visit Date</th>
-                    <th className="px-6 py-3">Reason</th>
-                    <th className="px-6 py-3">Diagnosis By.</th>
-                    <th className="px-6 py-3">X-Ray</th>
-                    <th className="px-6 py-3">Prescription</th>
-                    <th className="px-6 py-3">Bill</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visitsLoading && (
-                    <tr>
-                      <td
-                        colSpan={6}
-                        className="px-6 py-6 text-center text-sm text-gray-500"
-                        aria-busy="true"
-                      >
-                        Loading visits…
-                      </td>
-                    </tr>
-                  )}
+          <Card className="overflow-hidden rounded-2xl border-none bg-white px-0 py-0 shadow-sm">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-gray-50">
+                  <TableHead className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Visit Date
+                  </TableHead>
+                  <TableHead className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Reason
+                  </TableHead>
+                  <TableHead className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Diagnosis By
+                  </TableHead>
+                  <TableHead className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Stage
+                  </TableHead>
+                  <TableHead className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Action
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
 
-                  {!visitsLoading && visitsErrorMessage && (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-6 text-center text-sm text-red-600">
-                        {visitsErrorMessage}
-                      </td>
-                    </tr>
-                  )}
+              <TableBody>
+                {visitsLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500">
+                      Loading visits…
+                    </TableCell>
+                  </TableRow>
+                ) : visitsErrorMessage ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="px-6 py-10 text-center text-sm text-red-600">
+                      {visitsErrorMessage}
+                    </TableCell>
+                  </TableRow>
+                ) : pageItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500">
+                      No visits found{selectedDate ? ` for ${selectedDate}` : ''}.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  pageItems.map((visit) => {
+                    const doctorName = doctorNameById.get(visit.doctorId) ?? visit.doctorId ?? '—';
 
-                  {!visitsLoading &&
-                    !visitsErrorMessage &&
-                    filteredVisits.map((visit) => {
-                      const doctorName =
-                        doctorNameById.get(visit.doctorId) ?? visit.doctorId ?? '—';
+                    return (
+                      <TableRow key={visit.visitId} className="hover:bg-gray-50/60">
+                        <TableCell className="px-6 py-4 text-sm font-medium text-gray-900">
+                          {formatVisitDate(visit.visitDate)}
+                        </TableCell>
 
-                      return (
-                        <tr key={visit.visitId} className="border-b last:border-b-0">
-                          <td className="px-6 py-4 text-sm text-gray-800">
-                            {formatVisitDate(visit.visitDate)}
-                          </td>
-                          <td className="px-6 py-4 text-sm text-gray-800">{visit.reason || '—'}</td>
-                          <td className="px-6 py-4 text-sm text-gray-800">{doctorName}</td>
-                          <td className="px-6 py-4">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="rounded-full border-gray-200 bg-white px-5 text-xs text-gray-800 hover:bg-gray-100"
-                            >
-                              View
-                            </Button>
-                          </td>
-                          <td className="px-6 py-4">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="rounded-full border-gray-200 bg-white px-5 text-xs text-gray-800 hover:bg-gray-100"
-                            >
-                              View
-                            </Button>
-                          </td>
-                          <td className="px-6 py-4">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="rounded-full border-gray-200 bg-white px-5 text-xs text-gray-800 hover:bg-gray-100"
-                            >
-                              View
-                            </Button>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                        <TableCell className="px-6 py-4 text-sm text-gray-800">
+                          {visit.reason || '—'}
+                        </TableCell>
 
-                  {!visitsLoading && !visitsErrorMessage && filteredVisits.length === 0 && (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-6 text-center text-sm text-gray-500">
-                        No visits found.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                        <TableCell className="px-6 py-4 text-sm text-gray-800">
+                          {doctorName}
+                        </TableCell>
+
+                        <TableCell className="px-6 py-4">
+                          <Badge
+                            variant="outline"
+                            className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
+                              visit.status,
+                            )}`}
+                          >
+                            {stageLabel(visit.status)}
+                          </Badge>
+                        </TableCell>
+
+                        <TableCell className="px-6 py-4 text-right">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-9 rounded-xl px-3 text-xs"
+                            // ✅ FIX: open Clinic Visit Info page (/(clinic)/visits/[visitId])
+                            onClick={() => router.push(`/visits/${visit.visitId}`)}
+                          >
+                            View <ArrowRight className="ml-1 h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
+              </TableBody>
+            </Table>
+
+            {/* ✅ Pagination triggers only if > 4 */}
+            {filteredVisits.length > PAGE_SIZE ? (
+              <div className="border-t bg-white px-4 py-3">
+                <SimplePagination page={pageSafe} totalPages={totalPages} onPageChange={setPage} />
+              </div>
+            ) : null}
           </Card>
-          <div className="flex justify-end gap-3 py-3">
-            <Button
-              type="button"
-              variant="outline"
-              size="lg"
-              className="rounded-2xl bg-white px-6 text-xs text-gray-800 hover:bg-gray-100 cursor-pointer"
-            >
-              Previous
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              size="lg"
-              className="rounded-2xl bg-black text-xs text-white hover:bg-black/70 hover:text-white cursor-pointer"
-            >
-              Next
-            </Button>
-          </div>
         </div>
       </div>
     </section>

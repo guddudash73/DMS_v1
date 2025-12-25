@@ -2,9 +2,14 @@ import express, { type Request, type Response, type NextFunction } from 'express
 import { z } from 'zod';
 import { VisitId, XrayId, XrayContentType } from '@dms/types';
 import { visitRepository } from '../repositories/visitRepository';
-import { xrayRepository, XrayConflictError } from '../repositories/xrayRepository';
+import {
+  xrayRepository,
+  XrayConflictError,
+  XrayDeleteConflictError,
+} from '../repositories/xrayRepository';
 import { XRAY_BUCKET_NAME } from '../config/env';
-import { getPresignedUploadUrl, getPresignedDownloadUrl } from '../lib/s3';
+import { getPresignedUploadUrl, getPresignedDownloadUrl, s3Client } from '../lib/s3';
+import { DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { patientRepository } from '../repositories/patientRepository';
 import { v4 as randomUUID } from 'uuid';
 import { logAudit, logError } from '../lib/logger';
@@ -148,9 +153,7 @@ router.post(
       xrayId,
       key: contentKey,
       uploadUrl,
-      headers: {
-        'Content-Type': contentType,
-      },
+      headers: { 'Content-Type': contentType },
       expiresInSeconds: 90,
     });
   }),
@@ -279,9 +282,7 @@ router.get(
 
     const items = await xrayRepository.listByVisit(visitId);
 
-    return res.status(200).json({
-      items,
-    });
+    return res.status(200).json({ items });
   }),
 );
 
@@ -362,10 +363,121 @@ router.get(
       });
     }
 
-    return res.status(200).json({
-      url,
-      variant: size,
-    });
+    return res.status(200).json({ url, variant: size });
+  }),
+);
+
+router.delete(
+  '/:xrayId',
+  asyncHandler(async (req, res) => {
+    const idResult = XrayId.safeParse(req.params.xrayId);
+    if (!idResult.success) return handleValidationError(req, res, idResult.error.issues);
+
+    const xrayId = idResult.data;
+
+    const meta = await xrayRepository.getById(xrayId);
+    if (!meta) {
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'X-ray not found',
+        traceId: req.requestId,
+      });
+    }
+
+    const visit = await visitRepository.getById(meta.visitId);
+    if (!visit) {
+      return res.status(404).json({
+        error: 'VISIT_NOT_FOUND',
+        message: 'Visit not found for this X-ray',
+        traceId: req.requestId,
+      });
+    }
+
+    const patient = await patientRepository.getById(visit.patientId);
+    if (!patient || patient.isDeleted) {
+      return res.status(404).json({
+        error: 'PATIENT_NOT_FOUND',
+        message: 'Patient not found or has been deleted',
+        traceId: req.requestId,
+      });
+    }
+
+    try {
+      // 1) HARD DELETE from S3 first (so we don't lose keys)
+      const objects = [
+        { Key: meta.contentKey },
+        ...(meta.thumbKey ? [{ Key: meta.thumbKey }] : []),
+      ];
+
+      try {
+        await withRetry(() =>
+          s3Client.send(
+            new DeleteObjectsCommand({
+              Bucket: XRAY_BUCKET_NAME,
+              Delete: { Objects: objects, Quiet: true },
+            }),
+          ),
+        );
+      } catch (err) {
+        logError('xray_s3_delete_failed', {
+          reqId: req.requestId,
+          xrayId,
+          visitId: meta.visitId,
+          keys: { contentKey: meta.contentKey, thumbKey: meta.thumbKey },
+          error:
+            err instanceof Error
+              ? { name: err.name, message: err.message }
+              : { message: String(err) },
+        });
+
+        return res.status(503).json({
+          error: 'XRAY_S3_DELETE_FAILED',
+          message: 'Unable to delete X-ray file, please retry.',
+          traceId: req.requestId,
+        });
+      }
+
+      // 2) HARD DELETE DynamoDB rows
+      await xrayRepository.hardDelete(xrayId);
+
+      if (req.auth) {
+        logAudit({
+          actorUserId: req.auth.userId,
+          action: 'XRAY_DELETE',
+          entity: { type: 'XRAY', id: xrayId },
+          meta: {
+            visitId: meta.visitId,
+            patientId: visit.patientId,
+            deletedKeys: { contentKey: meta.contentKey, thumbKey: meta.thumbKey },
+          },
+        });
+      }
+
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      if (err instanceof XrayDeleteConflictError) {
+        return res.status(409).json({
+          error: err.code,
+          message: err.message,
+          traceId: req.requestId,
+        });
+      }
+
+      logError('xray_delete_failed', {
+        reqId: req.requestId,
+        xrayId,
+        error:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      });
+
+      return res.status(500).json({
+        error: 'XRAY_DELETE_FAILED',
+        message: 'Unable to delete X-ray',
+        traceId: req.requestId,
+      });
+    }
   }),
 );
 

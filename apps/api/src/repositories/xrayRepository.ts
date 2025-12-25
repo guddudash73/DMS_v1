@@ -1,3 +1,4 @@
+// apps/api/src/repositories/xrayRepository.ts
 import {
   ConditionalCheckFailedException,
   TransactionCanceledException,
@@ -13,9 +14,7 @@ import { key } from '@dms/types';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
-  marshallOptions: {
-    removeUndefinedValues: true,
-  },
+  marshallOptions: { removeUndefinedValues: true },
 });
 
 export interface XrayMetaDataInput {
@@ -32,16 +31,23 @@ export interface XrayMetaDataInput {
 export interface XrayRepository {
   putMetadata(input: XrayMetaDataInput): Promise<Xray>;
   getById(xrayId: string): Promise<Xray | null>;
-
   listByVisit(visitId: string): Promise<Xray[]>;
+  hardDelete(xrayId: string): Promise<{ ok: true; visitId: string }>;
 }
 
 export class XrayConflictError extends Error {
   readonly code = 'XRAY_CONFLICT' as const;
-
   constructor(message = 'X-ray metadata already exists for this ID') {
     super(message);
     this.name = 'XrayConflictError';
+  }
+}
+
+export class XrayDeleteConflictError extends Error {
+  readonly code = 'XRAY_DELETE_CONFLICT' as const;
+  constructor(message = 'X-ray was already deleted or cannot be deleted') {
+    super(message);
+    this.name = 'XrayDeleteConflictError';
   }
 }
 
@@ -89,12 +95,7 @@ export class DynamoDBXrayRepository implements XrayRepository {
       await docClient.send(
         new TransactWriteCommand({
           TransactItems: [
-            {
-              Put: {
-                TableName: TABLE_NAME,
-                Item: visitScopedItem,
-              },
-            },
+            { Put: { TableName: TABLE_NAME, Item: visitScopedItem } },
             {
               Put: {
                 TableName: TABLE_NAME,
@@ -122,16 +123,13 @@ export class DynamoDBXrayRepository implements XrayRepository {
     const { Item } = await docClient.send(
       new GetCommand({
         TableName: TABLE_NAME,
-        Key: {
-          PK: `XRAY#${xrayId}`,
-          SK: 'META',
-        },
+        Key: { PK: `XRAY#${xrayId}`, SK: 'META' },
         ConsistentRead: true,
       }),
     );
 
     if (!Item || Item.entityType !== 'XRAY') return null;
-    if (Item.deletedAt != null) return null;
+    if (Item.deletedAt != null) return null; // (legacy support; safe)
     if (Item.patientIsDeleted === true || Item.visitIsDeleted === true) return null;
 
     return Item as Xray;
@@ -152,8 +150,53 @@ export class DynamoDBXrayRepository implements XrayRepository {
 
     if (!Items || Items.length === 0) return [];
     const xrays = Items as Xray[];
-
     return xrays.filter((x) => x.deletedAt == null);
+  }
+
+  async hardDelete(xrayId: string): Promise<{ ok: true; visitId: string }> {
+    // Read META to find visitId for visit-scoped row key
+    const { Item } = await docClient.send(
+      new GetCommand({
+        TableName: TABLE_NAME,
+        Key: { PK: `XRAY#${xrayId}`, SK: 'META' },
+        ConsistentRead: true,
+      }),
+    );
+
+    if (!Item || Item.entityType !== 'XRAY') {
+      throw new XrayDeleteConflictError('X-ray not found');
+    }
+
+    const visitId = Item.visitId as string;
+
+    try {
+      await docClient.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Delete: {
+                TableName: TABLE_NAME,
+                Key: { PK: `XRAY#${xrayId}`, SK: 'META' },
+              },
+            },
+            {
+              Delete: {
+                TableName: TABLE_NAME,
+                Key: { PK: key.visitPK(visitId), SK: key.xraySK(xrayId) },
+              },
+            },
+          ],
+        }),
+      );
+    } catch (err) {
+      if (err instanceof TransactionCanceledException) {
+        // Treat as conflict only when transaction truly fails (e.g. capacity / validation)
+        throw new XrayDeleteConflictError('Unable to delete X-ray');
+      }
+      throw err;
+    }
+
+    return { ok: true, visitId };
   }
 }
 

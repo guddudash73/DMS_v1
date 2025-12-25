@@ -1,3 +1,4 @@
+// apps/web/components/xray/XrayUploader.tsx
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
@@ -7,10 +8,13 @@ import { toast } from 'react-toastify';
 import { usePresignXrayUploadMutation, useRegisterXrayMetadataMutation } from '@/src/store/api';
 import { useSelector } from 'react-redux';
 import type { RootState } from '@/src/store';
+import { cn } from '@/lib/utils';
 
 type Props = {
   visitId: string;
   onUploaded?: () => void;
+  variant?: 'outline' | 'default';
+  className?: string;
 };
 
 const MAX_SIZE_BYTES = 10 * 1024 * 1024;
@@ -61,7 +65,7 @@ async function putWithProgress(
   });
 }
 
-export function XrayUploader({ visitId, onUploaded }: Props) {
+export function XrayUploader({ visitId, onUploaded, variant = 'default', className }: Props) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const xhrRef = useRef<XMLHttpRequest | null>(null);
 
@@ -175,9 +179,14 @@ export function XrayUploader({ visitId, onUploaded }: Props) {
 
       <Button
         type="button"
+        variant={variant}
         onClick={pickFile}
         disabled={busy}
-        className="rounded-xl bg-black text-white hover:bg-black/90"
+        className={cn(
+          'rounded-xl',
+          variant === 'default' ? 'bg-black text-white hover:bg-black/90' : '',
+          className,
+        )}
       >
         {buttonLabel}
       </Button>
