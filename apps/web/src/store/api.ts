@@ -717,6 +717,55 @@ export const apiSlice = createApi({
         body: { lines },
       }),
     }),
+
+    updateFollowupStatus: builder.mutation<
+      {
+        followup: {
+          visitId: string;
+          status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+          updatedAt: number;
+        };
+      },
+      { visitId: string; status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED'; dateTag?: string }
+    >({
+      query: ({ visitId, status }) => ({
+        url: `/followups/${visitId}/status`,
+        method: 'PATCH',
+        body: { status },
+      }),
+
+      async onQueryStarted(arg, { dispatch, queryFulfilled }) {
+        // Optimistic remove when completing/cancelling (daily list shows only ACTIVE)
+        const patch =
+          (arg.status === 'COMPLETED' || arg.status === 'CANCELLED') && arg.dateTag
+            ? dispatch(
+                apiSlice.util.updateQueryData('getDailyFollowups', arg.dateTag, (draft) => {
+                  draft.items = (draft.items ?? []).filter((x) => x.visitId !== arg.visitId);
+                }),
+              )
+            : null;
+
+        try {
+          await queryFulfilled;
+        } catch {
+          patch?.undo();
+        }
+      },
+
+      // ✅ Only invalidate when it matters:
+      // - if status becomes ACTIVE again, the item must re-appear (needs refetch)
+      // - if dateTag missing, fallback invalidation
+      invalidatesTags: (_r, _e, arg) => {
+        if (!arg.dateTag) return ['Followups'];
+
+        if (arg.status === 'ACTIVE') {
+          return [{ type: 'Followups' as const, id: arg.dateTag }];
+        }
+
+        // COMPLETED/CANCELLED: no invalidation needed (we already removed it optimistically)
+        return [];
+      },
+    }),
   }),
 });
 
@@ -768,6 +817,7 @@ export const {
   useUpdateVisitRxReceptionNotesMutation, // ✅ NEW export
   useStartVisitRxRevisionMutation,
   useUpdateRxByIdMutation,
+  useUpdateFollowupStatusMutation,
 } = apiSlice;
 
 export const api = apiSlice;

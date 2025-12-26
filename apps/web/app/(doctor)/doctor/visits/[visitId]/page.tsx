@@ -1,46 +1,39 @@
-// apps/web/app/(doctor)/doctor/visits/[visitId]/page.tsx
 'use client';
 
-import { useMemo } from 'react';
+import * as React from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'react-toastify';
 
-import { PrescriptionWorkspace } from '@/components/prescription/PrescriptionWorkspace';
+import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 import {
   useGetVisitByIdQuery,
-  useGetPatientByIdQuery,
   useUpdateVisitStatusMutation,
+  useGetPatientByIdQuery,
 } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
 
-export default function DoctorVisitHandlingPage() {
-  const params = useParams();
+export default function DoctorVisitOverviewPage() {
   const router = useRouter();
+  const params = useParams<{ visitId: string }>();
 
-  const visitId = useMemo(() => String(params.visitId ?? ''), [params.visitId]);
+  const visitId = React.useMemo(() => String(params?.visitId ?? ''), [params?.visitId]);
 
   const auth = useAuth();
   const doctorId = auth.userId ?? '';
-  const doctorName = doctorId ? `Doctor (${doctorId})` : 'Doctor';
 
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
-  const patientId = visitQuery.data?.patientId;
+  const visit = visitQuery.data;
 
-  const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
+  const patientQuery = useGetPatientByIdQuery(visit?.patientId ?? '', {
+    skip: !visit?.patientId,
+  });
 
-  const [updateVisitStatus, updateVisitStatusState] = useUpdateVisitStatusMutation();
+  const [updateStatus, updateStatusState] = useUpdateVisitStatusMutation();
 
-  const visitStatus = visitQuery.data?.status;
-
-  const canEndSession =
-    !!visitId &&
-    !!doctorId &&
-    (visitStatus === 'IN_PROGRESS' || visitStatus === 'QUEUED') &&
-    !updateVisitStatusState.isLoading;
-
-  const onEndSession = async () => {
+  const startSession = async () => {
     if (!visitId) return;
 
     if (!doctorId) {
@@ -48,49 +41,77 @@ export default function DoctorVisitHandlingPage() {
       return;
     }
 
+    if (!visit) {
+      toast.error('Visit not loaded yet.');
+      return;
+    }
+
     try {
-      await updateVisitStatus({
+      await updateStatus({
         visitId,
-        status: 'DONE',
+        status: 'IN_PROGRESS',
         doctorId,
-        date: visitQuery.data?.visitDate,
+        date: visit.visitDate,
       }).unwrap();
 
-      toast.success('Session ended. Visit marked as DONE.');
-      router.push('/doctor');
+      router.push(`/doctor/visits/${visitId}/prescription`);
     } catch (err: any) {
-      toast.error(err?.data?.message ?? err?.message ?? 'Failed to end session.');
+      toast.error(err?.data?.message ?? err?.message ?? 'Failed to start session.');
     }
   };
 
+  const resumeSession = () => {
+    router.push(`/doctor/visits/${visitId}/prescription`);
+  };
+
+  if (!visitId) return <div className="p-6">Invalid visit id.</div>;
+
+  if (visitQuery.isLoading) return <div className="p-6">Loading…</div>;
+
+  if (visitQuery.isError) {
+    return <div className="p-6 text-red-600">Failed to load visit.</div>;
+  }
+
+  if (!visit) return <div className="p-6">Visit not found</div>;
+
   return (
-    <div className="p-4 2xl:p-8">
-      <div className="mb-4 flex items-center justify-end gap-3">
-        <Button type="button" variant="outline" className="rounded-xl" disabled>
-          Hold Session
-        </Button>
+    <div className="space-y-6 p-4 2xl:p-8">
+      {/* Patient */}
+      <Card className="rounded-2xl p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate text-lg font-semibold">
+              {patientQuery.data?.name ?? 'Patient'}
+            </div>
+            <div className="text-sm text-gray-500">{patientQuery.data?.phone ?? '—'}</div>
+          </div>
+          <Badge variant="outline">Visit</Badge>
+        </div>
+      </Card>
 
-        <Button
-          type="button"
-          className="rounded-xl bg-black text-white hover:bg-black/90"
-          disabled={!canEndSession}
-          onClick={() => void onEndSession()}
-        >
-          {updateVisitStatusState.isLoading ? 'Ending…' : 'End Session'}
-        </Button>
-      </div>
+      {/* Visit Details */}
+      <Card className="rounded-2xl p-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="truncate font-medium">{visit.reason ?? '—'}</div>
+            <div className="text-sm text-gray-500">{visit.visitDate ?? '—'}</div>
+          </div>
 
-      <PrescriptionWorkspace
-        visitId={visitId}
-        patientId={patientId} // ✅ NEW
-        patientName={patientQuery.data?.name}
-        patientPhone={patientQuery.data?.phone}
-        doctorName={doctorName}
-        visitDateLabel={
-          visitQuery.data?.visitDate ? `Visit: ${visitQuery.data.visitDate}` : undefined
-        }
-        visitStatus={visitStatus}
-      />
+          <div className="flex items-center gap-3">
+            <Badge>{visit.status}</Badge>
+
+            {visit.status === 'QUEUED' && (
+              <Button onClick={() => void startSession()} disabled={updateStatusState.isLoading}>
+                {updateStatusState.isLoading ? 'Starting…' : 'Start Session'}
+              </Button>
+            )}
+
+            {visit.status === 'IN_PROGRESS' && (
+              <Button onClick={resumeSession}>Resume Session</Button>
+            )}
+          </div>
+        </div>
+      </Card>
     </div>
   );
 }

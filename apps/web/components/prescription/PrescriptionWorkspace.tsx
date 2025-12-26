@@ -1,4 +1,3 @@
-// apps/web/components/prescription/PrescriptionWorkspace.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -10,6 +9,7 @@ import { PrescriptionPrintSheet } from './PrescriptionPrintSheet';
 import { MedicinesEditor } from './MedicinesEditor';
 import { XrayUploader } from '@/components/xray/XrayUploader';
 import { XrayGallery } from '@/components/xray/XrayGallery';
+import { XrayTrayReadOnly } from '@/components/xray/XrayTrayReadOnly';
 
 import {
   useUpsertVisitRxMutation,
@@ -37,6 +37,8 @@ import { PaginationControl } from '@/components/ui/pagination-control';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
+import { AnimatePresence, motion } from 'framer-motion';
+
 type Props = {
   visitId: string;
   patientId?: string;
@@ -45,15 +47,130 @@ type Props = {
   doctorName?: string;
   visitDateLabel?: string;
   visitStatus?: 'QUEUED' | 'IN_PROGRESS' | 'DONE';
+
+  /** lets the top page button know when revision mode is active */
+  onRevisionModeChange?: (enabled: boolean) => void;
 };
 
 function toISODate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+function lineToText(line: RxLineType): string {
+  const med = (line as any)?.medicineName ?? (line as any)?.medicine ?? 'Medicine';
+  const dose = (line as any)?.dose ? `${(line as any).dose}` : '';
+  const freq = (line as any)?.frequency ? `${(line as any).frequency}` : '';
+  const days =
+    (line as any)?.days !== undefined && (line as any)?.days !== null
+      ? `${(line as any).days}`
+      : '';
+  const timing = (line as any)?.timing ? `${(line as any).timing}` : '';
+  const notes = (line as any)?.notes ? `${(line as any).notes}` : '';
+
+  const parts = [dose, freq, days ? `${days} days` : '', timing].filter(Boolean);
+  return `${med}${parts.length ? ` — ${parts.join(' · ')}` : ''}${notes ? ` — ${notes}` : ''}`;
+}
+
+function MedicinesReadOnly({ lines }: { lines: RxLineType[] }) {
+  if (!lines.length) {
+    return <div className="mt-3 text-sm text-gray-500">No medicines added.</div>;
+  }
+
+  return (
+    <div className="mt-3 overflow-hidden rounded-2xl border">
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-gray-50">
+            <TableHead className="font-semibold text-gray-600">#</TableHead>
+            <TableHead className="font-semibold text-gray-600">Medicine</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {lines.map((l, idx) => (
+            <TableRow key={(l as any)?.id ?? `${idx}`} className="hover:bg-gray-50/60">
+              <TableCell className="w-[60px] text-gray-700">{idx + 1}</TableCell>
+              <TableCell className="text-gray-800">{lineToText(l)}</TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </div>
+  );
+}
+
+/** ✅ Quick-look dialog for prescription */
+function VisitPrescriptionQuickLookDialog(props: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  visitId: string | null;
+  patientName?: string;
+  patientPhone?: string;
+  doctorName?: string;
+}) {
+  const { open, onOpenChange, visitId, patientName, patientPhone, doctorName } = props;
+
+  const rxQuery = useGetVisitRxQuery({ visitId: visitId ?? '' }, { skip: !open || !visitId });
+  const lines = rxQuery.data?.rx?.lines ?? [];
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-5xl rounded-2xl">
+        <DialogHeader>
+          <DialogTitle>Prescription</DialogTitle>
+        </DialogHeader>
+
+        <div className="min-w-0 overflow-x-hidden rounded-2xl border bg-white p-4">
+          {rxQuery.isFetching ? (
+            <div className="text-sm text-gray-500">Loading…</div>
+          ) : !rxQuery.data?.rx ? (
+            <div className="text-sm text-gray-500">No prescription found for this visit.</div>
+          ) : (
+            <PrescriptionPreview
+              patientName={patientName}
+              patientPhone={patientPhone}
+              doctorName={doctorName}
+              visitDateLabel={rxQuery.data?.rx?.visitId ? `Visit: ${rxQuery.data.rx.visitId}` : ''}
+              lines={lines}
+            />
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/** ✅ Quick-look dialog for X-rays */
+function VisitXrayQuickLookDialog(props: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  visitId: string | null;
+}) {
+  const { open, onOpenChange, visitId } = props;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-5xl rounded-2xl">
+        <DialogHeader>
+          <DialogTitle>X-rays</DialogTitle>
+        </DialogHeader>
+
+        {!visitId ? null : <XrayTrayReadOnly visitId={visitId} />}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function PrescriptionWorkspace(props: Props) {
-  const { visitId, patientId, patientName, patientPhone, doctorName, visitDateLabel, visitStatus } =
-    props;
+  const {
+    visitId,
+    patientId,
+    patientName,
+    patientPhone,
+    doctorName,
+    visitDateLabel,
+    visitStatus,
+    onRevisionModeChange,
+  } = props;
 
   const router = useRouter();
 
@@ -74,7 +191,17 @@ export function PrescriptionWorkspace(props: Props) {
   const [startRevision, startRevisionState] = useStartVisitRxRevisionMutation();
   const [updateRxById] = useUpdateRxByIdMutation();
 
-  // Hydrate from server once
+  // Revision mode
+  const [isRevisionMode, setIsRevisionMode] = useState(false);
+  const isDone = visitStatus === 'DONE';
+  const canEdit = !isDone || isRevisionMode;
+
+  const setRevisionMode = (enabled: boolean) => {
+    setIsRevisionMode(enabled);
+    onRevisionModeChange?.(enabled);
+  };
+
+  // Hydrate once
   useEffect(() => {
     if (hydratedRef.current) return;
     if (!rxQuery.isSuccess) return;
@@ -97,6 +224,7 @@ export function PrescriptionWorkspace(props: Props) {
   const hash = useMemo(() => JSON.stringify(lines), [lines]);
 
   const canAutosave =
+    canEdit &&
     hydratedRef.current &&
     lines.length > 0 &&
     hash !== lastHash.current &&
@@ -126,7 +254,7 @@ export function PrescriptionWorkspace(props: Props) {
     return () => {
       if (debounce.current) clearTimeout(debounce.current);
     };
-  }, [canAutosave, hash, lines, visitId, visitStatus, activeRxId, upsert, updateRxById]);
+  }, [canAutosave, hash, lines, visitId, visitStatus, activeRxId, upsert, updateRxById, canEdit]);
 
   const statusText =
     state === 'saving'
@@ -137,11 +265,9 @@ export function PrescriptionWorkspace(props: Props) {
           ? 'Save failed'
           : '';
 
-  const showStartRevision = visitStatus === 'DONE';
+  const showStartRevision = isDone && !isRevisionMode;
 
-  // ---------------------------
-  // ✅ Print helper (Doctor panel parity with Reception)
-  // ---------------------------
+  // Print
   const canPrint = lines.length > 0;
 
   const printPrescription = () => {
@@ -153,11 +279,8 @@ export function PrescriptionWorkspace(props: Props) {
     };
 
     window.addEventListener('afterprint', onAfterPrint);
-
-    // enable Rx print isolation rules inside PrescriptionPrintSheet
     document.body.classList.add('print-rx');
 
-    // allow DOM/styles to settle before invoking print (avoids Chrome capturing app shell)
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         window.print();
@@ -172,15 +295,12 @@ export function PrescriptionWorkspace(props: Props) {
   const allVisitsRaw = visitsQuery.data?.items ?? [];
 
   const allVisits = useMemo(() => {
-    const items = [...allVisitsRaw]
-      .filter((v) => v.status === 'DONE') // ✅ ONLY DONE visits
+    return [...allVisitsRaw]
+      .filter((v) => v.status === 'DONE')
       .sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0));
-
-    return items;
   }, [allVisitsRaw]);
 
-  const [datePickerOpenMain, setDatePickerOpenMain] = useState(false);
-  const [datePickerOpenDialog, setDatePickerOpenDialog] = useState(false);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
 
   const selectedDateStr = useMemo(
@@ -193,10 +313,9 @@ export function PrescriptionWorkspace(props: Props) {
     return allVisits.filter((v) => v.visitDate === selectedDateStr);
   }, [allVisits, selectedDateStr]);
 
-  // bottom list pagination (2 per page)
+  // bottom list pagination
   const PAGE_SIZE = 2;
   const [page, setPage] = useState(1);
-
   useEffect(() => setPage(1), [selectedDateStr]);
 
   const pageItems = useMemo(() => {
@@ -204,14 +323,16 @@ export function PrescriptionWorkspace(props: Props) {
     return filteredVisits.slice(start, start + PAGE_SIZE);
   }, [filteredVisits, page]);
 
-  // View all dialog pagination (10 per page)
-  const [viewAllOpen, setViewAllOpen] = useState(false);
+  // full overlay pagination
   const VIEW_ALL_PAGE_SIZE = 10;
   const [viewAllPage, setViewAllPage] = useState(1);
 
+  // ✅ animated overlay toggle
+  const [visitsExpanded, setVisitsExpanded] = useState(false);
+
   useEffect(() => {
-    if (viewAllOpen) setViewAllPage(1);
-  }, [selectedDateStr, viewAllOpen]);
+    if (visitsExpanded) setViewAllPage(1);
+  }, [visitsExpanded, selectedDateStr]);
 
   const viewAllItems = useMemo(() => {
     const start = (viewAllPage - 1) * VIEW_ALL_PAGE_SIZE;
@@ -224,47 +345,87 @@ export function PrescriptionWorkspace(props: Props) {
     router.push(`/doctor/visits/${v.visitId}`);
   };
 
+  // Quick look (modal) state
+  const [rxQuickOpen, setRxQuickOpen] = useState(false);
+  const [xrayQuickOpen, setXrayQuickOpen] = useState(false);
+  const [quickVisitId, setQuickVisitId] = useState<string | null>(null);
+
+  const openRxQuick = (visitIdToOpen: string) => {
+    setQuickVisitId(visitIdToOpen);
+    setRxQuickOpen(true);
+  };
+
+  const openXrayQuick = (visitIdToOpen: string) => {
+    setQuickVisitId(visitIdToOpen);
+    setXrayQuickOpen(true);
+  };
+
+  // ---------------------------
+  // UI
+  // ---------------------------
   return (
-    <div className="grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-10">
-      <div className="min-w-0 rounded-2xl bg-white p-4 lg:col-span-4">
-        <div className="flex items-center justify-between">
-          <div className="text-lg font-semibold text-gray-900">Prescription</div>
-          <div className="flex items-center gap-2">
-            <div className="text-[11px] text-gray-500">{statusText}</div>
+    <div className="relative w-full min-w-0">
+      {/* Main grid content (cards + bottom table) */}
+      <motion.div
+        className="grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-10"
+        animate={
+          visitsExpanded
+            ? { opacity: 0.25, y: -6, filter: 'blur(1px)' as any }
+            : { opacity: 1, y: 0, filter: 'blur(0px)' as any }
+        }
+        transition={{ duration: 0.25, ease: 'easeOut' }}
+        style={{ pointerEvents: visitsExpanded ? 'none' : 'auto' }}
+      >
+        {/* Prescription */}
+        <div className="min-w-0 rounded-2xl bg-white p-4 lg:col-span-4">
+          <div className="flex items-center justify-between">
+            <div className="text-lg font-semibold text-gray-900">Prescription</div>
+            <div className="flex items-center gap-2">
+              <div className="text-[11px] text-gray-500">{statusText}</div>
 
-            {showStartRevision ? (
+              {showStartRevision ? (
+                <Button
+                  variant="outline"
+                  className="rounded-xl"
+                  disabled={startRevisionState.isLoading}
+                  onClick={async () => {
+                    try {
+                      const res = await startRevision({ visitId }).unwrap();
+                      setActiveRxId(res.rxId);
+                      setRevisionMode(true);
+                      setState('idle');
+                    } catch {
+                      setState('error');
+                    }
+                  }}
+                >
+                  Start Revision
+                </Button>
+              ) : null}
+
               <Button
-                variant="outline"
-                className="rounded-xl"
-                disabled={startRevisionState.isLoading}
-                onClick={async () => {
-                  try {
-                    const res = await startRevision({ visitId }).unwrap();
-                    setActiveRxId(res.rxId);
-                    setState('idle');
-                  } catch {
-                    setState('error');
-                  }
-                }}
+                variant="default"
+                className="cursor-pointer rounded-xl"
+                onClick={printPrescription}
+                disabled={!canPrint}
+                title={!canPrint ? 'No medicines to print' : 'Print prescription'}
               >
-                Start Revision
+                Print
               </Button>
-            ) : null}
-
-            <Button
-              variant="default"
-              className="cursor-pointer rounded-xl"
-              onClick={printPrescription}
-              disabled={!canPrint}
-              title={!canPrint ? 'No medicines to print' : 'Print prescription'}
-            >
-              Print
-            </Button>
+            </div>
           </div>
-        </div>
 
-        <div className="mt-3 min-w-0 overflow-x-hidden">
-          <PrescriptionPreview
+          <div className="mt-3 min-w-0 overflow-x-hidden">
+            <PrescriptionPreview
+              patientName={patientName}
+              patientPhone={patientPhone}
+              doctorName={doctorName}
+              visitDateLabel={visitDateLabel}
+              lines={lines}
+            />
+          </div>
+
+          <PrescriptionPrintSheet
             patientName={patientName}
             patientPhone={patientPhone}
             doctorName={doctorName}
@@ -273,280 +434,390 @@ export function PrescriptionWorkspace(props: Props) {
           />
         </div>
 
-        <PrescriptionPrintSheet
-          patientName={patientName}
-          patientPhone={patientPhone}
-          doctorName={doctorName}
-          visitDateLabel={visitDateLabel}
-          lines={lines}
-        />
-      </div>
+        {/* Medicines */}
+        <Card className="w-full min-w-0 rounded-2xl border bg-white p-4 lg:col-span-6">
+          <div className="flex items-center justify-between border-b pb-3">
+            <div className="text-lg font-semibold text-gray-900">Medicines</div>
 
-      <Card className="w-full min-w-0 rounded-2xl border bg-white p-4 lg:col-span-6">
-        <div className="flex items-center justify-between border-b pb-3">
-          <div className="text-lg font-semibold text-gray-900">Medicines</div>
+            <div className="flex items-center gap-2">
+              {canEdit ? <XrayUploader visitId={visitId} variant="outline" /> : null}
 
-          <div className="flex items-center gap-2">
-            <XrayUploader visitId={visitId} variant="outline" />
-            <Button type="button" variant="outline" className="rounded-xl">
-              Import Preset
+              <Button type="button" variant="outline" className="rounded-xl" disabled={!canEdit}>
+                Import Preset
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-3">
+            {canEdit ? (
+              <XrayGallery visitId={visitId} variant="embedded" canDelete />
+            ) : (
+              <XrayTrayReadOnly visitId={visitId} />
+            )}
+          </div>
+
+          <div className="mt-4 min-w-0">
+            {canEdit ? (
+              <MedicinesEditor lines={lines} onChange={setLines} />
+            ) : (
+              <MedicinesReadOnly lines={lines} />
+            )}
+          </div>
+        </Card>
+
+        {/* Bottom Visits section (small) */}
+        <Card className="w-full rounded-2xl border bg-white p-4 lg:col-span-10">
+          <div className="flex items-center justify-between gap-3">
+            <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-[220px] justify-start gap-2 rounded-xl"
+                >
+                  <CalendarIcon className="h-4 w-4" />
+                  <span className={selectedDateStr ? 'text-gray-900' : 'text-gray-500'}>
+                    {dateLabel}
+                  </span>
+                </Button>
+              </PopoverTrigger>
+
+              <PopoverContent align="start" className="w-auto rounded-2xl p-2">
+                <Calendar
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={(d) => {
+                    setSelectedDate(d);
+                    setDatePickerOpen(false);
+                  }}
+                />
+                {selectedDateStr ? (
+                  <div className="px-2 pb-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      className="h-8 rounded-xl text-xs"
+                      onClick={() => {
+                        setSelectedDate(undefined);
+                        setDatePickerOpen(false);
+                      }}
+                    >
+                      Clear
+                    </Button>
+                  </div>
+                ) : null}
+              </PopoverContent>
+            </Popover>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => setVisitsExpanded(true)}
+              disabled={!patientId}
+            >
+              View All
             </Button>
           </div>
-        </div>
 
-        <div>
-          <XrayGallery visitId={visitId} variant="embedded" />
-        </div>
-
-        <div className="min-w-0">
-          <MedicinesEditor lines={lines} onChange={setLines} />
-        </div>
-      </Card>
-
-      {/* Bottom Visits Section */}
-      <Card className="lg:col-span-10 w-full rounded-2xl border bg-white p-4">
-        <div className="flex items-center justify-between gap-3">
-          <Popover open={datePickerOpenMain} onOpenChange={setDatePickerOpenMain}>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="outline"
-                className="w-[220px] justify-start gap-2 rounded-xl"
-              >
-                <CalendarIcon className="h-4 w-4" />
-                <span className={selectedDateStr ? 'text-gray-900' : 'text-gray-500'}>
-                  {dateLabel}
-                </span>
-              </Button>
-            </PopoverTrigger>
-
-            <PopoverContent align="start" className="w-auto rounded-2xl p-2">
-              <Calendar
-                mode="single"
-                selected={selectedDate}
-                onSelect={(d) => {
-                  setSelectedDate(d);
-                  setDatePickerOpenMain(false);
-                }}
-              />
-              {selectedDateStr ? (
-                <div className="px-2 pb-2 pt-1">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="h-8 rounded-xl text-xs"
-                    onClick={() => {
-                      setSelectedDate(undefined);
-                      setDatePickerOpenMain(false);
-                    }}
-                  >
-                    Clear
-                  </Button>
-                </div>
-              ) : null}
-            </PopoverContent>
-          </Popover>
-
-          <Button
-            type="button"
-            variant="outline"
-            className="rounded-xl"
-            onClick={() => setViewAllOpen(true)}
-            disabled={!patientId}
-          >
-            View All
-          </Button>
-        </div>
-
-        <div className="mt-4 overflow-hidden rounded-2xl border">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-gray-50">
-                <TableHead className="font-semibold text-gray-600">Visit Date</TableHead>
-                <TableHead className="font-semibold text-gray-600">Reason</TableHead>
-                <TableHead className="font-semibold text-gray-600">Status</TableHead>
-                <TableHead className="text-right font-semibold text-gray-600">Action</TableHead>
-              </TableRow>
-            </TableHeader>
-
-            <TableBody>
-              {!patientId ? (
-                <TableRow>
-                  <TableCell colSpan={4} className="py-10 text-center text-sm text-gray-500">
-                    Loading patient context…
-                  </TableCell>
+          <div className="mt-4 overflow-hidden rounded-2xl border">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-gray-50">
+                  <TableHead className="font-semibold text-gray-600">Visit Date</TableHead>
+                  <TableHead className="font-semibold text-gray-600">Reason</TableHead>
+                  <TableHead className="font-semibold text-gray-600">Status</TableHead>
+                  <TableHead className="text-right font-semibold text-gray-600">Actions</TableHead>
                 </TableRow>
-              ) : visitsQuery.isLoading ? (
-                <TableRow>
-                  <TableCell colSpan={4} className="py-10 text-center text-sm text-gray-500">
-                    Loading visits…
-                  </TableCell>
-                </TableRow>
-              ) : pageItems.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={4} className="py-10 text-center text-sm text-gray-500">
-                    No visits found{selectedDateStr ? ` for ${selectedDateStr}` : ''}.
-                  </TableCell>
-                </TableRow>
-              ) : (
-                pageItems.map((v) => (
-                  <TableRow key={v.visitId} className="hover:bg-gray-50/60">
-                    <TableCell className="font-medium">{v.visitDate}</TableCell>
-                    <TableCell className="text-gray-800">{v.reason ?? '—'}</TableCell>
-                    <TableCell className="text-gray-800">{v.status ?? '—'}</TableCell>
-                    <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="h-8 rounded-xl px-3 text-xs"
-                        onClick={() => openVisit(v)}
-                      >
-                        View
-                      </Button>
+              </TableHeader>
+
+              <TableBody>
+                {!patientId ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="py-10 text-center text-sm text-gray-500">
+                      Loading patient context…
                     </TableCell>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-
-          {filteredVisits.length > PAGE_SIZE ? (
-            <div className="border-t bg-white px-3 py-2">
-              <PaginationControl
-                page={page}
-                pageSize={PAGE_SIZE}
-                totalItems={filteredVisits.length}
-                onPageChange={setPage}
-              />
-            </div>
-          ) : null}
-        </div>
-
-        {/* View All Dialog */}
-        <Dialog open={viewAllOpen} onOpenChange={setViewAllOpen}>
-          <DialogContent className="max-w-5xl rounded-2xl">
-            <DialogHeader>
-              <DialogTitle>All Visits</DialogTitle>
-            </DialogHeader>
-
-            <div className="flex items-center justify-between gap-3">
-              <div className="text-sm text-gray-600">
-                {patientName ? (
-                  <>
-                    <span className="font-semibold text-gray-900">{patientName}</span>
-                    {patientPhone ? (
-                      <span className="ml-2 text-gray-500">({patientPhone})</span>
-                    ) : null}
-                  </>
-                ) : (
-                  <span className="text-gray-500">Patient</span>
-                )}
-              </div>
-
-              <Popover open={datePickerOpenDialog} onOpenChange={setDatePickerOpenDialog}>
-                <PopoverTrigger asChild>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-[220px] justify-start gap-2 rounded-xl"
-                  >
-                    <CalendarIcon className="h-4 w-4" />
-                    <span className={selectedDateStr ? 'text-gray-900' : 'text-gray-500'}>
-                      {dateLabel}
-                    </span>
-                  </Button>
-                </PopoverTrigger>
-
-                <PopoverContent align="end" className="w-auto rounded-2xl p-2">
-                  <Calendar
-                    mode="single"
-                    selected={selectedDate}
-                    onSelect={(d) => {
-                      setSelectedDate(d);
-                      setDatePickerOpenDialog(false);
-                    }}
-                  />
-                  {selectedDateStr ? (
-                    <div className="px-2 pb-2 pt-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="h-8 rounded-xl text-xs"
-                        onClick={() => {
-                          setSelectedDate(undefined);
-                          setDatePickerOpenDialog(false);
-                        }}
-                      >
-                        Clear
-                      </Button>
-                    </div>
-                  ) : null}
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="mt-3 overflow-hidden rounded-2xl border">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-gray-50">
-                    <TableHead className="font-semibold text-gray-600">Visit Date</TableHead>
-                    <TableHead className="font-semibold text-gray-600">Reason</TableHead>
-                    <TableHead className="font-semibold text-gray-600">Status</TableHead>
-                    <TableHead className="font-semibold text-gray-600">Doctor</TableHead>
-                    <TableHead className="text-right font-semibold text-gray-600">Action</TableHead>
+                ) : visitsQuery.isLoading ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="py-10 text-center text-sm text-gray-500">
+                      Loading visits…
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-
-                <TableBody>
-                  {visitsQuery.isLoading ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="py-10 text-center text-sm text-gray-500">
-                        Loading visits…
-                      </TableCell>
-                    </TableRow>
-                  ) : viewAllItems.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={5} className="py-10 text-center text-sm text-gray-500">
-                        No visits found{selectedDateStr ? ` for ${selectedDateStr}` : ''}.
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    viewAllItems.map((v) => (
-                      <TableRow key={v.visitId} className="hover:bg-gray-50/60">
-                        <TableCell className="font-medium">{v.visitDate}</TableCell>
-                        <TableCell className="text-gray-800">{v.reason ?? '—'}</TableCell>
-                        <TableCell className="text-gray-800">{v.status ?? '—'}</TableCell>
-                        <TableCell className="text-gray-800">{v.doctorId ?? '—'}</TableCell>
-                        <TableCell className="text-right">
+                ) : pageItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={4} className="py-10 text-center text-sm text-gray-500">
+                      No visits found{selectedDateStr ? ` for ${selectedDateStr}` : ''}.
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  pageItems.map((v) => (
+                    <TableRow key={v.visitId} className="hover:bg-gray-50/60">
+                      <TableCell className="font-medium">{v.visitDate}</TableCell>
+                      <TableCell className="text-gray-800">{v.reason ?? '—'}</TableCell>
+                      <TableCell className="text-gray-800">{v.status ?? '—'}</TableCell>
+                      <TableCell className="text-right">
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8 rounded-xl px-3 text-xs"
+                            onClick={() => openRxQuick(v.visitId)}
+                          >
+                            View Prescription
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="h-8 rounded-xl px-3 text-xs"
+                            onClick={() => openXrayQuick(v.visitId)}
+                          >
+                            View X-rays
+                          </Button>
                           <Button
                             type="button"
                             variant="outline"
                             className="h-8 rounded-xl px-3 text-xs"
                             onClick={() => openVisit(v)}
                           >
-                            Open
+                            View
                           </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
 
-              {filteredVisits.length > VIEW_ALL_PAGE_SIZE ? (
-                <div className="border-t bg-white px-3 py-2">
-                  <PaginationControl
-                    page={viewAllPage}
-                    pageSize={VIEW_ALL_PAGE_SIZE}
-                    totalItems={filteredVisits.length}
-                    onPageChange={setViewAllPage}
-                  />
+            {filteredVisits.length > PAGE_SIZE ? (
+              <div className="border-t bg-white px-3 py-2">
+                <PaginationControl
+                  page={page}
+                  pageSize={PAGE_SIZE}
+                  totalItems={filteredVisits.length}
+                  onPageChange={setPage}
+                />
+              </div>
+            ) : null}
+          </div>
+        </Card>
+      </motion.div>
+
+      {/* Animated overlay (grows into full view) */}
+      <AnimatePresence>
+        {visitsExpanded ? (
+          <motion.div
+            className="absolute inset-0 z-50"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+          >
+            {/* Backdrop */}
+            <motion.div
+              className="absolute inset-0 bg-black/20"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+            />
+
+            {/* Panel */}
+            <motion.div
+              className="absolute inset-0 m-2 rounded-2xl bg-white shadow-xl md:m-4"
+              initial={{ y: 40, opacity: 0, scale: 0.98 }}
+              animate={{ y: 0, opacity: 1, scale: 1 }}
+              exit={{ y: 30, opacity: 0, scale: 0.98 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+            >
+              <div className="flex h-full flex-col">
+                {/* Header */}
+                <div className="flex items-center justify-between gap-3 border-b p-4">
+                  <div className="min-w-0">
+                    <div className="text-lg font-semibold text-gray-900">All Visits</div>
+                    <div className="mt-0.5 text-sm text-gray-600">
+                      {patientName ? (
+                        <>
+                          <span className="font-semibold text-gray-900">{patientName}</span>
+                          {patientPhone ? (
+                            <span className="ml-2 text-gray-500">({patientPhone})</span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <span className="text-gray-500">Patient</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-[220px] justify-start gap-2 rounded-xl"
+                        >
+                          <CalendarIcon className="h-4 w-4" />
+                          <span className={selectedDateStr ? 'text-gray-900' : 'text-gray-500'}>
+                            {dateLabel}
+                          </span>
+                        </Button>
+                      </PopoverTrigger>
+
+                      <PopoverContent align="end" className="w-auto rounded-2xl p-2">
+                        <Calendar
+                          mode="single"
+                          selected={selectedDate}
+                          onSelect={(d) => {
+                            setSelectedDate(d);
+                            setDatePickerOpen(false);
+                          }}
+                        />
+                        {selectedDateStr ? (
+                          <div className="px-2 pb-2 pt-1">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              className="h-8 rounded-xl text-xs"
+                              onClick={() => {
+                                setSelectedDate(undefined);
+                                setDatePickerOpen(false);
+                              }}
+                            >
+                              Clear
+                            </Button>
+                          </div>
+                        ) : null}
+                      </PopoverContent>
+                    </Popover>
+
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="rounded-xl"
+                      onClick={() => setVisitsExpanded(false)}
+                    >
+                      View Less
+                    </Button>
+                  </div>
                 </div>
-              ) : null}
-            </div>
-          </DialogContent>
-        </Dialog>
-      </Card>
+
+                {/* Content (scrollable) */}
+                <div className="min-h-0 flex-1 overflow-auto p-4">
+                  <div className="overflow-hidden rounded-2xl border">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-gray-50">
+                          <TableHead className="font-semibold text-gray-600">Visit Date</TableHead>
+                          <TableHead className="font-semibold text-gray-600">Reason</TableHead>
+                          <TableHead className="font-semibold text-gray-600">Status</TableHead>
+                          <TableHead className="text-right font-semibold text-gray-600">
+                            Actions
+                          </TableHead>
+                        </TableRow>
+                      </TableHeader>
+
+                      <TableBody>
+                        {!patientId ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={4}
+                              className="py-10 text-center text-sm text-gray-500"
+                            >
+                              Loading patient context…
+                            </TableCell>
+                          </TableRow>
+                        ) : visitsQuery.isLoading ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={4}
+                              className="py-10 text-center text-sm text-gray-500"
+                            >
+                              Loading visits…
+                            </TableCell>
+                          </TableRow>
+                        ) : viewAllItems.length === 0 ? (
+                          <TableRow>
+                            <TableCell
+                              colSpan={4}
+                              className="py-10 text-center text-sm text-gray-500"
+                            >
+                              No visits found{selectedDateStr ? ` for ${selectedDateStr}` : ''}.
+                            </TableCell>
+                          </TableRow>
+                        ) : (
+                          viewAllItems.map((v) => (
+                            <TableRow key={v.visitId} className="hover:bg-gray-50/60">
+                              <TableCell className="font-medium">{v.visitDate}</TableCell>
+                              <TableCell className="text-gray-800">{v.reason ?? '—'}</TableCell>
+                              <TableCell className="text-gray-800">{v.status ?? '—'}</TableCell>
+                              <TableCell className="text-right">
+                                <div className="flex justify-end gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-8 rounded-xl px-3 text-xs"
+                                    onClick={() => openRxQuick(v.visitId)}
+                                  >
+                                    View Prescription
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-8 rounded-xl px-3 text-xs"
+                                    onClick={() => openXrayQuick(v.visitId)}
+                                  >
+                                    View X-rays
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-8 rounded-xl px-3 text-xs"
+                                    onClick={() => openVisit(v)}
+                                  >
+                                    View
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))
+                        )}
+                      </TableBody>
+                    </Table>
+
+                    {filteredVisits.length > VIEW_ALL_PAGE_SIZE ? (
+                      <div className="border-t bg-white px-3 py-2">
+                        <PaginationControl
+                          page={viewAllPage}
+                          pageSize={VIEW_ALL_PAGE_SIZE}
+                          totalItems={filteredVisits.length}
+                          onPageChange={setViewAllPage}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      {/* Quick look dialogs */}
+      <VisitPrescriptionQuickLookDialog
+        open={rxQuickOpen}
+        onOpenChange={(o) => setRxQuickOpen(o)}
+        visitId={quickVisitId}
+        patientName={patientName}
+        patientPhone={patientPhone}
+        doctorName={doctorName}
+      />
+
+      <VisitXrayQuickLookDialog
+        open={xrayQuickOpen}
+        onOpenChange={(o) => setXrayQuickOpen(o)}
+        visitId={quickVisitId}
+      />
     </div>
   );
 }
