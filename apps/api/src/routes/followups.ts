@@ -5,7 +5,6 @@ import { logError } from '../lib/logger';
 import { visitRepository } from '../repositories/visitRepository';
 import { followupRepository } from '../repositories/followupRepository';
 import { patientRepository } from '../repositories/patientRepository';
-import { requireRole } from '../middlewares/auth';
 
 const router = express.Router();
 
@@ -14,6 +13,11 @@ const DailyFollowupsQuery = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/, 'Expected date in YYYY-MM-DD format')
     .optional(),
+});
+
+// ✅ must match packages/types FollowUpStatus
+const FollowupStatusUpdateBody = z.object({
+  status: z.enum(['ACTIVE', 'COMPLETED', 'CANCELLED']),
 });
 
 const asyncHandler =
@@ -41,17 +45,13 @@ type FollowupListItem = {
 
 router.get(
   '/daily',
-  requireRole('RECEPTION', 'ADMIN'),
   asyncHandler(async (req, res) => {
     const parsed = DailyFollowupsQuery.safeParse(req.query);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
     const date = parsed.data.date ?? todayIso();
 
     try {
-      // 1) All visits for the given date (uses existing GSI3)
       const visits = await visitRepository.listByDate(date);
 
       const items: FollowupListItem[] = [];
@@ -59,6 +59,8 @@ router.get(
       for (const visit of visits) {
         const followup = await followupRepository.getByVisitId(visit.visitId);
         if (!followup) continue;
+
+        // ✅ show only ACTIVE on the call list
         if (followup.status !== 'ACTIVE') continue;
 
         const patient = await patientRepository.getById(visit.patientId);
@@ -91,6 +93,43 @@ router.get(
       return res.status(500).json({
         error: 'FOLLOWUPS_DAILY_FAILED',
         message: 'Unable to load followups for the requested date',
+        traceId: req.requestId,
+      });
+    }
+  }),
+);
+
+router.patch(
+  '/:visitId/status',
+  asyncHandler(async (req, res) => {
+    const visitId = req.params.visitId;
+
+    const parsed = FollowupStatusUpdateBody.safeParse(req.body);
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
+
+    try {
+      const updated = await followupRepository.updateStatus(visitId as any, parsed.data);
+      if (!updated) {
+        return res.status(404).json({
+          error: 'FOLLOWUP_NOT_FOUND',
+          message: 'Followup not found for this visit.',
+          traceId: req.requestId,
+        });
+      }
+
+      return res.status(200).json({ followup: updated });
+    } catch (err) {
+      logError('followups_status_update_failed', {
+        visitId,
+        error:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      });
+
+      return res.status(500).json({
+        error: 'FOLLOWUPS_STATUS_UPDATE_FAILED',
+        message: 'Unable to update followup status',
         traceId: req.requestId,
       });
     }

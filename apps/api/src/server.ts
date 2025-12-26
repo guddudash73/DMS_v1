@@ -153,7 +153,13 @@ export const createApp = () => {
 
   app.use('/me', authMiddleware, meRouter);
 
-  app.use('/followups', followupsRouter);
+  app.use(
+    '/followups',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('RECEPTION', 'ADMIN'), // ✅ reception-only as you want
+    followupsRouter,
+  );
 
   app.use(errorHandler);
 
