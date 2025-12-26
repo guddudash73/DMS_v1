@@ -91,12 +91,41 @@ router.post(
 
     const visit = await visitRepository.create(parsed.data);
 
+    // --- Build token print payload (server-source-of-truth) ---
+    const patient = await patientRepository.getById(visit.patientId);
+
+    // Visit number for patient (after create)
+    const patientVisits = await visitRepository.listByPatientId(visit.patientId);
+    const visitNumberForPatient = patientVisits.length;
+
+    // Waiting number in queue (QUEUED list, 1-based)
+    const queue = await visitRepository.getDoctorQueue({
+      doctorId: visit.doctorId,
+      date: visit.visitDate,
+      status: 'QUEUED',
+    });
+    const idx = queue.findIndex((v) => v.visitId === visit.visitId);
+    const tokenNumber = idx >= 0 ? idx + 1 : Math.max(1, queue.length);
+
+    const tokenPrint = {
+      // clinicName/phone can be added later from config
+      tokenNumber,
+      visitId: visit.visitId,
+      patientName: patient?.name ?? '—',
+      patientPhone: patient?.phone ?? undefined,
+      reason: visit.reason,
+      tag: visit.tag,
+      visitNumberForPatient,
+      createdAt: visit.createdAt,
+      visitDate: visit.visitDate,
+    };
+
     void publishDoctorQueueUpdated({
       doctorId: visit.doctorId,
       visitDate: visit.visitDate,
     });
 
-    return res.status(201).json(visit);
+    return res.status(201).json({ visit, tokenPrint });
   }),
 );
 

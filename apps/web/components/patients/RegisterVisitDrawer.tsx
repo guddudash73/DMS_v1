@@ -4,9 +4,14 @@ import * as React from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { useGetDoctorsQuery, useCreateVisitMutation } from '@/src/store/api';
+import type { VisitCreateResponse } from '@dms/types';
 import type { VisitCreate } from '@dms/types';
 import { toast } from 'react-toastify';
 import { useAuth } from '@/src/hooks/useAuth';
+
+import { loadPrintSettings } from '@/src/lib/printing/settings';
+import { buildTokenEscPos } from '@/src/lib/printing/escpos';
+import { printRaw } from '@/src/lib/printing/qz';
 
 type Props = {
   patientId: string;
@@ -27,6 +32,18 @@ export function RegisterVisitDrawer({ patientId }: Props) {
 
   const [createVisit] = useCreateVisitMutation();
 
+  const tryAutoPrint = async (resp: VisitCreateResponse) => {
+    const settings = loadPrintSettings();
+    if (!settings.autoPrintToken) return;
+    if (!settings.printerName) {
+      toast.info('Visit created. Select a printer in Settings to auto-print tokens.');
+      return;
+    }
+
+    const raw = buildTokenEscPos(resp.tokenPrint);
+    await printRaw(settings.printerName, raw);
+  };
+
   const handleSubmit: React.FormEventHandler = async (e) => {
     e.preventDefault();
     if (!doctorId || !reason.trim()) {
@@ -38,12 +55,22 @@ export function RegisterVisitDrawer({ patientId }: Props) {
       patientId,
       doctorId,
       reason: reason.trim(),
+      tag: 'N', // drawer flow defaults; modal supports N/F/Z
     };
 
     try {
       setSubmitting(true);
-      await createVisit(payload).unwrap();
+      const resp = await createVisit(payload).unwrap();
       toast.success('Visit registered and added to the queue.');
+
+      try {
+        await tryAutoPrint(resp);
+        toast.success('Token printed.');
+      } catch (err) {
+        console.error(err);
+        toast.error('Visit created, but printing failed. Is QZ Tray running?');
+      }
+
       setOpen(false);
       setReason('');
     } catch (err) {

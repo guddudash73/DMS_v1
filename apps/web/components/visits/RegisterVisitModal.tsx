@@ -15,6 +15,9 @@ import {
   useGetPatientByIdQuery,
   useCreateVisitMutation,
 } from '@/src/store/api';
+import { loadPrintSettings } from '@/src/lib/printing/settings';
+import { buildTokenEscPos } from '@/src/lib/printing/escpos';
+import { printRaw } from '@/src/lib/printing/qz';
 
 type Props = {
   patientId: string;
@@ -87,8 +90,22 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
 
   const onSubmit = async (values: VisitCreate) => {
     try {
-      await createVisit(values).unwrap();
+      const resp = await createVisit(values).unwrap();
+
       toast.success('Visit created successfully.');
+
+      try {
+        const settings = loadPrintSettings();
+        if (settings.autoPrintToken && settings.printerName) {
+          const raw = buildTokenEscPos(resp.tokenPrint);
+          await printRaw(settings.printerName, raw);
+          toast.success('Token printed.');
+        }
+      } catch (e) {
+        console.error(e);
+        toast.error('Visit created, but printing failed. Is QZ Tray running?');
+      }
+
       handleClose();
     } catch {
       toast.error('Unable to create visit. Please try again.');

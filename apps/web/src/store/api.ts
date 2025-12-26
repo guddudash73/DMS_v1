@@ -17,6 +17,7 @@ import type {
   AdminDoctorListItem,
   Visit,
   VisitCreate,
+  VisitCreateResponse,
   DoctorPatientsCountSeries,
   DailyVisitsBreakdownResponse,
   DoctorDailyVisitsBreakdownResponse,
@@ -483,7 +484,7 @@ export const apiSlice = createApi({
       },
     }),
 
-    createVisit: builder.mutation<Visit, VisitCreate>({
+    createVisit: builder.mutation<VisitCreateResponse, VisitCreate>({
       query: (body) => ({
         url: '/visits',
         method: 'POST',

@@ -144,7 +144,7 @@ export default function RemindersPage() {
       <div
         className={[
           'relative z-30 transition-all duration-300 ease-in-out',
-          expanded ? 'fixed left-[calc(280px+24px)] right-6 top-[calc(24px+56px)] bottom-6' : '',
+          expanded ? 'fixed left-[calc(280px+24px)] right-6 top-20 bottom-6' : '',
         ].join(' ')}
       >
         <Card

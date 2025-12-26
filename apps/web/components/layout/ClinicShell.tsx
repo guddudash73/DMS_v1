@@ -16,6 +16,7 @@ import {
   Search,
   Calendar,
   Clock,
+  Settings,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,11 @@ import { useAuth } from '@/src/hooks/useAuth';
 import NewPatientModal from '@/components/patients/NewPatientModal';
 import RegisterVisitModal from '@/components/visits/RegisterVisitModal';
 import LogoutButton from '@/components/auth/LogoutButton';
+
+// ✅ NEW: auto-select printer after login (Option B)
+import { toast } from 'react-toastify';
+import { loadPrintSettings, savePrintSettings } from '@/src/lib/printing/settings';
+import { listPrinters, pickPreferredPrinter } from '@/src/lib/printing/qz';
 
 type ClinicShellProps = {
   children: React.ReactNode;
@@ -56,7 +62,11 @@ const mainNav: NavItem[] = [
   { label: 'Documents', href: '/documents', icon: FileStack },
 ];
 
-const moreNav: NavItem[] = [{ label: 'Notifications', href: '/notifications', icon: Bell }];
+// ✅ Add Settings in "More"
+const moreNav: NavItem[] = [
+  { label: 'Notifications', href: '/notifications', icon: Bell },
+  { label: 'Settings', href: '/settings', icon: Settings },
+];
 
 const getDaySuffix = (day: number) => {
   if (day >= 11 && day <= 13) return 'th';
@@ -101,6 +111,9 @@ const deriveTitleFromPath = (pathname: string): string => {
   if (pathname.startsWith('/documents')) return 'Documents';
   if (pathname.startsWith('/notifications')) return 'Notifications';
 
+  // ✅ NEW
+  if (pathname.startsWith('/settings')) return 'Settings';
+
   return 'Dashboard';
 };
 
@@ -138,6 +151,40 @@ export default function ClinicShell({ children }: ClinicShellProps) {
   const todayIso = now.toISOString().slice(0, 10);
 
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
+
+  // ✅ NEW: Auto-detect & auto-select printer after login (Option B)
+  // - Runs once per app load
+  // - Does NOT overwrite if user already selected a printer
+  const printerAutoInitRan = useRef(false);
+  useEffect(() => {
+    if (!canUseApi) return;
+    if (printerAutoInitRan.current) return;
+    printerAutoInitRan.current = true;
+
+    const run = async () => {
+      const current = loadPrintSettings();
+      if (current.printerName) return; // don't overwrite manual selection
+
+      try {
+        const printers = await listPrinters();
+        const match = pickPreferredPrinter(printers, ['POS-80C']);
+
+        if (!match) return;
+
+        savePrintSettings({
+          ...current,
+          printerName: match,
+        });
+
+        toast.success(`Printer auto-selected: ${match}`);
+      } catch (e) {
+        // don't block the UI if QZ isn't available on some PCs
+        console.error('Auto printer select failed:', e);
+      }
+    };
+
+    void run();
+  }, [canUseApi]);
 
   const { data: patientSummary, isLoading: summaryLoading } = useGetDailyPatientSummaryQuery(
     todayIso,
@@ -551,7 +598,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
           <main
             className={[
               'flex-1 overflow-y-auto dms-scroll ',
-              // Optional: block scrolling the whole content container while modal open
               isAnyModalOpen ? 'overflow-hidden' : '',
             ].join(' ')}
           >
