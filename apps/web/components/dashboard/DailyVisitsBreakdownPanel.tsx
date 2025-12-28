@@ -1,9 +1,9 @@
+// apps/web/components/dashboard/DailyVisitsBreakdownPanel.tsx
 'use client';
 
 import * as React from 'react';
 import { useGetDailyVisitsBreakdownQuery } from '@/src/store/api';
 import { Card } from '@/components/ui/card';
-import { cn } from '@/lib/utils';
 import {
   Select,
   SelectContent,
@@ -12,11 +12,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-function formatPrettyDate(dateIso: string) {
-  const d = new Date(dateIso);
-  if (Number.isNaN(d.getTime())) return dateIso;
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-}
+import { formatClinicDatePretty, formatClinicTimeFromMs } from '@/src/lib/clinicTime';
 
 function statusBadge(status: string) {
   const base =
@@ -48,7 +44,7 @@ function currency(v?: number) {
 }
 
 type Props = {
-  date: string;
+  date: string; // YYYY-MM-DD clinic date key
   onBack: () => void;
 };
 
@@ -85,7 +81,9 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-xs text-muted-foreground">Daily breakdown</div>
-            <div className="text-lg font-semibold tracking-tight">{formatPrettyDate(date)}</div>
+            <div className="text-lg font-semibold tracking-tight">
+              {formatClinicDatePretty(date)}
+            </div>
             <div className="mt-1 text-xs text-muted-foreground">
               Doctors and patients handled on this day.
             </div>
@@ -167,7 +165,6 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
                   <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-semibold">{doc.doctorName}</div>
-
                       <div className="truncate text-[11px] text-muted-foreground">
                         {doc.doctorId.slice(0, 8)}…{doc.doctorId.slice(-6)}
                       </div>
@@ -190,7 +187,6 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
                                 </div>
 
                                 <span className={statusBadge(v.status)}>{v.status}</span>
-
                                 <span className={tagBadge(v.tag)}>{tagLabel(v.tag)}</span>
                               </div>
 
@@ -221,10 +217,9 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
                               </div>
 
                               <div className="mt-2 text-[11px] text-muted-foreground">
-                                {new Date(v.createdAt).toLocaleTimeString('en-US', {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })}
+                                {typeof v.createdAt === 'number'
+                                  ? formatClinicTimeFromMs(v.createdAt)
+                                  : '—'}
                               </div>
                             </div>
                           </div>

@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useForm, type SubmitErrorHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'react-toastify';
+import { z } from 'zod';
 
 import { PatientCreate as PatientCreateSchema, type PatientCreate } from '@dms/types';
 import { Button } from '@/components/ui/button';
@@ -35,6 +36,10 @@ const asErrorResponse = (data: unknown): ErrorResponse | null => {
   return null;
 };
 
+// ✅ IMPORTANT: use BOTH input + output types for the schema
+type PatientCreateFormInput = z.input<typeof PatientCreateSchema>; // gender?: unknown
+type PatientCreateFormOutput = z.output<typeof PatientCreateSchema>; // gender?: "MALE" | ...
+
 export default function NewPatientPage() {
   const router = useRouter();
   const [createPatient, { isLoading }] = useCreatePatientMutation();
@@ -43,14 +48,25 @@ export default function NewPatientPage() {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<PatientCreate>({
+  } = useForm<PatientCreateFormInput, any, PatientCreateFormOutput>({
     resolver: zodResolver(PatientCreateSchema),
     mode: 'onBlur',
+    defaultValues: {
+      name: '',
+      phone: '',
+      dob: '',
+      gender: undefined,
+      address: '',
+    },
   });
 
-  const onSubmit = async (values: PatientCreate) => {
+  // ✅ onSubmit receives the *parsed/output* type from zodResolver
+  const onSubmit = async (values: PatientCreateFormOutput) => {
+    // values.gender is now correctly typed as MALE/FEMALE/OTHER/UNKNOWN | undefined
+    const payload: PatientCreate = values as PatientCreate;
+
     try {
-      const patient = await createPatient(values).unwrap();
+      const patient = await createPatient(payload).unwrap();
       toast.success('Patient created successfully.');
       router.push(`/patients/${patient.patientId}`);
     } catch (err) {
@@ -67,14 +83,15 @@ export default function NewPatientPage() {
     }
   };
 
-  const onSubmitError: SubmitErrorHandler<PatientCreate> = (formErrors) => {
+  // ✅ errors are keyed by the *input* fields
+  const onSubmitError: SubmitErrorHandler<PatientCreateFormInput> = (formErrors) => {
     const messages = Object.values(formErrors)
       .map((e) => e?.message)
       .filter((m): m is string => Boolean(m));
 
-    const msg = messages.length > 0 ? messages.join('\n') : 'Please check the highlighted fields.';
-    toast.error(msg);
+    toast.error(messages.length ? messages.join('\n') : 'Please check the highlighted fields.');
   };
+
   return (
     <section className="relative h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
       <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/10 backdrop-blur-sm">
@@ -82,6 +99,7 @@ export default function NewPatientPage() {
           <CardHeader className="pb-4">
             <CardTitle className="text-xl font-semibold text-gray-900">Create Patient</CardTitle>
           </CardHeader>
+
           <CardContent className="pt-0">
             <form
               className="grid gap-4"
@@ -123,6 +141,7 @@ export default function NewPatientPage() {
                 />
                 <p className="h-3 text-xs">&nbsp;</p>
               </div>
+
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="space-y-1">
                   <Label htmlFor="gender" className="text-sm font-medium text-gray-800">
@@ -138,9 +157,11 @@ export default function NewPatientPage() {
                     {...register('gender')}
                   >
                     <option value="">Choose a category</option>
-                    <option value="male">Male</option>
-                    <option value="female">Female</option>
-                    <option value="other">Other</option>
+                    {/* ✅ Use enum values expected by backend */}
+                    <option value="MALE">Male</option>
+                    <option value="FEMALE">Female</option>
+                    <option value="OTHER">Other</option>
+                    <option value="UNKNOWN">Unknown</option>
                   </select>
                   <p className="h-3 text-xs">&nbsp;</p>
                 </div>
@@ -172,12 +193,10 @@ export default function NewPatientPage() {
                   id="address"
                   placeholder="Type patient address here..."
                   className={`min-h-[90px] rounded-xl text-sm ${
-                    // @ts-expect-error address should exist on PatientCreate once schema is updated
                     errors.address
                       ? 'border-red-500 focus-visible:ring-red-500'
                       : 'border-gray-200 focus-visible:ring-gray-300'
                   }`}
-                  // @ts-expect-error address should exist on PatientCreate once schema is updated
                   {...register('address')}
                 />
                 <p className="h-3 text-xs">&nbsp;</p>

@@ -1,6 +1,12 @@
+// apps/api/src/routes/medicines.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
-import { MedicineSearchQuery, QuickAddMedicineInput } from '@dms/types';
+import {
+  MedicineSearchQuery,
+  QuickAddMedicineInput,
+  MedicineCatalogSearchQuery,
+  DoctorUpdateMedicineRequest,
+} from '@dms/types';
 import type { MedicineTypeaheadItem } from '@dms/types';
 import { medicinePresetRepository } from '../repositories/medicinePresetRepository';
 import { logAudit } from '../lib/logger';
@@ -38,6 +44,25 @@ const buildSearchQueryFromRequest = (req: Request): MedicineSearchQuery => {
   return parsed.data;
 };
 
+const buildCatalogQueryFromRequest = (req: Request) => {
+  const query =
+    typeof req.query.query === 'string' && req.query.query.trim().length > 0
+      ? req.query.query
+      : undefined;
+
+  const limitRaw = req.query.limit;
+  const limit = typeof limitRaw === 'string' && limitRaw.length > 0 ? Number(limitRaw) : undefined;
+
+  const cursor =
+    typeof req.query.cursor === 'string' && req.query.cursor.trim().length > 0
+      ? req.query.cursor
+      : undefined;
+
+  const parsed = MedicineCatalogSearchQuery.safeParse({ query, limit, cursor });
+  if (!parsed.success) throw parsed.error;
+  return parsed.data;
+};
+
 router.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -67,6 +92,40 @@ router.get(
   }),
 );
 
+// ✅ NEW: doctor catalog (verified + own unverified)
+router.get(
+  '/catalog',
+  asyncHandler(async (req, res) => {
+    if (!req.auth?.userId) {
+      return res.status(401).json({
+        error: 'UNAUTHENTICATED',
+        message: 'Login required',
+        traceId: req.requestId,
+      });
+    }
+
+    let q: z.infer<typeof MedicineCatalogSearchQuery>;
+    try {
+      q = buildCatalogQueryFromRequest(req);
+    } catch (err) {
+      if (err instanceof z.ZodError) return handleValidationError(req, res, err.issues);
+      throw err;
+    }
+
+    const result = await medicinePresetRepository.catalogList({
+      query: q.query,
+      limit: q.limit,
+      cursor: q.cursor,
+      viewerUserId: req.auth.userId,
+    });
+
+    return res.status(200).json({
+      items: result.items,
+      nextCursor: result.nextCursor,
+    });
+  }),
+);
+
 router.post(
   '/quick-add',
   asyncHandler(async (req, res) => {
@@ -75,8 +134,6 @@ router.post(
       return handleValidationError(req, res, parsed.error.issues);
     }
 
-    // Router is mounted behind authMiddleware + requireRole('DOCTOR' | 'ADMIN'),
-    // so req.auth should be present for real usage.
     const createdByUserId = req.auth?.userId ?? 'INLINE_DOCTOR_PLACEHOLDER';
 
     const preset = await medicinePresetRepository.quickAdd({
@@ -102,6 +159,104 @@ router.post(
     }
 
     return res.status(201).json(preset);
+  }),
+);
+
+// ✅ NEW: doctor update (only mine + INLINE_DOCTOR)
+router.patch(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    if (!req.auth?.userId) {
+      return res.status(401).json({
+        error: 'UNAUTHENTICATED',
+        message: 'Login required',
+        traceId: req.requestId,
+      });
+    }
+
+    const id = req.params.id;
+    if (!id) {
+      return res.status(400).json({
+        error: 'INVALID_MEDICINE_ID',
+        message: 'Medicine id is required',
+        traceId: req.requestId,
+      });
+    }
+
+    const parsed = DoctorUpdateMedicineRequest.safeParse(req.body);
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
+
+    const updated = await medicinePresetRepository.doctorUpdate(id, parsed.data, req.auth.userId);
+    if (updated === 'FORBIDDEN') {
+      return res.status(403).json({
+        error: 'FORBIDDEN',
+        message: 'You can only edit medicines created by you.',
+        traceId: req.requestId,
+      });
+    }
+    if (!updated) {
+      return res.status(404).json({
+        error: 'MEDICINE_NOT_FOUND',
+        message: 'Medicine not found',
+        traceId: req.requestId,
+      });
+    }
+
+    logAudit({
+      actorUserId: req.auth.userId,
+      action: 'DOCTOR_UPDATE_MEDICINE',
+      entity: { type: 'MEDICINE', id },
+      meta: { displayName: updated.displayName },
+    });
+
+    return res.status(200).json(updated);
+  }),
+);
+
+// ✅ NEW: doctor delete (only mine + INLINE_DOCTOR)
+router.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    if (!req.auth?.userId) {
+      return res.status(401).json({
+        error: 'UNAUTHENTICATED',
+        message: 'Login required',
+        traceId: req.requestId,
+      });
+    }
+
+    const id = req.params.id;
+    if (!id) {
+      return res.status(400).json({
+        error: 'INVALID_MEDICINE_ID',
+        message: 'Medicine id is required',
+        traceId: req.requestId,
+      });
+    }
+
+    const ok = await medicinePresetRepository.doctorDelete(id, req.auth.userId);
+    if (ok === 'FORBIDDEN') {
+      return res.status(403).json({
+        error: 'FORBIDDEN',
+        message: 'You can only delete medicines created by you.',
+        traceId: req.requestId,
+      });
+    }
+    if (!ok) {
+      return res.status(404).json({
+        error: 'MEDICINE_NOT_FOUND',
+        message: 'Medicine not found',
+        traceId: req.requestId,
+      });
+    }
+
+    logAudit({
+      actorUserId: req.auth.userId,
+      action: 'DOCTOR_DELETE_MEDICINE',
+      entity: { type: 'MEDICINE', id },
+    });
+
+    return res.status(200).json({ ok: true });
   }),
 );
 

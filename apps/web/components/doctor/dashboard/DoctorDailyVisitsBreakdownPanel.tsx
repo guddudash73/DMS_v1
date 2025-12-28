@@ -3,13 +3,8 @@
 import * as React from 'react';
 import { useGetDoctorDailyVisitsBreakdownQuery } from '@/src/store/api';
 import { Card } from '@/components/ui/card';
+import { formatClinicDatePretty } from '@/src/lib/clinicTime';
 import { cn } from '@/lib/utils';
-
-function formatPrettyDate(dateIso: string) {
-  const d = new Date(dateIso);
-  if (Number.isNaN(d.getTime())) return dateIso;
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-}
 
 function statusBadge(status: string) {
   const base =
@@ -57,7 +52,9 @@ export default function DoctorDailyVisitsBreakdownPanel({ date, onBack }: Props)
         <div className="flex items-start justify-between gap-3">
           <div>
             <div className="text-xs text-muted-foreground">Daily breakdown</div>
-            <div className="text-lg font-semibold tracking-tight">{formatPrettyDate(date)}</div>
+            <div className="text-lg font-semibold tracking-tight">
+              {formatClinicDatePretty(date)}
+            </div>
             <div className="mt-1 text-xs text-muted-foreground">
               Visits handled by you on this day.
             </div>

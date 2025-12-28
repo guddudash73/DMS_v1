@@ -5,9 +5,10 @@ import { Card } from '@/components/ui/card';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useGetDoctorQueueQuery } from '@/src/store/api';
 import type { Visit } from '@dms/types';
+import { clinicDateISO } from '@/src/lib/clinicTime';
 
 function getTodayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return clinicDateISO(new Date());
 }
 
 type QueueSummaryCardProps = {

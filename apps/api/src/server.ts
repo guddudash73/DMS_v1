@@ -1,3 +1,4 @@
+// apps/api/src/server.ts
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -15,12 +16,16 @@ import medicinesRouter from './routes/medicines';
 import rxPresetsRouter from './routes/rx-presets';
 import adminDoctorsRouter from './routes/admin-doctors';
 import adminRxPresetsRouter from './routes/admin-rx-presets';
+import adminMedicinesRouter from './routes/admin-medicines';
+import doctorsRouter from './routes/doctors'; // ✅ NEW
+
 import { authMiddleware, requireRole } from './middlewares/auth';
 import { genericSensitiveRateLimiter } from './middlewares/rateLimit';
 import { logInfo } from './lib/logger';
 import { errorHandler } from './middlewares/errorHandler';
 import meRouter from './routes/me';
 import followupsRouter from './routes/followups';
+import adminUsersRouter from './routes/admin-users';
 
 const env = parseEnv(process.env);
 
@@ -128,11 +133,28 @@ export const createApp = () => {
   );
 
   app.use(
+    '/admin/medicines',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('ADMIN'),
+    adminMedicinesRouter,
+  );
+
+  app.use(
     '/rx-presets',
     genericSensitiveRateLimiter,
     authMiddleware,
     requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
     rxPresetsRouter,
+  );
+
+  // ✅ NEW: public doctors list for doctor panel + reception + admin
+  app.use(
+    '/doctors',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('ADMIN', 'RECEPTION', 'DOCTOR'),
+    doctorsRouter,
   );
 
   app.use(
@@ -141,6 +163,14 @@ export const createApp = () => {
     authMiddleware,
     requireRole('ADMIN', 'RECEPTION'),
     adminDoctorsRouter,
+  );
+
+  app.use(
+    '/admin/users',
+    genericSensitiveRateLimiter,
+    authMiddleware,
+    requireRole('ADMIN'),
+    adminUsersRouter,
   );
 
   app.use(
@@ -157,7 +187,7 @@ export const createApp = () => {
     '/followups',
     genericSensitiveRateLimiter,
     authMiddleware,
-    requireRole('RECEPTION', 'ADMIN'), // ✅ reception-only as you want
+    requireRole('RECEPTION', 'ADMIN'),
     followupsRouter,
   );
 

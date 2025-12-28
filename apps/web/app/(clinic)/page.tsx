@@ -1,3 +1,4 @@
+// apps/web/app/(clinic)/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -10,6 +11,7 @@ import DailyVisitsBreakdownPanel from '@/components/dashboard/DailyVisitsBreakdo
 
 import { useGetDailyVisitsBreakdownQuery } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
+import { clinicDateISO } from '@/src/lib/clinicTime';
 
 export default function DashboardPage() {
   const [selectedDate, setSelectedDate] = React.useState<string | null>(null);
@@ -17,7 +19,8 @@ export default function DashboardPage() {
   const auth = useAuth();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
-  const todayIso = React.useMemo(() => new Date().toISOString().slice(0, 10), []);
+  // ✅ Clinic “today” key (Asia/Kolkata)
+  const todayIso = React.useMemo(() => clinicDateISO(new Date()), []);
   const dateForPatients = selectedDate ?? todayIso;
 
   const breakdownQuery = useGetDailyVisitsBreakdownQuery(dateForPatients, {
@@ -38,8 +41,8 @@ export default function DashboardPage() {
       })),
     );
 
-    // keep the list stable & nice: oldest first like queue
-    flat.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+    // ✅ Latest on top
+    flat.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
     return flat;
   }, [breakdownQuery.data]);
 
@@ -56,7 +59,7 @@ export default function DashboardPage() {
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
-      <div className="grid h-full grid-cols-1 gap-6 2xl:gap-10 lg:grid-cols-[minmax(0,3fr)_minmax(320px,0.9fr)]">
+      <div className="grid h-full grid-cols-1 gap-6 2xl:gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
         <div className="flex h-full flex-col gap-6">
           <div className="grid w-full grid-cols-1 gap-6 2xl:gap-10 lg:grid-cols-[minmax(0,2fr)]">
             <DoctorQueueCard />
@@ -68,6 +71,7 @@ export default function DashboardPage() {
           <PatientsPanel
             title="Patients."
             dateLabel={todayIso === dateForPatients ? 'Today' : dateForPatients}
+            dateIso={dateForPatients}
             patients={patients}
             loading={breakdownQuery.isLoading || breakdownQuery.isFetching}
             canUseApi={canUseApi}

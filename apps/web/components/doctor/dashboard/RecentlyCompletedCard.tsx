@@ -4,9 +4,10 @@ import { Card } from '@/components/ui/card';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useGetDoctorRecentCompletedQuery } from '@/src/store/api';
 import { FileText, Image as ImageIcon } from 'lucide-react';
+import { clinicDateISO } from '@/src/lib/clinicTime';
 
 function getTodayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return clinicDateISO(new Date());
 }
 
 const ROWS = 5;

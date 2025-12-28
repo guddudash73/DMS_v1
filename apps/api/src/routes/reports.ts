@@ -24,12 +24,40 @@ import { type ZodError } from 'zod';
 import { sendZodValidationError } from '../lib/validation';
 import { prescriptionRepository } from '../repositories/prescriptionRepository';
 import { xrayRepository } from '../repositories/xrayRepository';
+import { clinicDateISO } from '../lib/date';
 
 const router = express.Router();
 
 const handleValidationError = (req: Request, res: Response, issues: ZodError['issues']) => {
   return sendZodValidationError(req, res, issues);
 };
+
+const ISO_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function pad2(n: number): string {
+  return String(n).padStart(2, '0');
+}
+
+/**
+ * Add days to a YYYY-MM-DD "day key" safely (pure day math).
+ *
+ * ✅ Does not use toISOString().slice(0,10) to avoid spreading that pattern.
+ * ✅ Operates in UTC because dateISO is already a day key (timezone-independent).
+ */
+function addDaysISO(dateISO: string, days: number): string {
+  const [y, m, d] = dateISO.split('-').map((x) => Number(x));
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+
+  const yy = dt.getUTCFullYear();
+  const mm = pad2(dt.getUTCMonth() + 1);
+  const dd = pad2(dt.getUTCDate());
+
+  return `${yy}-${mm}-${dd}`;
+}
+
+function isValidISODate(dateISO: string): boolean {
+  return ISO_DATE_RE.test(dateISO) && !Number.isNaN(Date.parse(`${dateISO}T00:00:00Z`));
+}
 
 const asyncHandler =
   (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
@@ -174,19 +202,15 @@ router.get(
 
     const points: DailyPatientSummary[] = [];
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    if (!isValidISODate(startDate) || !isValidISODate(endDate) || startDate > endDate) {
       return res.status(200).json({ points });
     }
 
-    const current = new Date(start);
-    while (current <= end) {
-      const dateStr = current.toISOString().slice(0, 10);
-      const summary = await buildDailyPatientSummary(dateStr);
+    let current = startDate;
+    while (current <= endDate) {
+      const summary = await buildDailyPatientSummary(current);
       points.push(summary);
-      current.setDate(current.getDate() + 1);
+      current = addDaysISO(current, 1);
     }
 
     return res.status(200).json({ points });
@@ -210,18 +234,14 @@ router.get(
 
     const points: DailyPatientSummary[] = [];
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
-
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start > end) {
+    if (!isValidISODate(startDate) || !isValidISODate(endDate) || startDate > endDate) {
       return res.status(200).json({ points });
     }
 
-    const current = new Date(start);
-    while (current <= end) {
-      const dateStr = current.toISOString().slice(0, 10);
+    let current = startDate;
+    while (current <= endDate) {
+      const dateStr = current;
 
-      // All visits for THIS doctor on THIS day
       const visits = await visitRepository.getDoctorQueue({ doctorId, date: dateStr });
 
       let newPatients = 0;
@@ -244,7 +264,7 @@ router.get(
         totalPatients,
       });
 
-      current.setDate(current.getDate() + 1);
+      current = addDaysISO(current, 1);
     }
 
     return res.status(200).json({ points });
@@ -287,7 +307,6 @@ router.get(
       return res.status(200).json(empty);
     }
 
-    // Patients lookup
     const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
     const patientResults = await Promise.all(
       uniquePatientIds.map((id) => patientRepository.getById(id)),
@@ -350,14 +369,12 @@ router.get(
       return res.status(200).json(empty);
     }
 
-    // Patients lookup
     const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
     const patientResults = await Promise.all(
       uniquePatientIds.map((id) => patientRepository.getById(id)),
     );
     const patientMap = new Map(patientResults.filter(Boolean).map((p) => [p!.patientId, p!]));
 
-    // Doctors lookup via USER table (displayName lives there)
     const uniqueDoctorIds = Array.from(new Set(visits.map((v) => v.doctorId)));
     const doctorUsers = await Promise.all(uniqueDoctorIds.map((id) => userRepository.getById(id)));
 
@@ -369,7 +386,6 @@ router.get(
       doctorNameMap.set(id, name);
     }
 
-    // Normalize & filter (skip visits where patient record not found)
     const normalized = visits
       .map((v) => {
         const p = patientMap.get(v.patientId);
@@ -398,7 +414,6 @@ router.get(
       })
       .filter((x): x is NonNullable<typeof x> => x !== null);
 
-    // Group by doctor
     const byDoctor = new Map<string, typeof normalized>();
     for (const item of normalized) {
       const arr = byDoctor.get(item.doctorId) ?? [];
@@ -441,7 +456,7 @@ router.get(
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    const todayIso = new Date().toISOString().slice(0, 10);
+    const todayIso = clinicDateISO();
     const date = parsed.data.date ?? todayIso;
     const limit = parsed.data.limit ?? 5;
 

@@ -1,23 +1,27 @@
+// apps/api/src/repositories/followupRepository.ts
 import {
   DynamoDBDocumentClient,
   GetCommand,
   PutCommand,
+  QueryCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import type {
   FollowUp,
+  FollowUpCreate,
   FollowUpStatus,
-  FollowUpUpsert,
   FollowUpStatusUpdate,
   Visit,
   VisitId,
+  FollowUpId,
 } from '@dms/types';
+import { v4 as randomUUID } from 'uuid';
 import { visitRepository } from './visitRepository';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
+import { isoDateInTimeZone } from '../lib/date';
 
 export class FollowUpRuleViolationError extends Error {
   readonly code = 'FOLLOWUP_RULE_VIOLATION' as const;
-
   constructor(message: string) {
     super(message);
     this.name = 'FollowUpRuleViolationError';
@@ -25,17 +29,20 @@ export class FollowUpRuleViolationError extends Error {
 }
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
-  marshallOptions: {
-    removeUndefinedValues: true,
-  },
+  marshallOptions: { removeUndefinedValues: true },
 });
 
-const buildFollowUpKey = (visitId: string) => ({
+const buildFollowUpKey = (visitId: string, followupId: string) => ({
   PK: `VISIT#${visitId}`,
-  SK: 'FOLLOWUP',
+  SK: `FOLLOWUP#${followupId}`,
 });
 
-const todayDateString = (): string => new Date().toISOString().slice(0, 10);
+const buildGsi3 = (followUpDate: string, followupId: string) => ({
+  GSI3PK: `DATE#${followUpDate}`,
+  GSI3SK: `TYPE#FOLLOWUP#ID#${followupId}`,
+});
+
+const todayDateString = (): string => isoDateInTimeZone(new Date(), 'Asia/Kolkata');
 
 const assertValidFollowUpDate = (visit: Visit, followUpDate: string) => {
   const visitDate = visit.visitDate;
@@ -55,44 +62,62 @@ const assertValidFollowUpDate = (visit: Visit, followUpDate: string) => {
 };
 
 export interface FollowupRepository {
-  getByVisitId(visitId: VisitId): Promise<FollowUp | null>;
-  upsertForVisit(visitId: VisitId, input: FollowUpUpsert): Promise<FollowUp>;
-  updateStatus(visitId: VisitId, input: FollowUpStatusUpdate): Promise<FollowUp | null>;
+  listByVisitId(visitId: VisitId): Promise<FollowUp[]>;
+  createForVisit(visitId: VisitId, input: FollowUpCreate): Promise<FollowUp>;
+  listActiveByFollowUpDate(dateISO: string): Promise<FollowUp[]>;
+  listByFollowUpDate(dateISO: string): Promise<FollowUp[]>; // ✅ NEW
+  updateStatus(args: {
+    visitId: VisitId;
+    followupId: FollowUpId;
+    input: FollowUpStatusUpdate;
+  }): Promise<FollowUp | null>;
 }
 
 export class DynamoDBFollowupRepository implements FollowupRepository {
-  async getByVisitId(visitId: VisitId): Promise<FollowUp | null> {
-    const { Item } = await docClient.send(
-      new GetCommand({
+  async listByVisitId(visitId: VisitId): Promise<FollowUp[]> {
+    const res = await docClient.send(
+      new QueryCommand({
         TableName: TABLE_NAME,
-        Key: buildFollowUpKey(visitId),
+        KeyConditionExpression: 'PK = :pk AND begins_with(SK, :sk)',
+        ExpressionAttributeValues: {
+          ':pk': `VISIT#${visitId}`,
+          ':sk': 'FOLLOWUP#',
+        },
+        ConsistentRead: true,
       }),
     );
 
-    if (!Item || Item.entityType !== 'FOLLOWUP') return null;
-    return Item as FollowUp;
+    return (res.Items ?? [])
+      .filter((x) => x.entityType === 'FOLLOWUP')
+      .map((x) => ({
+        followupId: String(x.followupId),
+        visitId: String(x.visitId),
+        followUpDate: String(x.followUpDate),
+        reason: x.reason as string | undefined,
+        contactMethod: String(x.contactMethod) as any,
+        status: String(x.status) as FollowUpStatus,
+        createdAt: Number(x.createdAt),
+        updatedAt: Number(x.updatedAt),
+      }));
   }
 
-  async upsertForVisit(visitId: VisitId, input: FollowUpUpsert): Promise<FollowUp> {
+  async createForVisit(visitId: VisitId, input: FollowUpCreate): Promise<FollowUp> {
     const visit = await visitRepository.getById(visitId);
-    if (!visit) {
-      throw new FollowUpRuleViolationError('Visit not found for follow-up creation');
-    }
+    if (!visit) throw new FollowUpRuleViolationError('Visit not found for follow-up creation');
 
     assertValidFollowUpDate(visit, input.followUpDate);
 
-    const existing = await this.getByVisitId(visitId);
     const now = Date.now();
-
-    const contactMethod = input.contactMethod ?? existing?.contactMethod ?? 'CALL';
+    const followupId = randomUUID();
 
     const item: FollowUp = {
+      followupId,
       visitId,
       followUpDate: input.followUpDate,
-      reason: input.reason ?? existing?.reason,
-      contactMethod,
+      reason: input.reason,
+      contactMethod: input.contactMethod ?? 'CALL',
       status: 'ACTIVE',
-      createdAt: existing?.createdAt ?? now,
+      createdAt: now,
       updatedAt: now,
     };
 
@@ -100,36 +125,75 @@ export class DynamoDBFollowupRepository implements FollowupRepository {
       new PutCommand({
         TableName: TABLE_NAME,
         Item: {
-          ...buildFollowUpKey(visitId),
+          ...buildFollowUpKey(visitId, followupId),
+          ...buildGsi3(item.followUpDate, followupId),
           entityType: 'FOLLOWUP',
           ...item,
         },
+        ConditionExpression: 'attribute_not_exists(PK)',
       }),
     );
 
     return item;
   }
 
-  async updateStatus(visitId: VisitId, input: FollowUpStatusUpdate): Promise<FollowUp | null> {
-    const existing = await this.getByVisitId(visitId);
-    if (!existing) {
-      return null;
-    }
+  /**
+   * ⚠️ Legacy: ACTIVE only
+   */
+  async listActiveByFollowUpDate(dateISO: string): Promise<FollowUp[]> {
+    const res = await this.listByFollowUpDate(dateISO);
+    return res.filter((x) => x.status === 'ACTIVE');
+  }
 
+  /**
+   * ✅ NEW: return ALL followups for a date (ACTIVE + COMPLETED + CANCELLED)
+   */
+  async listByFollowUpDate(dateISO: string): Promise<FollowUp[]> {
+    const res = await docClient.send(
+      new QueryCommand({
+        TableName: TABLE_NAME,
+        IndexName: 'GSI3',
+        KeyConditionExpression: 'GSI3PK = :pk AND begins_with(GSI3SK, :sk)',
+        ExpressionAttributeValues: {
+          ':pk': `DATE#${dateISO}`,
+          ':sk': 'TYPE#FOLLOWUP#ID#',
+        },
+      }),
+    );
+
+    return (res.Items ?? [])
+      .filter((x) => x.entityType === 'FOLLOWUP')
+      .map((x) => ({
+        followupId: String(x.followupId),
+        visitId: String(x.visitId),
+        followUpDate: String(x.followUpDate),
+        reason: x.reason as string | undefined,
+        contactMethod: String(x.contactMethod) as any,
+        status: String(x.status) as FollowUpStatus,
+        createdAt: Number(x.createdAt),
+        updatedAt: Number(x.updatedAt),
+      }));
+  }
+
+  async updateStatus(args: {
+    visitId: VisitId;
+    followupId: FollowUpId;
+    input: FollowUpStatusUpdate;
+  }): Promise<FollowUp | null> {
+    const { visitId, followupId, input } = args;
     const now = Date.now();
-    const { status } = input;
 
     const { Attributes } = await docClient.send(
       new UpdateCommand({
         TableName: TABLE_NAME,
-        Key: buildFollowUpKey(visitId),
+        Key: buildFollowUpKey(visitId, followupId),
         UpdateExpression: 'SET #status = :status, #updatedAt = :updatedAt',
         ExpressionAttributeNames: {
           '#status': 'status',
           '#updatedAt': 'updatedAt',
         },
         ExpressionAttributeValues: {
-          ':status': status,
+          ':status': input.status,
           ':updatedAt': now,
         },
         ConditionExpression: 'attribute_exists(PK)',
@@ -137,11 +201,12 @@ export class DynamoDBFollowupRepository implements FollowupRepository {
       }),
     );
 
-    if (!Attributes) return null;
+    if (!Attributes || Attributes.entityType !== 'FOLLOWUP') return null;
 
     return {
-      visitId,
-      followUpDate: Attributes.followUpDate,
+      followupId: String(Attributes.followupId),
+      visitId: String(Attributes.visitId),
+      followUpDate: String(Attributes.followUpDate),
       reason: Attributes.reason,
       contactMethod: Attributes.contactMethod,
       status: Attributes.status as FollowUpStatus,

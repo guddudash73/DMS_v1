@@ -1,3 +1,4 @@
+// apps/api/src/repositories/patientRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   ConditionalCheckFailedException,
@@ -15,6 +16,7 @@ import {
 import type { Patient, PatientCreate, PatientUpdate } from '@dms/types';
 import { normalizePhone } from '../utils/phone';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
+import { isoDateInTimeZone } from '../lib/date';
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: {
@@ -42,6 +44,38 @@ const buildPatientSearchGsi = (normalizedSearchText: string) => ({
   GSI1SK: normalizedSearchText,
 });
 
+// ✅ SD-ID counter helpers
+const buildSdIdCounterKey = (year: string) => ({
+  PK: `COUNTER#SDID#${year}`,
+  SK: 'META',
+});
+
+async function nextSdSequence(year: string): Promise<number> {
+  const { Attributes } = await docClient.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: buildSdIdCounterKey(year),
+      UpdateExpression: 'ADD #last :inc SET #updatedAt = :now',
+      ExpressionAttributeNames: {
+        '#last': 'last',
+        '#updatedAt': 'updatedAt',
+      },
+      ExpressionAttributeValues: {
+        ':inc': 1,
+        ':now': Date.now(),
+      },
+      ReturnValues: 'UPDATED_NEW',
+    }),
+  );
+
+  const last = (Attributes?.last as number | undefined) ?? 0;
+  return Number(last);
+}
+
+function formatSdId(year: string, seq: number): string {
+  return `SD-${year}-${String(seq).padStart(5, '0')}`;
+}
+
 export class DuplicatePatientError extends Error {
   readonly code = 'DUPLICATE_PATIENT' as const;
   readonly statusCode = 409 as const;
@@ -58,13 +92,17 @@ export interface PatientRepository {
   update(patientId: string, patch: PatientUpdate): Promise<Patient | null>;
   search(params: { query?: string; limit: number }): Promise<Patient[]>;
   softDelete(patientId: string): Promise<boolean>;
-  restore(patientId: string): Promise<Patient | null>; // NEW
+  restore(patientId: string): Promise<Patient | null>;
 }
 
 export class DynamoDBPatientRepository implements PatientRepository {
   async create(input: PatientCreate): Promise<Patient> {
     const patientId = randomUUID();
     const now = Date.now();
+
+    const year = isoDateInTimeZone(new Date(now), 'Asia/Kolkata').slice(0, 4);
+    const seq = await nextSdSequence(year);
+    const sdId = formatSdId(year, seq);
 
     const normalizedPhone = input.phone ? normalizePhone(input.phone) : undefined;
     const normalizedName = normalizeNameForUniq(input.name);
@@ -74,10 +112,16 @@ export class DynamoDBPatientRepository implements PatientRepository {
       ...buildPatientKeys(patientId),
       entityType: 'PATIENT',
       patientId,
+
+      // ✅ NEW
+      sdId,
+
       name: input.name,
       phone: input.phone,
       dob: input.dob,
       gender: input.gender,
+      address: input.address,
+
       createdAt: now,
       updatedAt: now,
       isDeleted: false,
@@ -182,6 +226,9 @@ export class DynamoDBPatientRepository implements PatientRepository {
     add('phone');
     add('dob');
     add('gender');
+
+    // ✅ NEW
+    add('address');
 
     const mergedName = (patch.name ?? existing.name)!;
     const mergedPhone = patch.phone ?? existing.phone;
@@ -343,12 +390,9 @@ export class DynamoDBPatientRepository implements PatientRepository {
     );
 
     const all = (Items ?? []) as Patient[];
-
     const visible = all.filter((p) => p.isDeleted !== true);
 
-    if (visible.length <= limit) {
-      return visible;
-    }
+    if (visible.length <= limit) return visible;
     return visible.slice(0, limit);
   }
 
@@ -379,9 +423,7 @@ export class DynamoDBPatientRepository implements PatientRepository {
 
       return !!Attributes;
     } catch (err) {
-      if (err instanceof ConditionalCheckFailedException) {
-        return false;
-      }
+      if (err instanceof ConditionalCheckFailedException) return false;
       throw err;
     }
   }
@@ -412,9 +454,7 @@ export class DynamoDBPatientRepository implements PatientRepository {
       if (!Attributes) return null;
       return Attributes as Patient;
     } catch (err) {
-      if (err instanceof ConditionalCheckFailedException) {
-        return null;
-      }
+      if (err instanceof ConditionalCheckFailedException) return null;
       throw err;
     }
   }

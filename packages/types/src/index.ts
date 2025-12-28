@@ -14,3 +14,4 @@ export * from './billing';
 export * from './http';
 export * from './print';
 export * from './visitResponses';
+export * from './patientSummary';

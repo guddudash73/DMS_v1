@@ -12,8 +12,9 @@ import {
   useGetDoctorQueueQuery,
 } from '@/src/store/api';
 
-import type { UserPreferences, AdminDoctorListItem, Visit, DoctorQueueItem } from '@dms/types';
+import type { UserPreferences, Visit, DoctorQueueItem } from '@dms/types';
 import { useAuth } from '@/src/hooks/useAuth';
+import { clinicDateISO } from '@/src/lib/clinicTime';
 
 const MAX_COLUMNS = 3 as const;
 
@@ -26,7 +27,6 @@ const statusDotClass: Record<VisitStatus, string> = {
 };
 
 function getVisitLabel(v: DoctorQueueItem): string {
-  // ✅ show patient name (fallback to patientId)
   const name = v.patientName?.trim();
   return name && name.length > 0 ? name : `Patient: ${v.patientId}`;
 }
@@ -55,9 +55,12 @@ function DoctorQueueItemRow({
   );
 }
 
+// ✅ IMPORTANT: match the type returned by useGetDoctorsQuery (DoctorPublicListItem)
+type DoctorFromApi = NonNullable<ReturnType<typeof useGetDoctorsQuery>['data']>[number];
+
 type ColumnConfig = {
   headerLabel: string;
-  doctor?: AdminDoctorListItem;
+  doctor?: DoctorFromApi;
 };
 
 const PlaceholderBlock = () => (
@@ -118,7 +121,7 @@ export default function DoctorQueueCard() {
     });
   }, [effectiveSelectedIds, doctors]);
 
-  const todayIso = React.useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayIso = React.useMemo(() => clinicDateISO(new Date()), []);
 
   const queue1 = useGetDoctorQueueQuery(
     { doctorId: effectiveSelectedIds[0]!, date: todayIso },
@@ -138,7 +141,6 @@ export default function DoctorQueueCard() {
   const queues = [queue1, queue2, queue3];
 
   const openClinicVisit = (visitId: string) => {
-    // ✅ routes to apps/web/app/(clinic)/visits/[visitId]/page.tsx
     router.push(`/visits/${visitId}`);
   };
 

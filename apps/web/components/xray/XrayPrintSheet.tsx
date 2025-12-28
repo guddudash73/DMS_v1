@@ -31,12 +31,24 @@ export function XrayPrintSheet(props: {
   useEffect(() => {
     if (!open) return;
 
+    const onAfter = () => {
+      document.body.classList.remove('print-xray');
+      window.removeEventListener('afterprint', onAfter);
+      onAfterPrint?.();
+    };
+
+    window.addEventListener('afterprint', onAfter);
+    document.body.classList.add('print-xray');
+
     const t = setTimeout(() => {
       window.print();
-      onAfterPrint?.();
     }, 250);
 
-    return () => clearTimeout(t);
+    return () => {
+      clearTimeout(t);
+      document.body.classList.remove('print-xray');
+      window.removeEventListener('afterprint', onAfter);
+    };
   }, [open, onAfterPrint]);
 
   const count = xrayIds.length;
@@ -46,13 +58,12 @@ export function XrayPrintSheet(props: {
     if (count === 2) return 'grid grid-cols-1 grid-rows-2';
     if (count === 3) return 'grid grid-cols-2 grid-rows-2';
     if (count === 4) return 'grid grid-cols-2 grid-rows-2';
-    // >4 still one page: 3 columns grid (squeezed but still one page)
     return 'grid grid-cols-3 grid-rows-3';
   }, [count]);
 
   const items = useMemo(() => {
     if (count <= 4) return xrayIds;
-    return xrayIds.slice(0, 9); // keep on one page (A4). If you want different rule, tell me.
+    return xrayIds.slice(0, 9);
   }, [xrayIds, count]);
 
   if (!mounted) return null;
@@ -60,9 +71,17 @@ export function XrayPrintSheet(props: {
   return createPortal(
     <div className={`xray-print-root ${open ? '' : 'hidden'} print:block`}>
       <style>{`
+        /* Default: never show on screen */
+        .xray-print-root { display: none; }
+
         @media print {
-          body > *:not(.xray-print-root) { display: none !important; }
-          .xray-print-root { display: block !important; }
+          /*
+            ✅ IMPORTANT:
+            Only apply "hide everything else" when body has print-xray class.
+            This prevents conflicts with Rx/Bill printing.
+          */
+          body.print-xray > *:not(.xray-print-root) { display: none !important; }
+          body.print-xray .xray-print-root { display: block !important; }
 
           @page { size: A4; margin: 0; }
 

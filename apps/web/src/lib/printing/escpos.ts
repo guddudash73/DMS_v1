@@ -1,5 +1,6 @@
 // apps/web/src/lib/printing/escpos.ts
 import type { TokenPrintPayload } from '@dms/types';
+import { CLINIC_TZ } from '../clinicTime';
 
 const ESC = '\x1B';
 const GS = '\x1D';
@@ -10,8 +11,15 @@ function hr() {
 }
 
 function fmtDateTime(ms: number) {
-  const d = new Date(ms);
-  return d.toLocaleString('en-IN', { hour12: true });
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: CLINIC_TZ,
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).format(new Date(ms));
 }
 
 function maskPhone(phone?: string) {

@@ -1,4 +1,3 @@
-// apps/web/components/prescription/MedicinesEditor.tsx
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
@@ -79,6 +78,57 @@ export function MedicinesEditor({ lines, onChange }: Props) {
   const notesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const addBtnRef = useRef<HTMLButtonElement | null>(null);
 
+  const goNext = (el?: HTMLElement | null) => {
+    requestAnimationFrame(() => el?.focus());
+  };
+
+  // ✅ NEW: apply medicine defaults from the typeahead item (if present)
+  const applyMedicineDefaults = (picked: any) => {
+    const defaults = picked?.defaults ?? picked?.default ?? picked?.presetDefaults;
+    if (!defaults) return;
+
+    // dose
+    const d =
+      defaults.dose ??
+      defaults.doseText ??
+      defaults.dosage ??
+      defaults.strength ??
+      defaults.defaultDose;
+    if (typeof d === 'string' && d.trim()) setDose(d.trim());
+
+    // frequency
+    const f = defaults.frequency ?? defaults.freq ?? defaults.defaultFrequency;
+    if (typeof f === 'string' && isFrequency(f)) setFrequency(f);
+
+    // duration
+    const dur =
+      defaults.duration ??
+      defaults.dur ??
+      defaults.days ??
+      defaults.durationDays ??
+      defaults.defaultDuration;
+    if (typeof dur === 'number' && Number.isFinite(dur) && dur > 0) setDurationDays(String(dur));
+    if (typeof dur === 'string' && dur.trim() && Number.isFinite(Number(dur))) {
+      const n = Number(dur);
+      if (n > 0) setDurationDays(String(n));
+    }
+
+    // timing
+    const t = defaults.timing ?? defaults.time ?? defaults.defaultTiming;
+    if (typeof t === 'string') {
+      if (t === 'BEFORE_MEAL') setTimingUi('BE_MEAL');
+      else if (t === 'AFTER_MEAL' || t === 'AFTER_MEAL') setTimingUi('AF_MEAL');
+      else if (t === 'ANY') setTimingUi('ANY');
+    }
+
+    // notes (optional)
+    const n = defaults.notes ?? defaults.note;
+    if (typeof n === 'string' && n.trim()) {
+      setNotes(n.trim());
+      setNotesOpen(true);
+    }
+  };
+
   const canAdd = useMemo(() => {
     if (!medicine.trim()) return false;
     if (!dose.trim()) return false;
@@ -106,7 +156,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
       dose: d,
       frequency: freq,
       duration: durNum,
-      ...(timing ? { timing } : {}), // ✅ backend values stored
+      ...(timing ? { timing } : {}),
       ...(notes.trim() ? { notes: notes.trim() } : {}),
     };
 
@@ -142,7 +192,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     setDose(row.dose ?? '');
     setFrequency(row.frequency);
     setDurationDays(String(row.duration ?? ''));
-    setTimingUi(timingToUi(row.timing ?? undefined)); // ✅ map backend -> UI
+    setTimingUi(timingToUi(row.timing ?? undefined));
     setNotes(row.notes ?? '');
     setNotesOpen(Boolean(row.notes?.trim()));
     remove(idx);
@@ -166,11 +216,6 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     onChange(next);
     setRowNotesIndex(null);
     setRowNotesDraft('');
-  };
-
-  // ---- key helpers
-  const goNext = (el?: HTMLElement | null) => {
-    requestAnimationFrame(() => el?.focus());
   };
 
   const openNotesPopover = () => {
@@ -201,6 +246,19 @@ export function MedicinesEditor({ lines, onChange }: Props) {
               value={medicine}
               onPick={(m) => {
                 setMedicine(m.displayName);
+
+                // ✅ APPLY DEFAULTS FROM MEDICINE PRESET
+                if (m.defaultFrequency && isFrequency(m.defaultFrequency)) {
+                  setFrequency(m.defaultFrequency);
+                }
+
+                if (typeof m.defaultDuration === 'number') {
+                  setDurationDays(String(m.defaultDuration));
+                }
+
+                // optional future use
+                // m.form -> TABLET / SYRUP etc
+
                 goNext(doseRef.current);
               }}
               placeholder="Medicine name"
@@ -399,7 +457,6 @@ export function MedicinesEditor({ lines, onChange }: Props) {
         <div className="w-[8.333%]">Actions</div>
       </div>
 
-      {/* Scroll existing items only when > 4 */}
       <div
         className={[
           'divide-y',
@@ -419,8 +476,6 @@ export function MedicinesEditor({ lines, onChange }: Props) {
 
               <div className="w-[16.666%] pl-3 text-gray-800">{l.frequency}</div>
               <div className="w-[16.666%] text-gray- pl-3">{l.duration}</div>
-
-              {/* ✅ UI label only (BE_MEAL / AF_MEAL), backend remains BEFORE_MEAL / AFTER_MEAL */}
               <div className="w-[16.666%] pl-2 text-gray-800">{timingLabel(l.timing)}</div>
 
               <div className="w-[16.666%]">

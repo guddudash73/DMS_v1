@@ -8,11 +8,12 @@ import { useAuth } from '@/src/hooks/useAuth';
 import { useGetDoctorQueueQuery } from '@/src/store/api';
 import type { Visit } from '@dms/types';
 import { ArrowLeft } from 'lucide-react';
+import { clinicDateISO } from '@/src/lib/clinicTime';
 
 type QueueVisit = Visit & { patientName?: string };
 
 function getTodayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return clinicDateISO(new Date());
 }
 
 const statusLabel: Record<Visit['status'], string> = {

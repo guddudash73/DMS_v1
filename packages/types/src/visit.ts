@@ -1,3 +1,4 @@
+// packages/types/src/visit.ts
 import { z } from 'zod';
 import { PatientId } from './patient';
 import { UserId } from './user';
@@ -18,6 +19,10 @@ export const Visit = z.object({
   reason: z.string().min(1).max(500),
   status: VisitStatus,
   visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+
+  // ✅ OPD number string (generated at visit creation)
+  opdNo: z.string().min(1).optional(),
+
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
   billingAmount: z.number().nonnegative().optional(),
@@ -66,17 +71,6 @@ export type FollowUpContactMethod = z.infer<typeof FollowUpContactMethod>;
 export const FollowUpStatus = z.enum(['ACTIVE', 'COMPLETED', 'CANCELLED']);
 export type FollowUpStatus = z.infer<typeof FollowUpStatus>;
 
-export const FollowUp = z.object({
-  visitId: VisitId,
-  followUpDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  reason: z.string().min(1).max(500).optional(),
-  contactMethod: FollowUpContactMethod,
-  status: FollowUpStatus,
-  createdAt: z.number().int().nonnegative(),
-  updatedAt: z.number().int().nonnegative(),
-});
-export type FollowUp = z.infer<typeof FollowUp>;
-
 export const FollowUpUpsert = z.object({
   followUpDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   reason: z.string().min(1).max(500).optional(),
@@ -88,3 +82,25 @@ export const FollowUpStatusUpdate = z.object({
   status: FollowUpStatus,
 });
 export type FollowUpStatusUpdate = z.infer<typeof FollowUpStatusUpdate>;
+
+export const FollowUpId = z.string().min(1);
+export type FollowUpId = z.infer<typeof FollowUpId>;
+
+export const FollowUpCreate = z.object({
+  followUpDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reason: z.string().min(1).max(500).optional(),
+  contactMethod: FollowUpContactMethod.optional(),
+});
+export type FollowUpCreate = z.infer<typeof FollowUpCreate>;
+
+export const FollowUp = z.object({
+  followupId: FollowUpId,
+  visitId: VisitId,
+  followUpDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  reason: z.string().min(1).max(500).optional(),
+  contactMethod: FollowUpContactMethod,
+  status: FollowUpStatus,
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+});
+export type FollowUp = z.infer<typeof FollowUp>;

@@ -1,10 +1,13 @@
+// apps/api/src/repositories/billingRepository.ts
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import type { Billing, BillingCheckoutInput, Visit, VisitId } from '@dms/types';
 import { visitRepository } from './visitRepository';
 import { patientRepository } from './patientRepository';
-import { followupRepository, FollowUpRuleViolationError } from './followupRepository';
+import { FollowUpRuleViolationError } from './followupRepository';
 import { logInfo, logError } from '../lib/logger';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
+import { v4 as randomUUID } from 'uuid';
+import { isoDateInTimeZone } from '../lib/date';
 
 export class BillingRuleViolationError extends Error {
   readonly code = 'BILLING_RULE_VIOLATION' as const;
@@ -57,12 +60,29 @@ const buildBillingKey = (visitId: string) => ({
   SK: 'BILLING',
 });
 
-const buildFollowUpKey = (visitId: string) => ({
+/**
+ * ✅ Multi-followup model:
+ * Store followups as separate items under the same VISIT partition.
+ * PK: VISIT#<visitId>
+ * SK: FOLLOWUP#<followupId>
+ *
+ * Also index by followUpDate in GSI3 so /followups/daily can query by date.
+ */
+const buildFollowUpKey = (visitId: string, followupId: string) => ({
   PK: `VISIT#${visitId}`,
-  SK: 'FOLLOWUP',
+  SK: `FOLLOWUP#${followupId}`,
 });
 
-const todayDateString = (): string => new Date().toISOString().slice(0, 10);
+// GSI3 helpers (kept local to avoid hard dependency on packages/types keys changes)
+const gsi3PK_date = (dateISO: string) => `DATE#${dateISO}`;
+const gsi3SK_typeId = (type: 'FOLLOWUP', id: string) => `TYPE#${type}#ID#${id}`;
+
+/**
+ * ✅ IMPORTANT:
+ * "Today" for clinic rules must be Asia/Kolkata, NOT UTC.
+ * Never use new Date().toISOString().slice(0,10) for "clinic day".
+ */
+const todayDateString = (): string => isoDateInTimeZone(new Date(), 'Asia/Kolkata');
 
 interface ComputedBillingTotals {
   billing: Billing;
@@ -154,12 +174,6 @@ export class DynamoDBBillingRepository implements BillingRepository {
       throw new DuplicateCheckoutError('Billing already exists for this visit');
     }
 
-    const existingFollowup = await followupRepository.getByVisitId(visitId);
-
-    if (input.followUp && existingFollowup) {
-      throw new FollowUpRuleViolationError('Follow-up already exists for this visit');
-    }
-
     const { billing, total } = computeTotals(visitId, input);
     const now = billing.createdAt;
 
@@ -168,8 +182,8 @@ export class DynamoDBBillingRepository implements BillingRepository {
     if (input.followUp) {
       const { followUpDate, reason, contactMethod } = input.followUp;
 
-      const visitDate = visit.visitDate;
-      const today = todayDateString();
+      const visitDate = visit.visitDate; // already clinic-local date key
+      const today = todayDateString(); // ✅ IST-based today
 
       if (followUpDate < visitDate) {
         throw new FollowUpRuleViolationError(
@@ -183,22 +197,32 @@ export class DynamoDBBillingRepository implements BillingRepository {
         );
       }
 
-      const effectiveContactMethod = contactMethod ?? existingFollowup?.contactMethod ?? 'CALL';
+      // ✅ multi-followup: always create a NEW followup record
+      const followupId = randomUUID();
+      const effectiveContactMethod = contactMethod ?? 'CALL';
 
       followUpItem = {
         Put: {
           TableName: TABLE_NAME,
           Item: {
-            ...buildFollowUpKey(visitId),
+            ...buildFollowUpKey(visitId, followupId),
             entityType: 'FOLLOWUP',
+
+            followupId,
             visitId,
             followUpDate,
             reason,
             contactMethod: effectiveContactMethod,
             status: 'ACTIVE',
-            createdAt: existingFollowup?.createdAt ?? now,
+            createdAt: now,
             updatedAt: now,
+
+            // ✅ GSI3 date index for /followups/daily?date=YYYY-MM-DD
+            GSI3PK: gsi3PK_date(followUpDate),
+            GSI3SK: gsi3SK_typeId('FOLLOWUP', followupId),
           },
+          // condition is evaluated against the *same* PK+SK item only,
+          // so this does not prevent other followups under the same visit.
           ConditionExpression: 'attribute_not_exists(PK)',
         },
       };

@@ -42,7 +42,7 @@ export default function DoctorDashboardPage() {
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
-      <div className="grid h-full grid-cols-1 gap-6 2xl:gap-10 lg:grid-cols-[minmax(280px,0.9fr)_minmax(0,3fr)]">
+      <div className="grid h-full grid-cols-1 gap-6 2xl:gap-10 lg:grid-cols-[minmax(320px,0.9fr)_minmax(0,2fr)]">
         <div className="flex flex-col gap-6 2xl:gap-10">
           <DoctorQueueCard onViewAll={() => setViewMode('queue')} />
           <QueueSummaryCard />
@@ -51,7 +51,7 @@ export default function DoctorDashboardPage() {
         <div className="flex h-full flex-col gap-6 2xl:gap-10">
           <DoctorPatientsChart onDateSelect={(dateIso) => setSelectedDate(dateIso)} />
 
-          <div className="grid grid-cols-1 gap-6 items-stretch lg:grid-cols-[minmax(220px,1fr)_minmax(0,2fr)]">
+          <div className="grid grid-cols-1 gap-6 items-stretch lg:grid-cols-[minmax(220px,2fr)_minmax(0,2fr)]">
             <TodayCaseMixCard />
             <RecentlyCompletedCard />
           </div>

@@ -1,3 +1,4 @@
+// apps/web/app/(clinic)/patients/[id]/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -8,15 +9,17 @@ import {
   useGetPatientByIdQuery,
   useGetPatientVisitsQuery,
   useGetDoctorsQuery,
+  useGetPatientSummaryQuery,
   type ErrorResponse,
 } from '@/src/store/api';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { RegisterVisitDrawer } from '@/components/patients/RegisterVisitDrawer';
 
-// ✅ shadcn table
+// ✅ Register Visit popup modal
+import RegisterVisitModal from '@/components/visits/RegisterVisitModal';
+
 import {
   Table,
   TableBody,
@@ -26,11 +29,11 @@ import {
   TableRow,
 } from '@/components/ui/table';
 
-// ✅ shadcn calendar + popover
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 
 import { ArrowRight, Calendar as CalendarIcon } from 'lucide-react';
+import { formatClinicDateShort } from '@/src/lib/clinicTime';
 
 type ApiError = {
   status?: number;
@@ -55,18 +58,18 @@ const asErrorResponse = (data: unknown): ErrorResponse | null => {
 };
 
 const formatVisitDate = (dateStr: string) => {
-  const d = new Date(dateStr);
-  if (Number.isNaN(d.getTime())) return dateStr;
-  return d.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
+  // dateStr is YYYY-MM-DD clinic key
+  return formatClinicDateShort(dateStr);
 };
 
-const toISODate = (d: Date) => d.toISOString().slice(0, 10);
+const toISODate = (d: Date) => {
+  // Date-only key without UTC shifting
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
 
-// ✅ local pagination (simple + aesthetic)
 function SimplePagination(props: {
   page: number;
   totalPages: number;
@@ -114,7 +117,6 @@ function stageLabel(status?: Visit['status']) {
   return '—';
 }
 
-// ✅ Pink / Yellow / Green badges like your screenshot
 function stageBadgeClass(status?: Visit['status']) {
   if (status === 'QUEUED') return 'bg-pink-100 text-pink-700 border-pink-200';
   if (status === 'IN_PROGRESS') return 'bg-yellow-100 text-yellow-800 border-yellow-200';
@@ -126,6 +128,8 @@ export default function PatientDetailPage() {
   const params = useParams<{ id: string }>();
   const rawId = params?.id;
   const router = useRouter();
+
+  const [registerOpen, setRegisterOpen] = React.useState(false);
 
   if (!rawId || typeof rawId !== 'string') {
     return (
@@ -149,19 +153,20 @@ export default function PatientDetailPage() {
     error: rawVisitsError,
   } = useGetPatientVisitsQuery(patientId);
 
+  const { data: summary } = useGetPatientSummaryQuery(patientId);
+
   const { data: doctors } = useGetDoctorsQuery();
 
-  // date filter (stored as YYYY-MM-DD)
   const [selectedDate, setSelectedDate] = React.useState<string>('');
   const selectedDateObj = React.useMemo(() => {
     if (!selectedDate) return undefined;
-    const d = new Date(selectedDate);
-    return Number.isNaN(d.getTime()) ? undefined : d;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(selectedDate)) return undefined;
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const dt = new Date(y, m - 1, d, 0, 0, 0, 0);
+    return Number.isNaN(dt.getTime()) ? undefined : dt;
   }, [selectedDate]);
 
   const [datePopoverOpen, setDatePopoverOpen] = React.useState(false);
-
-  const loading = patientLoading;
 
   const patientErrorMessage = React.useMemo(() => {
     if (!rawPatientError) return null;
@@ -179,7 +184,6 @@ export default function PatientDetailPage() {
 
   const visits: Visit[] = visitsData?.items ?? [];
 
-  // ✅ Sort newest first (nice UX)
   const sortedVisits = React.useMemo(() => {
     const items = [...visits];
     items.sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0));
@@ -199,7 +203,6 @@ export default function PatientDetailPage() {
     return map;
   }, [doctors]);
 
-  // ✅ pagination state (max 4 rows)
   const PAGE_SIZE = 4;
   const [page, setPage] = React.useState<number>(1);
 
@@ -215,7 +218,7 @@ export default function PatientDetailPage() {
     return filteredVisits.slice(start, start + PAGE_SIZE);
   }, [filteredVisits, pageSafe]);
 
-  const followupLabel = 'No Follow Up Scheduled';
+  const followupLabel = summary?.nextFollowUpDate ?? 'No Follow Up Scheduled';
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
@@ -223,22 +226,21 @@ export default function PatientDetailPage() {
         <div className="flex flex-row items-center justify-end gap-6">
           <div className="text-sm">
             <span className="font-medium text-gray-700">Follow up:&nbsp;</span>
-            <span className="font-semibold text-red-500">{followupLabel}</span>
+            <span
+              className={[
+                'font-semibold',
+                summary?.nextFollowUpDate ? 'text-green-600' : 'text-red-500',
+              ].join(' ')}
+            >
+              {followupLabel}
+            </span>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="lg"
-            className="rounded-2xl border-gray-200 bg-white px-4 text-xs font-medium text-gray-800 hover:bg-gray-100"
-          >
-            Add Follow up
-          </Button>
         </div>
 
         <Card className="rounded-2xl border-none bg-white px-8 py-6 shadow-sm">
           <h2 className="mb-4 text-lg font-semibold text-gray-900">Patient Details:</h2>
 
-          {loading && (
+          {patientLoading && (
             <div className="space-y-2 text-sm text-gray-600" aria-busy="true">
               <div className="h-4 w-40 animate-pulse rounded bg-gray-100" />
               <div className="h-4 w-32 animate-pulse rounded bg-gray-100" />
@@ -246,11 +248,11 @@ export default function PatientDetailPage() {
             </div>
           )}
 
-          {!loading && patientErrorMessage && (
+          {!patientLoading && patientErrorMessage && (
             <p className="text-sm text-red-600">{patientErrorMessage}</p>
           )}
 
-          {!loading && !patientErrorMessage && patient && (
+          {!patientLoading && !patientErrorMessage && patient && (
             <div className="grid gap-4 text-sm text-gray-800 md:grid-cols-2">
               <dl className="space-y-2">
                 <div className="flex gap-3">
@@ -258,7 +260,7 @@ export default function PatientDetailPage() {
                   <dd className="text-gray-900">: {patient.name}</dd>
                 </div>
                 <div className="flex gap-3">
-                  <dt className="w-28 shrink-0 text-gray-600">Age/Sex</dt>
+                  <dt className="w-28 shrink-0 text-gray-600">DOB/Sex</dt>
                   <dd className="text-gray-900">
                     : {patient.dob ?? '—'} / {patient.gender ?? '—'}
                   </dd>
@@ -269,9 +271,10 @@ export default function PatientDetailPage() {
                 </div>
                 <div className="flex gap-3">
                   <dt className="w-28 shrink-0 text-gray-600">Address</dt>
-                  <dd className="whitespace-pre-line text-gray-900">:</dd>
+                  <dd className="whitespace-pre-line text-gray-900">: {patient.address ?? '—'}</dd>
                 </div>
               </dl>
+
               <dl className="space-y-2 md:justify-self-end">
                 <div className="flex gap-3">
                   <dt className="w-32 shrink-0 text-gray-600">Regd. Date</dt>
@@ -284,29 +287,38 @@ export default function PatientDetailPage() {
                 </div>
                 <div className="flex gap-3">
                   <dt className="w-32 shrink-0 text-gray-600">SD-ID</dt>
-                  <dd className="text-gray-900">: {patient.patientId}</dd>
+                  <dd className="text-gray-900">: {patient.sdId}</dd>
                 </div>
                 <div className="flex gap-3">
-                  <dt className="w-32 shrink-0 text-gray-600">OPD No.</dt>
-                  <dd className="text-gray-900">: —</dd>
+                  <dt className="w-32 shrink-0 text-gray-600">Visits count</dt>
+                  <dd className="text-gray-900">: {summary?.doneVisitCount ?? 0}</dd>
                 </div>
                 <div className="flex gap-3">
                   <dt className="w-32 shrink-0 text-gray-600">Last Visit</dt>
-                  <dd className="text-gray-900">: —</dd>
+                  <dd className="text-gray-900">: {summary?.lastVisitDate ?? '—'}</dd>
                 </div>
               </dl>
             </div>
           )}
 
-          <div className="mt-5">
-            <RegisterVisitDrawer patientId={patientId} />
+          <div className="mt-5 flex justify-end">
+            <Button
+              type="button"
+              className="rounded-2xl"
+              onClick={() => setRegisterOpen(true)}
+              disabled={!patient || !!patientErrorMessage}
+            >
+              Register checkup
+            </Button>
           </div>
+
+          {registerOpen ? (
+            <RegisterVisitModal patientId={patientId} onClose={() => setRegisterOpen(false)} />
+          ) : null}
         </Card>
       </div>
 
-      {/* ---------------- Visits table section ---------------- */}
       <div className="flex flex-col gap-4 pt-10">
-        {/* ✅ shadcn date picker */}
         <div className="flex items-center justify-end gap-6">
           <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
             <PopoverTrigger asChild>
@@ -353,7 +365,6 @@ export default function PatientDetailPage() {
           </Popover>
         </div>
 
-        {/* ✅ Updated Table */}
         <div>
           <Card className="overflow-hidden rounded-2xl border-none bg-white px-0 py-0 shadow-sm">
             <Table>
@@ -430,7 +441,6 @@ export default function PatientDetailPage() {
                             type="button"
                             variant="outline"
                             className="h-9 rounded-xl px-3 text-xs"
-                            // ✅ FIX: open Clinic Visit Info page (/(clinic)/visits/[visitId])
                             onClick={() => router.push(`/visits/${visit.visitId}`)}
                           >
                             View <ArrowRight className="ml-1 h-4 w-4" />
@@ -443,7 +453,6 @@ export default function PatientDetailPage() {
               </TableBody>
             </Table>
 
-            {/* ✅ Pagination triggers only if > 4 */}
             {filteredVisits.length > PAGE_SIZE ? (
               <div className="border-t bg-white px-4 py-3">
                 <SimplePagination page={pageSafe} totalPages={totalPages} onPageChange={setPage} />

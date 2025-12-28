@@ -4,10 +4,12 @@ import { useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { useGetDailyReportQuery } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
+import { clinicDateISO } from '@/src/lib/clinicTime';
 
 function getTodayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  return clinicDateISO(new Date());
 }
+
 type QueueSummaryCardProps = {
   date?: string;
 };

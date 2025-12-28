@@ -8,6 +8,7 @@ import { useListVisitXraysQuery, useGetXrayUrlQuery, useDeleteXrayMutation } fro
 import { XrayViewerModal } from './XrayViewerModal';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { CLINIC_TZ } from '@/src/lib/clinicTime';
 
 type Props = {
   visitId: string;
@@ -20,6 +21,21 @@ type Props = {
   /** ✅ if false, hide delete UI (read-only mode) */
   canDelete?: boolean;
 };
+
+function formatClinicDateTime(ts: number | string) {
+  const d = new Date(ts);
+  if (!Number.isFinite(d.getTime())) return '—';
+
+  return new Intl.DateTimeFormat('en-IN', {
+    timeZone: CLINIC_TZ,
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: true,
+  }).format(d);
+}
 
 function Thumb({ xrayId }: { xrayId: string }) {
   const { data } = useGetXrayUrlQuery({ xrayId, size: 'thumb' });
@@ -137,7 +153,7 @@ export function XrayGallery({ visitId, variant = 'standalone', canDelete = true 
 
               <div className="mt-2 text-left">
                 <div className="text-[11px] font-medium text-gray-800">
-                  {new Date(x.takenAt).toLocaleString()}
+                  {formatClinicDateTime(x.takenAt)}
                 </div>
                 <div className="text-[10px] text-gray-500">{Math.round(x.size / 1024)} KB</div>
               </div>

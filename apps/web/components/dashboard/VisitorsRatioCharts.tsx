@@ -1,3 +1,4 @@
+// apps/web/components/dashboard/VisitorsRatioCharts.tsx
 'use client';
 
 import * as React from 'react';
@@ -22,6 +23,8 @@ import { useGetDailyPatientSummarySeriesQuery } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
 import { cn } from '@/lib/utils';
 
+import { CLINIC_TZ, clinicDateISO } from '@/src/lib/clinicTime';
+
 type TimeRange = '90d' | '30d' | '7d';
 
 const chartConfig = {
@@ -44,7 +47,6 @@ const chartConfig = {
 
 function getDateRange(range: TimeRange): { startDate: string; endDate: string } {
   const end = new Date();
-  end.setHours(0, 0, 0, 0);
 
   let days = 90;
   if (range === '30d') days = 30;
@@ -53,18 +55,25 @@ function getDateRange(range: TimeRange): { startDate: string; endDate: string } 
   const start = new Date(end);
   start.setDate(start.getDate() - (days - 1));
 
-  const toIso = (d: Date) => d.toISOString().slice(0, 10);
-
   return {
-    startDate: toIso(start),
-    endDate: toIso(end),
+    startDate: clinicDateISO(start),
+    endDate: clinicDateISO(end),
   };
 }
 
 function formatShortDate(value: unknown) {
-  const d = new Date(String(value));
-  if (Number.isNaN(d.getTime())) return String(value ?? '');
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const dateIso = String(value ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateIso)) return dateIso;
+
+  // Use a stable date anchor then render in clinic TZ
+  const dt = new Date(`${dateIso}T00:00:00Z`);
+  if (Number.isNaN(dt.getTime())) return dateIso;
+
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: CLINIC_TZ,
+    month: 'short',
+    day: 'numeric',
+  }).format(dt);
 }
 
 type TooltipProps = {
@@ -256,7 +265,6 @@ export default function VisitorsRatioChart({ onDateSelect }: VisitorsRatioChartP
               </defs>
 
               <CartesianGrid vertical={false} strokeDasharray="3 3" />
-
               <XAxis
                 dataKey="date"
                 tickLine={false}

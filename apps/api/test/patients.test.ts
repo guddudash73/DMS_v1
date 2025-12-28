@@ -1,3 +1,4 @@
+// apps/api/test/patients.test.ts
 import { afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -32,10 +33,15 @@ describe('Patients API', () => {
         phone: `+9177490648${Math.floor(Math.random() * 100)
           .toString()
           .padStart(2, '0')}`,
+        address: 'Some address line',
       })
       .expect(201);
 
     expect(createRes.body).toHaveProperty('patientId');
+    expect(createRes.body).toHaveProperty('sdId');
+    expect(typeof createRes.body.sdId).toBe('string');
+    expect(createRes.body.sdId).toMatch(/^SD-\d{4}-\d{5}$/);
+
     const patientId = createRes.body.patientId as string;
     registerPatient(patientId);
 
@@ -46,6 +52,7 @@ describe('Patients API', () => {
 
     expect(getRes.body.patientId).toBe(patientId);
     expect(getRes.body.name).toBe('Guddu Dash');
+    expect(getRes.body.sdId).toBe(createRes.body.sdId);
   });
 
   it('rejects invalid input', async () => {

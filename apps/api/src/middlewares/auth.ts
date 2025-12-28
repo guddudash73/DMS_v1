@@ -1,14 +1,14 @@
+// apps/api/src/middlewares/auth.ts
 import type { Request, Response, NextFunction } from 'express';
 import type { Role } from '@dms/types';
 import { verifyAccessToken } from '../lib/authTokens';
+import { userRepository } from '../repositories/userRepository';
 
 declare module 'express-serve-static-core' {
   interface Request {
     auth?: {
       userId: string;
       role: Role;
-      // Prefer not to store raw token unless you truly need it.
-      // token?: string;
     };
     requestId?: string;
   }
@@ -26,7 +26,7 @@ export class AuthError extends Error {
   }
 }
 
-export const authMiddleware = (req: Request, _res: Response, next: NextFunction) => {
+export const authMiddleware = async (req: Request, _res: Response, next: NextFunction) => {
   const header = req.header('Authorization') ?? req.header('authorization');
 
   if (!header || !header.toLowerCase().startsWith('bearer ')) {
@@ -41,11 +41,16 @@ export const authMiddleware = (req: Request, _res: Response, next: NextFunction)
   try {
     const decoded = verifyAccessToken(token);
 
-    req.auth = {
-      userId: decoded.sub,
-      role: decoded.role,
-    };
+    // ✅ NEW: enforce active user for every request
+    const user = await userRepository.getById(decoded.sub);
+    if (!user) {
+      return next(new AuthError('UNAUTHORIZED', 401, 'UNAUTHORIZED'));
+    }
+    if (user.active === false) {
+      return next(new AuthError('USER_INACTIVE', 403, 'USER_INACTIVE'));
+    }
 
+    req.auth = { userId: decoded.sub, role: decoded.role };
     return next();
   } catch {
     return next(new AuthError('UNAUTHORIZED', 401, 'UNAUTHORIZED'));

@@ -19,7 +19,6 @@ const LOCK_WINDOW_MS = 15 * 60 * 1000;
 const COOKIE_NAME = 'refreshToken';
 
 const setRefreshCookie = (res: Response, refreshToken: string) => {
-  // Keep both paths as you already do (good for cleanup / compatibility)
   res.cookie(COOKIE_NAME, refreshToken, {
     httpOnly: true,
     secure: NODE_ENV === 'production',
@@ -63,6 +62,15 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
       });
     }
 
+    // ✅ NEW: inactive users cannot login
+    if (user.active === false) {
+      return res.status(403).json({
+        error: 'USER_INACTIVE',
+        message: 'Account is inactive. Please contact admin.',
+        traceId: req.requestId,
+      });
+    }
+
     const now = Date.now();
     if (user.lockUntil && user.lockUntil > now) {
       logInfo('auth_login_locked', {
@@ -99,7 +107,6 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
       expiresAt: pair.refresh.exp * 1000,
     });
 
-    // refresh token ONLY via HttpOnly cookie
     setRefreshCookie(res, pair.refresh.token);
 
     const response: LoginResponse = {
@@ -126,8 +133,6 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
 
 r.post('/refresh', async (req, res, next) => {
   try {
-    // We will keep accepting body.refreshToken for now for compatibility,
-    // but cookie is the intended primary mechanism.
     const body = RefreshRequest.safeParse(req.body);
     const bodyToken = body.success ? body.data.refreshToken : undefined;
 
@@ -157,6 +162,12 @@ r.post('/refresh', async (req, res, next) => {
     if (!user) {
       clearRefreshCookie(res);
       throw new AuthError('User not found', 401, 'INVALID_REFRESH_TOKEN');
+    }
+
+    // ✅ NEW: inactive users cannot refresh
+    if (user.active === false) {
+      clearRefreshCookie(res);
+      throw new AuthError('User inactive', 403, 'USER_INACTIVE');
     }
 
     const pair = buildTokenPair(user.userId, user.role);

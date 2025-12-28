@@ -18,10 +18,23 @@ import {
 import { loadPrintSettings } from '@/src/lib/printing/settings';
 import { buildTokenEscPos } from '@/src/lib/printing/escpos';
 import { printRaw } from '@/src/lib/printing/qz';
+import { CLINIC_TZ } from '@/src/lib/clinicTime';
 
 type Props = {
   patientId: string;
   onClose: () => void;
+};
+
+const formatClinicDateFromAny = (input: unknown) => {
+  const d = input instanceof Date ? input : new Date(String(input));
+  if (!Number.isFinite(d.getTime())) return '—';
+
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: CLINIC_TZ,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+  }).format(d);
 };
 
 export default function RegisterVisitModal({ patientId, onClose }: Props) {
@@ -158,9 +171,7 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
                 <div className="flex justify-between gap-3">
                   <span className="text-gray-500">Regd. Date</span>
                   <span className="font-medium">
-                    {patient?.createdAt
-                      ? new Date(patient.createdAt).toLocaleDateString('en-GB')
-                      : '—'}
+                    {patient?.createdAt ? formatClinicDateFromAny(patient.createdAt) : '—'}
                   </span>
                 </div>
                 <div className="flex justify-between gap-3">

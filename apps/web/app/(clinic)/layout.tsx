@@ -12,11 +12,20 @@ export default function ClinicLayout({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (auth.status !== 'authenticated') return;
 
+    // ✅ Keep existing behavior: doctors do NOT belong in clinic routes
     if (auth.role === 'DOCTOR') router.replace('/doctor');
-    if (auth.role === 'ADMIN') router.replace('/admin');
+
+    // ✅ IMPORTANT CHANGE: Admin is allowed to be here (no redirect)
+    // if (auth.role === 'ADMIN') router.replace('/admin');
   }, [auth.status, auth.role, router]);
 
-  if (auth.status === 'authenticated' && auth.role && auth.role !== 'RECEPTION') {
+  // ✅ Allow RECEPTION and ADMIN to render clinic shell
+  if (
+    auth.status === 'authenticated' &&
+    auth.role &&
+    auth.role !== 'RECEPTION' &&
+    auth.role !== 'ADMIN'
+  ) {
     return (
       <div className="flex h-screen items-center justify-center text-sm text-gray-700">
         Redirecting…

@@ -12,7 +12,6 @@ import {
   useGetPatientByIdQuery,
   useUpdateVisitStatusMutation,
 } from '@/src/store/api';
-import { useAuth } from '@/src/hooks/useAuth';
 
 export default function DoctorVisitHandlingPage() {
   const params = useParams();
@@ -20,14 +19,12 @@ export default function DoctorVisitHandlingPage() {
 
   const visitId = useMemo(() => String(params.visitId ?? ''), [params.visitId]);
 
-  const auth = useAuth();
-  const doctorId = auth.userId ?? '';
-  const doctorName = doctorId ? `Doctor (${doctorId})` : 'Doctor';
-
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
   const patientId = visitQuery.data?.patientId;
 
-  const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
+  const patientQuery = useGetPatientByIdQuery(patientId ?? '', {
+    skip: !patientId,
+  });
 
   const [updateVisitStatus, updateVisitStatusState] = useUpdateVisitStatusMutation();
 
@@ -39,23 +36,16 @@ export default function DoctorVisitHandlingPage() {
 
   const canEndSession =
     !!visitId &&
-    !!doctorId &&
     (visitStatus === 'IN_PROGRESS' || visitStatus === 'QUEUED') &&
     !updateVisitStatusState.isLoading;
 
   const onEndSession = async () => {
     if (!visitId) return;
 
-    if (!doctorId) {
-      toast.error('Missing doctor session. Please re-login.');
-      return;
-    }
-
     try {
       await updateVisitStatus({
         visitId,
         status: 'DONE',
-        doctorId,
         date: visitQuery.data?.visitDate,
       }).unwrap();
 
@@ -67,7 +57,6 @@ export default function DoctorVisitHandlingPage() {
   };
 
   const onEndRevision = () => {
-    // ✅ just exit revision mode; visit is already DONE
     setIsRevisionMode(false);
     toast.success('Revision ended.');
   };
@@ -75,7 +64,7 @@ export default function DoctorVisitHandlingPage() {
   return (
     <div className="p-4 2xl:p-8">
       <div className="mb-4 flex items-center justify-end gap-3">
-        {/* ✅ hide Hold Session on DONE visits */}
+        {/* Hide Hold Session on DONE visits */}
         {!isDone ? (
           <Button type="button" variant="outline" className="rounded-xl" disabled>
             Hold Session
@@ -85,9 +74,7 @@ export default function DoctorVisitHandlingPage() {
         <Button
           type="button"
           className="rounded-xl bg-black text-white hover:bg-black/90"
-          disabled={
-            isDone ? !isRevisionMode : !canEndSession // ✅ in DONE, only clickable if revision mode active
-          }
+          disabled={isDone ? !isRevisionMode : !canEndSession}
           onClick={() => {
             if (isDone) return void onEndRevision();
             return void onEndSession();
@@ -102,10 +89,8 @@ export default function DoctorVisitHandlingPage() {
         patientId={patientId}
         patientName={patientQuery.data?.name}
         patientPhone={patientQuery.data?.phone}
-        doctorName={doctorName}
-        visitDateLabel={
-          visitQuery.data?.visitDate ? `Visit: ${visitQuery.data.visitDate}` : undefined
-        }
+        patientSdId={patientQuery.data?.sdId}
+        opdNo={(visitQuery.data as any)?.opdNo}
         visitStatus={visitStatus}
         onRevisionModeChange={setIsRevisionMode}
       />

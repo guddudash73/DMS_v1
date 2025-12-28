@@ -5,11 +5,22 @@ import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import type { RxLineType } from '@dms/types';
 
+type PatientSex = 'M' | 'F' | 'O' | 'U';
+
 type Props = {
   patientName?: string;
   patientPhone?: string;
+
+  patientAge?: number | string;
+  patientSex?: PatientSex;
+
+  sdId?: string;
+  opdNo?: string;
+
   doctorName?: string;
+  doctorRegdLabel?: string; // ✅ NEW
   visitDateLabel?: string;
+
   lines: RxLineType[];
   receptionNotes?: string;
 };
@@ -25,7 +36,7 @@ const FREQ_LABEL: Record<RxLineType['frequency'], string> = {
 
 const TIMING_LABEL: Record<NonNullable<RxLineType['timing']>, string> = {
   BEFORE_MEAL: 'before food',
-  AFTER_MEAL: 'After food',
+  AFTER_MEAL: 'after food',
   ANY: '',
 };
 
@@ -45,27 +56,68 @@ function buildLineText(l: RxLineType) {
   return parts.join(' ');
 }
 
+function formatAgeSex(age?: number | string, sex?: PatientSex) {
+  const ageStr =
+    typeof age === 'number'
+      ? Number.isFinite(age) && age > 0
+        ? String(age)
+        : ''
+      : (age ?? '').toString().trim();
+
+  const sexStr = (sex ?? '').toString().trim().toUpperCase();
+
+  if (!ageStr && !sexStr) return '—';
+  if (ageStr && sexStr) return `${ageStr}/${sexStr}`;
+  return ageStr || sexStr || '—';
+}
+
+function formatDateDDMMYYYY(d: Date) {
+  return d.toLocaleDateString('en-GB'); // dd/mm/yyyy
+}
+
+function parseDateFromVisitLabel(visitDateLabel?: string): Date | null {
+  if (!visitDateLabel) return null;
+
+  const raw = visitDateLabel.replace('Visit:', '').trim();
+  if (!raw) return null;
+
+  const d = new Date(raw);
+  if (!Number.isFinite(d.getTime())) return null;
+
+  return d;
+}
+
 export function PrescriptionPrintSheet(props: Props) {
-  const { patientName, patientPhone, doctorName, visitDateLabel, lines, receptionNotes } = props;
+  const {
+    patientName,
+    patientPhone,
+    patientAge,
+    patientSex,
+    sdId,
+    opdNo,
+    doctorName,
+    doctorRegdLabel,
+    visitDateLabel,
+    lines,
+    receptionNotes,
+  } = props;
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-  if (!mounted) return null;
 
   const hasNotes = !!receptionNotes?.trim();
+  const ageSex = formatAgeSex(patientAge, patientSex);
+
+  const rxDate = formatDateDDMMYYYY(parseDateFromVisitLabel(visitDateLabel) ?? new Date());
+
+  if (!mounted) return null;
 
   return createPortal(
     <div className="rx-print-root">
       <style>{`
-        /* Default: never show on screen */
         .rx-print-root { display: none; }
 
         @media print {
-          /*
-            ✅ IMPORTANT:
-            Only apply "hide everything else" when body has print-rx class.
-            This prevents conflicts with XrayPrintSheet (or anything else).
-          */
           body.print-rx > *:not(.rx-print-root) { display: none !important; }
           body.print-rx .rx-print-root { display: block !important; }
 
@@ -136,55 +188,67 @@ export function PrescriptionPrintSheet(props: Props) {
 
           <div className="mt-2 h-px w-full bg-emerald-600/60" />
 
-          {/* Doctor + Patient block */}
+          {/* Doctor row + Date */}
           <div className="shrink-0 pt-3 px-4">
-            <div className="flex flex-col items-start justify-between">
+            <div className="flex items-start justify-between gap-6">
               <div className="flex flex-col">
+                {/* ✅ no hardcode, show '—' while loading */}
                 <div className="text-[12px] font-bold text-gray-900">
-                  {doctorName ?? 'Dr. Soumendra Sarangi'}
+                  {doctorName?.trim() ? doctorName : '—'}
                 </div>
+
+                {/* ✅ dynamic regd label */}
                 <div className="mt-0.5 text-[11px] font-semibold text-gray-700">
-                  B.D.S Regd. - 68
+                  {doctorRegdLabel?.trim() ? doctorRegdLabel : '—'}
                 </div>
               </div>
 
-              <div className="mt-3 flex w-full justify-between">
-                <div className="space-y-1 text-[11px] text-gray-800">
-                  <div className="flex gap-3">
-                    <div className="w-28 text-gray-600">Patient Name</div>
-                    <div className="text-gray-600">:</div>
-                    <div className="font-semibold text-gray-900">{patientName ?? '—'}</div>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="w-28 text-gray-600">AGE / SEX</div>
-                    <div className="text-gray-600">:</div>
-                    <div className="font-semibold text-gray-900">—</div>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="w-28 text-gray-600">Contact No.</div>
-                    <div className="text-gray-600">:</div>
-                    <div className="font-semibold text-gray-900">{patientPhone ?? '—'}</div>
+              <div className="flex flex-col items-end text-[11px]">
+                <div className="text-gray-600">Date</div>
+                <div className="font-semibold text-gray-900">{rxDate}</div>
+              </div>
+            </div>
+
+            <div className="mt-3 flex w-full justify-between gap-6">
+              <div className="space-y-1 text-[11px] text-gray-800">
+                <div className="flex gap-3">
+                  <div className="w-28 text-gray-600">Patient Name</div>
+                  <div className="text-gray-600">:</div>
+                  <div className="font-semibold text-gray-900">{patientName ?? '—'}</div>
+                </div>
+
+                <div className="flex gap-3">
+                  <div className="w-28 text-gray-600">Contact No.</div>
+                  <div className="text-gray-600">:</div>
+                  <div className="font-semibold text-gray-900">{patientPhone ?? '—'}</div>
+                </div>
+
+                <div className="flex gap-3">
+                  <div className="w-28 text-gray-600">Age/Sex</div>
+                  <div className="text-gray-600">:</div>
+                  <div className="font-semibold text-gray-900">{ageSex}</div>
+                </div>
+              </div>
+
+              <div className="space-y-1 text-[11px] text-gray-800">
+                <div className="flex gap-3">
+                  <div className="w-28 text-gray-600">Regd. Date</div>
+                  <div className="text-gray-600">:</div>
+                  <div className="font-semibold text-gray-900">
+                    {visitDateLabel?.replace('Visit:', '').trim() || '—'}
                   </div>
                 </div>
 
-                <div className="space-y-1 text-[11px] text-gray-800">
-                  <div className="flex gap-3">
-                    <div className="w-28 text-gray-600">Regd. Date</div>
-                    <div className="text-gray-600">:</div>
-                    <div className="font-semibold text-gray-900">
-                      {visitDateLabel?.replace('Visit:', '').trim() || '—'}
-                    </div>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="w-28 text-gray-600">SD. ID</div>
-                    <div className="text-gray-600">:</div>
-                    <div className="font-semibold text-gray-900">—</div>
-                  </div>
-                  <div className="flex gap-3">
-                    <div className="w-28 text-gray-600">OPD. No</div>
-                    <div className="text-gray-600">:</div>
-                    <div className="font-semibold text-gray-900">—</div>
-                  </div>
+                <div className="flex gap-3">
+                  <div className="w-28 text-gray-600">SD. ID</div>
+                  <div className="text-gray-600">:</div>
+                  <div className="font-semibold text-gray-900">{sdId ?? '—'}</div>
+                </div>
+
+                <div className="flex gap-3">
+                  <div className="w-28 text-gray-600">OPD. No</div>
+                  <div className="text-gray-600">:</div>
+                  <div className="font-semibold text-gray-900">{opdNo ?? '—'}</div>
                 </div>
               </div>
             </div>

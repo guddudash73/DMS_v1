@@ -1,3 +1,4 @@
+// apps/api/src/routes/visits.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
@@ -5,13 +6,13 @@ import {
   VisitStatusUpdate,
   VisitId,
   VisitQueueQuery,
-  FollowUpUpsert,
-  FollowUpStatusUpdate,
   UserId,
   XrayId,
   XrayContentType,
   RxLine,
   BillingCheckoutInput,
+  FollowUpUpsert,
+  FollowUpStatusUpdate,
 } from '@dms/types';
 import { v4 as randomUUID } from 'uuid';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
@@ -38,9 +39,6 @@ import { logAudit, logError } from '../lib/logger';
 import { sendZodValidationError } from '../lib/validation';
 import { generateXrayThumbnail } from '../services/xrayThumbnails';
 import { publishDoctorQueueUpdated } from '../realtime/publisher';
-import { GetCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
-import { DynamoDBDocumentClient } from '@aws-sdk/lib-dynamodb';
-import { dynamoClient, TABLE_NAME } from '../config/aws';
 
 const router = express.Router();
 
@@ -81,6 +79,23 @@ export class PrescriptionStorageError extends Error {
   }
 }
 
+/**
+ * ✅ Follow-ups (multi)
+ * We support multiple followups per visit.
+ *
+ * Contract:
+ * - POST   /visits/:visitId/followups               => create a new followup for a visit
+ * - GET    /visits/:visitId/followups               => list followups for a visit
+ * - PATCH  /visits/:visitId/followups/:followupId/status => update status for one followup
+ *
+ * NOTE: The legacy single-followup endpoints are removed:
+ * - GET/PUT /visits/:visitId/followup
+ * - PATCH   /visits/:visitId/followup/status
+ *
+ * Update clients to use the new routes.
+ */
+const FollowupId = z.string().min(1);
+
 router.post(
   '/',
   asyncHandler(async (req, res) => {
@@ -108,7 +123,6 @@ router.post(
     const tokenNumber = idx >= 0 ? idx + 1 : Math.max(1, queue.length);
 
     const tokenPrint = {
-      // clinicName/phone can be added later from config
       tokenNumber,
       visitId: visit.visitId,
       patientName: patient?.name ?? '—',
@@ -271,59 +285,63 @@ router.patch(
   }),
 );
 
+/**
+ * ✅ Followups (multi) under /visits
+ */
 router.get(
-  '/:visitId/followup',
+  '/:visitId/followups',
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
-    if (!id.success) {
-      return handleValidationError(req, res, id.error.issues);
-    }
+    if (!id.success) return handleValidationError(req, res, id.error.issues);
 
-    const followup = await followupRepository.getByVisitId(id.data);
-    if (!followup) {
-      return res.status(404).json({
-        error: 'NOT_FOUND',
-        message: 'Follow-up not found',
+    try {
+      // expected repo method for multi-followups
+      const items = await (followupRepository as any).listByVisitId(id.data);
+      return res.status(200).json({ items: items ?? [] });
+    } catch (err) {
+      logError('visit_followups_list_failed', {
+        visitId: id.data,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return res.status(500).json({
+        error: 'VISIT_FOLLOWUPS_LIST_FAILED',
+        message: 'Unable to load followups for this visit',
         traceId: req.requestId,
       });
     }
-
-    return res.status(200).json(followup);
   }),
 );
 
-router.put(
-  '/:visitId/followup',
+router.post(
+  '/:visitId/followups',
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
-    if (!id.success) {
-      return handleValidationError(req, res, id.error.issues);
-    }
+    if (!id.success) return handleValidationError(req, res, id.error.issues);
 
     const parsedBody = FollowUpUpsert.safeParse(req.body);
-    if (!parsedBody.success) {
-      return handleValidationError(req, res, parsedBody.error.issues);
-    }
+    if (!parsedBody.success) return handleValidationError(req, res, parsedBody.error.issues);
 
     try {
-      const followup = await followupRepository.upsertForVisit(id.data, parsedBody.data);
+      // expected repo method for multi-followups
+      const created = await (followupRepository as any).createForVisit(id.data, parsedBody.data);
 
       if (req.auth) {
         logAudit({
           actorUserId: req.auth.userId,
-          action: 'FOLLOWUP_UPSERT',
+          action: 'FOLLOWUP_CREATE',
           entity: {
             type: 'VISIT',
             id: id.data,
           },
           meta: {
-            followUpDate: followup.followUpDate,
-            status: followup.status,
+            followUpDate: created.followUpDate,
+            status: created.status,
+            followupId: created.followupId,
           },
         });
       }
 
-      return res.status(200).json(followup);
+      return res.status(201).json(created);
     } catch (err) {
       if (err instanceof FollowUpRuleViolationError) {
         return res.status(400).json({
@@ -338,19 +356,23 @@ router.put(
 );
 
 router.patch(
-  '/:visitId/followup/status',
+  '/:visitId/followups/:followupId/status',
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
-    if (!id.success) {
-      return handleValidationError(req, res, id.error.issues);
-    }
+    if (!id.success) return handleValidationError(req, res, id.error.issues);
+
+    const fuId = FollowupId.safeParse(req.params.followupId);
+    if (!fuId.success) return handleValidationError(req, res, fuId.error.issues);
 
     const parsedBody = FollowUpStatusUpdate.safeParse(req.body);
-    if (!parsedBody.success) {
-      return handleValidationError(req, res, parsedBody.error.issues);
-    }
+    if (!parsedBody.success) return handleValidationError(req, res, parsedBody.error.issues);
 
-    const updated = await followupRepository.updateStatus(id.data, parsedBody.data);
+    const updated = await (followupRepository as any).updateStatus({
+      visitId: id.data,
+      followupId: fuId.data,
+      input: parsedBody.data,
+    });
+
     if (!updated) {
       return res.status(404).json({
         error: 'NOT_FOUND',
@@ -369,6 +391,7 @@ router.patch(
         },
         meta: {
           status: updated.status,
+          followupId: updated.followupId,
         },
       });
     }
@@ -784,7 +807,6 @@ router.post(
       });
     }
 
-    // start from current rx if exists, else allow blank? (safe default: require existing)
     const current = await prescriptionRepository.getCurrentForVisit(visit.visitId);
     if (!current) {
       return res.status(409).json({
@@ -794,7 +816,6 @@ router.post(
       });
     }
 
-    // copy existing lines into new version (doctor can edit afterwards)
     const now = Date.now();
     const jsonKey = `rx/${visit.visitId}/${randomUUID()}.json`;
 
@@ -821,7 +842,7 @@ router.post(
     } catch (err) {
       logError('rx_revision_s3_put_failed', {
         reqId: req.requestId,
-        visitId: visit.visitId,
+        visitId: req.params.visitId,
         error:
           err instanceof Error
             ? { name: err.name, message: err.message }

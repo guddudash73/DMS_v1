@@ -1,6 +1,13 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
-import { PrescriptionPresetSearchQuery } from '@dms/types';
+import {
+  PrescriptionPresetSearchQuery,
+  CreateRxPresetRequest,
+  UpdateRxPresetRequest,
+  PrescriptionPresetId,
+  type PrescriptionPresetScope,
+  type Role,
+} from '@dms/types';
 import { prescriptionPresetRepository } from '../repositories/prescriptionPresetRepository';
 import { sendZodValidationError } from '../lib/validation';
 
@@ -15,6 +22,15 @@ const asyncHandler =
   (req: Request, res: Response, next: NextFunction) =>
     void fn(req, res, next).catch(next);
 
+// ✅ Correct: your auth middleware attaches req.auth
+function requireUser(req: Request): { userId: string; role?: string } {
+  const u = (req as any).auth as { userId?: string; role?: string } | undefined;
+  if (!u?.userId) {
+    throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });
+  }
+  return { userId: u.userId, role: u.role };
+}
+
 const buildPresetSearchFromRequest = (req: Request): PrescriptionPresetSearchQuery => {
   const query =
     typeof req.query.query === 'string' && req.query.query.trim().length > 0
@@ -24,18 +40,22 @@ const buildPresetSearchFromRequest = (req: Request): PrescriptionPresetSearchQue
   const limitRaw = req.query.limit;
   const limit = typeof limitRaw === 'string' && limitRaw.length > 0 ? Number(limitRaw) : undefined;
 
+  const filter =
+    typeof req.query.filter === 'string' && req.query.filter.trim().length > 0
+      ? req.query.filter
+      : undefined;
+
   const parsed = PrescriptionPresetSearchQuery.safeParse({
     query,
     limit,
+    filter,
   });
 
-  if (!parsed.success) {
-    throw parsed.error;
-  }
-
+  if (!parsed.success) throw parsed.error;
   return parsed.data;
 };
 
+// ✅ list/search (doctor-facing)
 router.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -43,17 +63,152 @@ router.get(
     try {
       search = buildPresetSearchFromRequest(req);
     } catch (err) {
-      if (err instanceof z.ZodError) {
-        return handleValidationError(req, res, err.issues);
-      }
+      if (err instanceof z.ZodError) return handleValidationError(req, res, err.issues);
       throw err;
     }
 
-    const presets = await prescriptionPresetRepository.search(search);
+    const user = requireUser(req);
 
-    return res.status(200).json({
-      items: presets,
+    // repository enforces visibility now (no leaking PRIVATE presets)
+    const presets = await prescriptionPresetRepository.search(search, user);
+
+    return res.status(200).json({ items: presets });
+  }),
+);
+
+// ✅ get by id (doctor edit page)
+router.get(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const user = requireUser(req);
+
+    const parsedId = PrescriptionPresetId.safeParse(req.params.id);
+    if (!parsedId.success) return handleValidationError(req, res, parsedId.error.issues);
+
+    const preset = await prescriptionPresetRepository.getById(parsedId.data);
+    if (!preset) return res.status(404).json({ error: 'NOT_FOUND', message: 'Preset not found.' });
+
+    // ✅ access control:
+    // - ADMIN can read all
+    // - non-admin can read: ADMIN, PUBLIC, and their own PRIVATE
+    if (user.role !== 'ADMIN') {
+      const isOwner = preset.createdByUserId === user.userId;
+      const isVisible = preset.scope === 'ADMIN' || preset.scope === 'PUBLIC' || isOwner;
+      if (!isVisible) return res.status(403).json({ error: 'FORBIDDEN', message: 'Forbidden.' });
+    }
+
+    return res.status(200).json(preset);
+  }),
+);
+
+// ✅ create (doctor/admin)
+router.post(
+  '/',
+  asyncHandler(async (req, res) => {
+    const user = requireUser(req);
+
+    // extra hardening (server mounts requireRole incl RECEPTION)
+    if (user.role === 'RECEPTION') {
+      return res
+        .status(403)
+        .json({ error: 'FORBIDDEN', message: 'Reception cannot create presets.' });
+    }
+
+    const parsed = CreateRxPresetRequest.safeParse(req.body);
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
+
+    const desiredScope: PrescriptionPresetScope = parsed.data.scope ?? 'PRIVATE';
+
+    // ✅ only ADMIN can create ADMIN-scoped presets via this route
+    if (desiredScope === 'ADMIN' && user.role !== 'ADMIN') {
+      return res
+        .status(403)
+        .json({ error: 'FORBIDDEN', message: 'Only admin can create admin presets.' });
+    }
+
+    const preset = await prescriptionPresetRepository.create({
+      name: parsed.data.name,
+      lines: parsed.data.lines,
+      tags: parsed.data.tags,
+      createdByUserId: user.userId,
+      scope: desiredScope,
     });
+
+    return res.status(201).json(preset);
+  }),
+);
+
+// ✅ update (doctor: only own presets unless ADMIN)
+router.patch(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const user = requireUser(req);
+
+    if (user.role === 'RECEPTION') {
+      return res
+        .status(403)
+        .json({ error: 'FORBIDDEN', message: 'Reception cannot edit presets.' });
+    }
+
+    const parsedId = PrescriptionPresetId.safeParse(req.params.id);
+    if (!parsedId.success) return handleValidationError(req, res, parsedId.error.issues);
+
+    const parsedPatch = UpdateRxPresetRequest.safeParse(req.body);
+    if (!parsedPatch.success) return handleValidationError(req, res, parsedPatch.error.issues);
+
+    const existing = await prescriptionPresetRepository.getById(parsedId.data);
+    if (!existing)
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Preset not found.' });
+
+    const isOwner = existing.createdByUserId === user.userId;
+    if (user.role !== 'ADMIN' && !isOwner) {
+      return res
+        .status(403)
+        .json({ error: 'FORBIDDEN', message: 'You can only edit your own presets.' });
+    }
+
+    // ✅ scope hardening
+    if (parsedPatch.data.scope === 'ADMIN' && user.role !== 'ADMIN') {
+      return res
+        .status(403)
+        .json({ error: 'FORBIDDEN', message: 'Only admin can set ADMIN scope.' });
+    }
+
+    const updated = await prescriptionPresetRepository.update(parsedId.data, parsedPatch.data);
+    if (!updated) return res.status(404).json({ error: 'NOT_FOUND', message: 'Preset not found.' });
+
+    return res.status(200).json(updated);
+  }),
+);
+
+// ✅ delete (doctor: only own presets unless ADMIN)
+router.delete(
+  '/:id',
+  asyncHandler(async (req, res) => {
+    const user = requireUser(req);
+
+    if (user.role === 'RECEPTION') {
+      return res
+        .status(403)
+        .json({ error: 'FORBIDDEN', message: 'Reception cannot delete presets.' });
+    }
+
+    const parsedId = PrescriptionPresetId.safeParse(req.params.id);
+    if (!parsedId.success) return handleValidationError(req, res, parsedId.error.issues);
+
+    const existing = await prescriptionPresetRepository.getById(parsedId.data);
+    if (!existing)
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Preset not found.' });
+
+    const isOwner = existing.createdByUserId === user.userId;
+    if (user.role !== 'ADMIN' && !isOwner) {
+      return res
+        .status(403)
+        .json({ error: 'FORBIDDEN', message: 'You can only delete your own presets.' });
+    }
+
+    await prescriptionPresetRepository.delete(parsedId.data);
+    return res.status(200).json({ ok: true });
   }),
 );
 

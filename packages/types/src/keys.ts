@@ -22,5 +22,6 @@ export const key = {
     `STATUS#${status}#TS#${ts}`,
 
   gsi3PK_date: (dateISO: string) => `DATE#${dateISO}`,
-  gsi3SK_typeId: (type: 'VISIT' | 'XRAY' | 'RX', id: string) => `TYPE#${type}#ID#${id}`,
+  gsi3SK_typeId: (type: 'VISIT' | 'XRAY' | 'RX' | 'FOLLOWUP', id: string) =>
+    `TYPE#${type}#ID#${id}`,
 } as const;

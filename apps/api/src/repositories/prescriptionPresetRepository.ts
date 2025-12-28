@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
+  DeleteCommand,
   GetCommand,
   PutCommand,
   QueryCommand,
@@ -8,16 +9,17 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 import type {
+  AdminRxPresetSearchQuery,
   PrescriptionPreset,
   PrescriptionPresetId,
   PrescriptionPresetSearchQuery,
   RxLineType,
+  PrescriptionPresetScope,
+  RxPresetFilter,
 } from '@dms/types';
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
-  marshallOptions: {
-    removeUndefinedValues: true,
-  },
+  marshallOptions: { removeUndefinedValues: true },
 });
 
 const buildRxPresetKey = (id: string) => ({
@@ -38,34 +40,107 @@ const normalizePresetName = (name: string): string =>
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, '');
 
+const encodeCursor = (key: Record<string, unknown> | undefined): string | null => {
+  if (!key) return null;
+  return Buffer.from(JSON.stringify(key), 'utf8').toString('base64');
+};
+
+const decodeCursor = (cursor: string | undefined): Record<string, unknown> | undefined => {
+  if (!cursor) return undefined;
+  try {
+    const raw = Buffer.from(cursor, 'base64').toString('utf8');
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+};
+
 export interface PrescriptionPresetRepository {
-  search(params: PrescriptionPresetSearchQuery): Promise<PrescriptionPreset[]>;
+  search(
+    params: PrescriptionPresetSearchQuery,
+    ctx: { userId: string; role?: string },
+  ): Promise<PrescriptionPreset[]>;
+  searchAdmin(
+    params: AdminRxPresetSearchQuery,
+  ): Promise<{ items: PrescriptionPreset[]; total: number; nextCursor: string | null }>;
+
   create(input: {
     name: string;
     lines: RxLineType[];
     tags?: string[];
     createdByUserId: string;
+    scope: PrescriptionPresetScope;
   }): Promise<PrescriptionPreset>;
+
   update(
     id: PrescriptionPresetId,
-    patch: { name?: string; lines?: RxLineType[]; tags?: string[] },
+    patch: {
+      name?: string;
+      lines?: RxLineType[];
+      tags?: string[];
+      scope?: PrescriptionPresetScope;
+    },
   ): Promise<PrescriptionPreset | null>;
+
   getById(id: PrescriptionPresetId): Promise<PrescriptionPreset | null>;
+  delete(id: PrescriptionPresetId): Promise<boolean>;
 }
 
 export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetRepository {
-  async search(params: PrescriptionPresetSearchQuery): Promise<PrescriptionPreset[]> {
+  async search(
+    params: PrescriptionPresetSearchQuery,
+    ctx: { userId: string; role?: string },
+  ): Promise<PrescriptionPreset[]> {
     const { query, limit } = params;
+    const filter: RxPresetFilter = (params.filter ?? 'ALL') as RxPresetFilter;
+
     const normalizedQuery = query && query.trim().length > 0 ? normalizePresetName(query) : '';
 
     let keyCondition = 'GSI1PK = :pk';
-    const exprValues: Record<string, unknown> = {
-      ':pk': 'RX_PRESET',
-    };
+    const exprValues: Record<string, unknown> = { ':pk': 'RX_PRESET' };
+    const exprNames: Record<string, string> = {};
+    const filterParts: string[] = [];
 
     if (normalizedQuery) {
       keyCondition += ' AND begins_with(GSI1SK, :skPrefix)';
       exprValues[':skPrefix'] = `NAME#${normalizedQuery}`;
+    }
+
+    const isAdmin = ctx.role === 'ADMIN';
+
+    // ✅ Visibility rules:
+    // - ADMIN: can see all (unless filter narrows it)
+    // - non-admin: can see ADMIN or PUBLIC, plus their own PRIVATE
+    //
+    // Implemented via FilterExpression:
+    //   (scope <> 'PRIVATE') OR (createdByUserId = :me)
+    if (!isAdmin) {
+      exprNames['#scope'] = 'scope';
+      exprNames['#createdByUserId'] = 'createdByUserId';
+      exprValues[':privateScope'] = 'PRIVATE';
+      exprValues[':me'] = ctx.userId;
+      filterParts.push('(#scope <> :privateScope OR #createdByUserId = :me)');
+    }
+
+    // ✅ Apply explicit doctor-facing filter dropdown
+    if (filter === 'MINE') {
+      exprNames['#createdByUserId'] = 'createdByUserId';
+      exprValues[':me'] = ctx.userId;
+      filterParts.push('#createdByUserId = :me');
+    }
+
+    if (filter === 'ADMIN') {
+      exprNames['#scope'] = 'scope';
+      exprValues[':adminScope'] = 'ADMIN';
+      filterParts.push('#scope = :adminScope');
+    }
+
+    if (filter === 'PUBLIC') {
+      exprNames['#scope'] = 'scope';
+      exprValues[':publicScope'] = 'PUBLIC';
+      filterParts.push('#scope = :publicScope');
     }
 
     const { Items } = await docClient.send(
@@ -74,6 +149,8 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
         IndexName: 'GSI1',
         KeyConditionExpression: keyCondition,
         ExpressionAttributeValues: exprValues,
+        ...(Object.keys(exprNames).length ? { ExpressionAttributeNames: exprNames } : {}),
+        ...(filterParts.length ? { FilterExpression: filterParts.join(' AND ') } : {}),
         ScanIndexForward: true,
         Limit: limit,
       }),
@@ -82,11 +159,65 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
     return (Items ?? []) as PrescriptionPreset[];
   }
 
+  async searchAdmin(
+    params: AdminRxPresetSearchQuery,
+  ): Promise<{ items: PrescriptionPreset[]; total: number; nextCursor: string | null }> {
+    const { query, limit } = params;
+    const normalizedQuery = query && query.trim().length > 0 ? normalizePresetName(query) : '';
+
+    let keyCondition = 'GSI1PK = :pk';
+    const exprValues: Record<string, unknown> = { ':pk': 'RX_PRESET' };
+
+    if (normalizedQuery) {
+      keyCondition += ' AND begins_with(GSI1SK, :skPrefix)';
+      exprValues[':skPrefix'] = `NAME#${normalizedQuery}`;
+    }
+
+    // ✅ total count
+    let total = 0;
+    let countKey: Record<string, unknown> | undefined = undefined;
+
+    for (;;) {
+      const resp = await docClient.send(
+        new QueryCommand({
+          TableName: TABLE_NAME,
+          IndexName: 'GSI1',
+          KeyConditionExpression: keyCondition,
+          ExpressionAttributeValues: exprValues,
+          Select: 'COUNT',
+          ExclusiveStartKey: countKey,
+        }),
+      );
+      total += resp.Count ?? 0;
+      if (!resp.LastEvaluatedKey) break;
+      countKey = resp.LastEvaluatedKey as any;
+    }
+
+    const { Items, LastEvaluatedKey } = await docClient.send(
+      new QueryCommand({
+        TableName: TABLE_NAME,
+        IndexName: 'GSI1',
+        KeyConditionExpression: keyCondition,
+        ExpressionAttributeValues: exprValues,
+        ScanIndexForward: true,
+        Limit: limit,
+        ExclusiveStartKey: decodeCursor(params.cursor),
+      }),
+    );
+
+    return {
+      items: (Items ?? []) as PrescriptionPreset[],
+      total,
+      nextCursor: encodeCursor(LastEvaluatedKey as any),
+    };
+  }
+
   async create(input: {
     name: string;
     lines: RxLineType[];
     tags?: string[];
     createdByUserId: string;
+    scope: PrescriptionPresetScope;
   }): Promise<PrescriptionPreset> {
     const now = Date.now();
     const id = randomUUID();
@@ -97,8 +228,10 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
       name: input.name,
       lines: input.lines,
       tags: input.tags,
+      scope: input.scope,
       createdByUserId: input.createdByUserId,
       createdAt: now,
+      updatedAt: now,
     };
 
     const item = {
@@ -121,7 +254,12 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
 
   async update(
     id: PrescriptionPresetId,
-    patch: { name?: string; lines?: RxLineType[]; tags?: string[] },
+    patch: {
+      name?: string;
+      lines?: RxLineType[];
+      tags?: string[];
+      scope?: PrescriptionPresetScope;
+    },
   ): Promise<PrescriptionPreset | null> {
     const existing = await this.getById(id);
     if (!existing) return null;
@@ -138,6 +276,7 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
       names['#name'] = 'name';
       values[':name'] = patch.name;
       setParts.push('#name = :name');
+
       const normalizedName = normalizePresetName(patch.name);
       names['#GSI1PK'] = 'GSI1PK';
       names['#GSI1SK'] = 'GSI1SK';
@@ -156,6 +295,12 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
       names['#tags'] = 'tags';
       values[':tags'] = patch.tags;
       setParts.push('#tags = :tags');
+    }
+
+    if (patch.scope) {
+      names['#scope'] = 'scope';
+      values[':scope'] = patch.scope;
+      setParts.push('#scope = :scope');
     }
 
     const { Attributes } = await docClient.send(
@@ -183,8 +328,23 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
       }),
     );
 
-    if (!Item || Item.entityType !== 'RX_PRESET') return null;
+    if (!Item || (Item as any).entityType !== 'RX_PRESET') return null;
     return Item as PrescriptionPreset;
+  }
+
+  async delete(id: PrescriptionPresetId): Promise<boolean> {
+    const existing = await this.getById(id);
+    if (!existing) return false;
+
+    await docClient.send(
+      new DeleteCommand({
+        TableName: TABLE_NAME,
+        Key: buildRxPresetKey(id),
+        ConditionExpression: 'attribute_exists(PK)',
+      }),
+    );
+
+    return true;
   }
 }
 

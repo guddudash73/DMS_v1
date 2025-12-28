@@ -1,6 +1,7 @@
+// packages/types/src/user.ts
 import { z } from 'zod';
 
-export const Role = z.enum(['RECEPTION', 'DOCTOR', 'ADMIN']);
+export const Role = z.enum(['RECEPTION', 'DOCTOR', 'ADMIN', 'VIEWER']);
 export type Role = z.infer<typeof Role>;
 
 export const UserId = z.string().min(1);
@@ -11,6 +12,7 @@ export const User = z.object({
   email: z.email(),
   displayName: z.string().min(1),
   role: Role,
+  active: z.boolean(), // ✅ NEW
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 });
@@ -56,6 +58,26 @@ export const AdminDoctorListItem = DoctorProfile.extend({
   displayName: z.string().min(1),
 });
 export type AdminDoctorListItem = z.infer<typeof AdminDoctorListItem>;
+
+/** ✅ NEW: Admin user management schemas */
+export const AdminCreateUserRequest = z.object({
+  email: z.email(),
+  displayName: z.string().min(1),
+  password: z.string().min(8).max(128),
+  role: Role.refine((r) => r !== 'DOCTOR', { message: 'Use admin-doctors to create doctors' }),
+  active: z.boolean().optional(), // default true on backend
+});
+export type AdminCreateUserRequest = z.infer<typeof AdminCreateUserRequest>;
+
+export const AdminUpdateUserRequest = z.object({
+  displayName: z.string().min(1).optional(),
+  role: Role.optional(),
+  active: z.boolean().optional(),
+});
+export type AdminUpdateUserRequest = z.infer<typeof AdminUpdateUserRequest>;
+
+export const AdminUserListItem = User;
+export type AdminUserListItem = z.infer<typeof AdminUserListItem>;
 
 export const DashboardPreferences = z.object({
   selectedDoctorIds: z.array(DoctorId).max(3),

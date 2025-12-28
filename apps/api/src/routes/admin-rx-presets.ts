@@ -1,11 +1,65 @@
 import { Router } from 'express';
+import { z } from 'zod';
 import { validate } from '../middlewares/zod';
-import { AdminCreateRxPresetRequest, AdminUpdateRxPresetRequest } from '@dms/types';
+import {
+  AdminCreateRxPresetRequest,
+  AdminRxPresetSearchQuery,
+  AdminUpdateRxPresetRequest,
+  type AdminRxPresetListResponse,
+} from '@dms/types';
 import type { PrescriptionPresetId, RxLineType } from '@dms/types';
 import { prescriptionPresetRepository } from '../repositories/prescriptionPresetRepository';
 import { logAudit } from '../lib/logger';
+import { sendZodValidationError } from '../lib/validation';
 
 const r = Router();
+
+const handleValidationError = (req: any, res: any, issues: z.ZodError['issues']) => {
+  return sendZodValidationError(req, res, issues);
+};
+
+const buildAdminSearchFromRequest = (req: any) => {
+  const query =
+    typeof req.query.query === 'string' && req.query.query.trim().length > 0
+      ? req.query.query
+      : undefined;
+
+  const limitRaw = req.query.limit;
+  const limit = typeof limitRaw === 'string' && limitRaw.length > 0 ? Number(limitRaw) : undefined;
+
+  const cursor =
+    typeof req.query.cursor === 'string' && req.query.cursor.trim().length > 0
+      ? req.query.cursor
+      : undefined;
+
+  const parsed = AdminRxPresetSearchQuery.safeParse({ query, limit, cursor });
+  if (!parsed.success) throw parsed.error;
+  return parsed.data;
+};
+
+r.get('/', async (req, res, next) => {
+  try {
+    let search: z.infer<typeof AdminRxPresetSearchQuery>;
+    try {
+      search = buildAdminSearchFromRequest(req);
+    } catch (err) {
+      if (err instanceof z.ZodError) return handleValidationError(req, res, err.issues);
+      throw err;
+    }
+
+    const out = await prescriptionPresetRepository.searchAdmin(search);
+
+    const payload: AdminRxPresetListResponse = {
+      items: out.items,
+      total: out.total,
+      nextCursor: out.nextCursor,
+    };
+
+    return res.status(200).json(payload);
+  } catch (err) {
+    return next(err);
+  }
+});
 
 r.post('/', validate(AdminCreateRxPresetRequest), async (req, res, next) => {
   try {
@@ -13,22 +67,13 @@ r.post('/', validate(AdminCreateRxPresetRequest), async (req, res, next) => {
 
     const createdByUserId = req.auth?.userId ?? 'ADMIN';
 
-    const createParams: {
-      name: string;
-      lines: RxLineType[];
-      tags?: string[];
-      createdByUserId: string;
-    } = {
+    const created = await prescriptionPresetRepository.create({
       name: input.name,
       lines: input.lines,
+      tags: input.tags,
       createdByUserId,
-    };
-
-    if (input.tags !== undefined) {
-      createParams.tags = input.tags;
-    }
-
-    const created = await prescriptionPresetRepository.create(createParams);
+      scope: 'ADMIN', // ✅ IMPORTANT
+    });
 
     if (req.auth) {
       logAudit({
@@ -101,6 +146,66 @@ r.patch('/:id', validate(AdminUpdateRxPresetRequest), async (req, res, next) => 
     }
 
     return res.status(200).json(updated);
+  } catch (err) {
+    return next(err);
+  }
+});
+
+r.delete('/:id', async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    if (!id) {
+      return res.status(400).json({
+        error: 'INVALID_RX_PRESET_ID',
+        message: 'Rx preset id is required',
+        traceId: req.requestId,
+      });
+    }
+
+    const ok = await prescriptionPresetRepository.delete(id as PrescriptionPresetId);
+    if (!ok) {
+      return res.status(404).json({
+        error: 'RX_PRESET_NOT_FOUND',
+        message: 'Rx preset not found',
+        traceId: req.requestId,
+      });
+    }
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'ADMIN_DELETE_RX_PRESET',
+        entity: { type: 'RX_PRESET', id },
+      });
+    }
+
+    return res.status(200).json({ ok: true });
+  } catch (err) {
+    return next(err);
+  }
+});
+
+r.get('/:id', async (req, res, next) => {
+  try {
+    const id = req.params.id;
+    if (!id) {
+      return res.status(400).json({
+        error: 'INVALID_RX_PRESET_ID',
+        message: 'Rx preset id is required',
+        traceId: req.requestId,
+      });
+    }
+
+    const preset = await prescriptionPresetRepository.getById(id as PrescriptionPresetId);
+    if (!preset) {
+      return res.status(404).json({
+        error: 'RX_PRESET_NOT_FOUND',
+        message: 'Rx preset not found',
+        traceId: req.requestId,
+      });
+    }
+
+    return res.status(200).json(preset);
   } catch (err) {
     return next(err);
   }

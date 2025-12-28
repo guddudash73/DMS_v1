@@ -1,3 +1,4 @@
+// apps/api/src/repositories/userRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
@@ -6,6 +7,7 @@ import {
   UpdateCommand,
   ScanCommand,
   TransactWriteCommand,
+  DeleteCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 import type { Role, User, DoctorProfile } from '@dms/types';
@@ -38,12 +40,15 @@ export interface UserRecord extends User {
 export interface UserRepository {
   getById(userId: string): Promise<UserRecord | null>;
   getByEmail(email: string): Promise<UserRecord | null>;
+
   createUser(params: {
     email: string;
     displayName: string;
     passwordHash: string;
     role: Role;
+    active?: boolean;
   }): Promise<UserRecord>;
+
   recordFailedLogin(
     userId: string,
     maxAttempts: number,
@@ -51,6 +56,16 @@ export interface UserRepository {
   ): Promise<UserRecord | null>;
   clearFailedLogins(userId: string): Promise<void>;
 
+  // ✅ Admin users
+  listUsers(): Promise<UserRecord[]>;
+  updateUser(
+    userId: string,
+    patch: Partial<Pick<User, 'displayName' | 'role' | 'active'>>,
+  ): Promise<UserRecord | null>;
+  setUserActive(userId: string, active: boolean): Promise<UserRecord | null>;
+  deleteUser(userId: string): Promise<{ ok: true }>;
+
+  // Doctors
   createDoctor(params: {
     email: string;
     displayName: string;
@@ -60,6 +75,7 @@ export interface UserRepository {
     specialization: string;
     contact?: string;
   }): Promise<{ user: UserRecord; doctor: DoctorProfile }>;
+
   listDoctors(): Promise<Array<DoctorProfile & { email: string; displayName: string }>>;
   updateDoctorProfile(
     doctorId: string,
@@ -96,6 +112,7 @@ export class DynamoDBUserRepository implements UserRepository {
     displayName: string;
     passwordHash: string;
     role: Role;
+    active?: boolean;
   }): Promise<UserRecord> {
     const { email, displayName, passwordHash, role } = params;
     const userId = randomUUID();
@@ -106,6 +123,7 @@ export class DynamoDBUserRepository implements UserRepository {
       email,
       displayName,
       role,
+      active: params.active ?? true, // ✅ NEW
       createdAt: now,
       updatedAt: now,
       passwordHash,
@@ -147,6 +165,107 @@ export class DynamoDBUserRepository implements UserRepository {
     );
 
     return user;
+  }
+
+  async listUsers(): Promise<UserRecord[]> {
+    const { Items } = await docClient.send(
+      new ScanCommand({
+        TableName: TABLE_NAME,
+        FilterExpression: '#entityType = :type',
+        ExpressionAttributeNames: { '#entityType': 'entityType' },
+        ExpressionAttributeValues: { ':type': 'USER' },
+      }),
+    );
+
+    return (Items ?? []) as UserRecord[];
+  }
+
+  async updateUser(
+    userId: string,
+    patch: Partial<Pick<User, 'displayName' | 'role' | 'active'>>,
+  ): Promise<UserRecord | null> {
+    const existing = await this.getById(userId);
+    if (!existing) return null;
+
+    const names: Record<string, string> = { '#updatedAt': 'updatedAt' };
+    const values: Record<string, unknown> = { ':updatedAt': Date.now() };
+    const setParts: string[] = ['#updatedAt = :updatedAt'];
+
+    const add = (field: keyof typeof patch & string) => {
+      const value = patch[field];
+      if (value === undefined) return;
+      const n = `#${field}`;
+      const v = `:${field}`;
+      names[n] = field;
+      values[v] = value;
+      setParts.push(`${n} = ${v}`);
+    };
+
+    add('displayName');
+    add('role');
+    add('active');
+
+    const { Attributes } = await docClient.send(
+      new UpdateCommand({
+        TableName: TABLE_NAME,
+        Key: buildUserKey(userId),
+        UpdateExpression: `SET ${setParts.join(', ')}`,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ConditionExpression: 'attribute_exists(PK)',
+        ReturnValues: 'ALL_NEW',
+      }),
+    );
+
+    if (!Attributes) return null;
+    return Attributes as UserRecord;
+  }
+
+  async setUserActive(userId: string, active: boolean): Promise<UserRecord | null> {
+    return this.updateUser(userId, { active });
+  }
+
+  async deleteUser(userId: string): Promise<{ ok: true }> {
+    const user = await this.getById(userId);
+    if (!user) return { ok: true };
+
+    // Remove both USER and USER_EMAIL_INDEX
+    await docClient.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Delete: {
+              TableName: TABLE_NAME,
+              Key: buildUserKey(userId),
+              ConditionExpression: 'attribute_exists(PK)',
+            },
+          },
+          {
+            Delete: {
+              TableName: TABLE_NAME,
+              Key: buildUserEmailIndexKey(user.email),
+              // No condition; safe delete.
+            },
+          },
+        ],
+      }),
+    );
+
+    // If doctor user: remove doctor profile too (best-effort)
+    if (user.role === 'DOCTOR') {
+      try {
+        await docClient.send(
+          new DeleteCommand({
+            TableName: TABLE_NAME,
+            Key: buildDoctorProfileKey(userId),
+          }),
+        );
+      } catch {
+        // ignore
+      }
+    }
+
+    return { ok: true };
   }
 
   async recordFailedLogin(
@@ -227,6 +346,7 @@ export class DynamoDBUserRepository implements UserRepository {
       displayName: params.displayName,
       passwordHash: params.passwordHash,
       role: 'DOCTOR',
+      active: true,
     });
 
     const now = Date.now();

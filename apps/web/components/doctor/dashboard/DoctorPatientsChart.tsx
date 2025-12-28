@@ -22,6 +22,7 @@ import {
 import { useAuth } from '@/src/hooks/useAuth';
 import { useGetDoctorDailyPatientSummarySeriesQuery } from '@/src/store/api';
 import { cn } from '@/lib/utils';
+import { clinicDateISO } from '@/src/lib/clinicTime';
 
 type TimeRange = '90d' | '30d' | '7d';
 
@@ -43,9 +44,8 @@ const chartConfig = {
   },
 } satisfies ChartConfig;
 
-function getDateRange(range: TimeRange): { startDate: string; endDate: string } {
+function getDateRange(range: TimeRange) {
   const end = new Date();
-  end.setHours(0, 0, 0, 0);
 
   let days = 90;
   if (range === '30d') days = 30;
@@ -54,11 +54,9 @@ function getDateRange(range: TimeRange): { startDate: string; endDate: string } 
   const start = new Date(end);
   start.setDate(start.getDate() - (days - 1));
 
-  const toIso = (d: Date) => d.toISOString().slice(0, 10);
-
   return {
-    startDate: toIso(start),
-    endDate: toIso(end),
+    startDate: clinicDateISO(start),
+    endDate: clinicDateISO(end),
   };
 }
 

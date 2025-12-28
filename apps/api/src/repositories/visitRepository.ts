@@ -1,5 +1,4 @@
 // apps/api/src/repositories/visitRepository.ts
-
 import { randomUUID } from 'node:crypto';
 import {
   ConditionalCheckFailedException,
@@ -14,6 +13,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 import type { Visit, VisitCreate, VisitStatus, VisitQueueQuery, VisitTag } from '@dms/types';
+import { clinicDateISOFromMs } from '../lib/date';
 
 export class InvalidStatusTransitionError extends Error {
   readonly code = 'INVALID_STATUS_TRANSITION' as const;
@@ -56,9 +56,12 @@ const buildDoctorDayLockKey = (doctorId: string, visitDate: string) => ({
   SK: 'IN_PROGRESS_LOCK',
 });
 
-const toDateString = (timestampMs: number): string => {
-  return new Date(timestampMs).toISOString().slice(0, 10);
-};
+/**
+ * ✅ IMPORTANT
+ * Never use toISOString().slice(0,10) for "clinic day".
+ * That is UTC and causes the midnight IST bug.
+ */
+const clinicDateKeyFromMs = (timestampMs: number): string => clinicDateISOFromMs(timestampMs);
 
 const buildGsi2keys = (doctorId: string, date: string, status: VisitStatus, ts: number) => ({
   GSI2PK: `DOCTOR#${doctorId}#DATE#${date}`,
@@ -70,6 +73,68 @@ const buildGsi3Keys = (date: string, visitId: string) => ({
   GSI3SK: `TYPE#VISIT#ID#${visitId}`,
 });
 
+// ----------------------------
+// ✅ OPD number counters
+// ----------------------------
+
+// Daily counter (all visits for date)
+const buildOpdDailyCounterKey = (visitDate: string) => ({
+  PK: `COUNTER#OPD#${visitDate}`,
+  SK: 'META',
+});
+
+// Per-tag counter (N/F/Z for date)
+const buildOpdTagCounterKey = (visitDate: string, tag: VisitTag) => ({
+  PK: `COUNTER#OPD_TAG#${visitDate}#${tag}`,
+  SK: 'META',
+});
+
+async function nextCounter(key: { PK: string; SK: string }): Promise<number> {
+  const { Attributes } = await docClient.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: key,
+      UpdateExpression: 'ADD #last :inc SET #updatedAt = :now',
+      ExpressionAttributeNames: {
+        '#last': 'last',
+        '#updatedAt': 'updatedAt',
+      },
+      ExpressionAttributeValues: {
+        ':inc': 1,
+        ':now': Date.now(),
+      },
+      ReturnValues: 'UPDATED_NEW',
+    }),
+  );
+
+  const last = (Attributes?.last as number | undefined) ?? 0;
+  return Number(last);
+}
+
+function tagLabel(tag: VisitTag | undefined): string {
+  // Default to SDNEW if tag missing
+  if (tag === 'F') return 'SDFOLLOWUP';
+  if (tag === 'Z') return 'SDZEROBILLED';
+  return 'SDNEW';
+}
+
+function formatOpdNo(
+  visitDate: string,
+  dailySeq: number,
+  tag: VisitTag | undefined,
+  tagSeq: number,
+) {
+  // yy/mm/dd/001/SDNEW/001
+  const yy = visitDate.slice(2, 4);
+  const mm = visitDate.slice(5, 7);
+  const dd = visitDate.slice(8, 10);
+
+  const a = String(dailySeq).padStart(3, '0');
+  const b = String(tagSeq).padStart(3, '0');
+
+  return `${yy}/${mm}/${dd}/${a}/${tagLabel(tag)}/${b}`;
+}
+
 export interface VisitRepository {
   create(input: VisitCreate): Promise<Visit>;
   getById(visitId: string): Promise<Visit | null>;
@@ -78,13 +143,6 @@ export interface VisitRepository {
   getDoctorQueue(params: VisitQueueQuery): Promise<Visit[]>;
   listByDate(date: string): Promise<Visit[]>;
 
-  /**
-   * Persist the “current” prescription pointer for a visit.
-   *
-   * - Updates VISIT meta item
-   * - Updates PATIENT visit item (recommended for list views)
-   * - Enforces monotonic version moves (won’t overwrite a newer pointer)
-   */
   setCurrentRxPointer(params: {
     visitId: string;
     patientId: string;
@@ -103,9 +161,18 @@ export class DynamoDBVisitRepository implements VisitRepository {
   async create(input: VisitCreate): Promise<Visit> {
     const now = Date.now();
     const visitId = randomUUID();
-    const visitDate = toDateString(now);
+
+    // ✅ clinic-local day key
+    const visitDate = clinicDateKeyFromMs(now);
+
     const status: VisitStatus = 'QUEUED';
     const tag: VisitTag | undefined = input.tag;
+
+    // ✅ OPD No uses clinic-local visitDate
+    const dailySeq = await nextCounter(buildOpdDailyCounterKey(visitDate));
+    const tagForCounter: VisitTag = tag ?? 'N';
+    const tagSeq = await nextCounter(buildOpdTagCounterKey(visitDate, tagForCounter));
+    const opdNo = formatOpdNo(visitDate, dailySeq, tagForCounter, tagSeq);
 
     const base: Visit = {
       visitId,
@@ -114,6 +181,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
       reason: input.reason,
       status,
       visitDate,
+      opdNo,
       createdAt: now,
       updatedAt: now,
       ...(tag ? { tag } : {}),
@@ -383,14 +451,15 @@ export class DynamoDBVisitRepository implements VisitRepository {
       }),
     );
 
-    const updated = await this.getById(visitId);
-    return updated;
+    return await this.getById(visitId);
   }
 
   async getDoctorQueue(params: VisitQueueQuery): Promise<Visit[]> {
     const { doctorId, date, status } = params;
-    const today = toDateString(Date.now());
-    const queryDate = date ?? today;
+
+    // ✅ default date MUST be clinic-local date key
+    const todayClinic = clinicDateKeyFromMs(Date.now());
+    const queryDate = date ?? todayClinic;
 
     let keyCondition = 'GSI2PK = :pk';
     const exprValues: Record<string, unknown> = {
@@ -445,7 +514,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
     const metaKey = buildVisitMetaKeys(params.visitId);
     const patientVisitKey = buildPatientVisitKeys(params.patientId, params.visitId);
 
-    // Monotonic pointer update: only move forward (or set if missing).
     const condition =
       'attribute_exists(PK) AND (attribute_not_exists(#currentRxVersion) OR :version >= #currentRxVersion)';
 
@@ -492,8 +560,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
         }),
       );
     } catch (err) {
-      // If the monotonic condition fails (newer pointer already set) this will cancel the transaction.
-      // Treat that case as a no-op.
       if (
         err instanceof TransactionCanceledException ||
         err instanceof ConditionalCheckFailedException

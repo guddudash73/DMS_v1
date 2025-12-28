@@ -1,3 +1,4 @@
+// apps/web/components/prescription/PrescriptionWorkspace.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -17,11 +18,15 @@ import {
   useStartVisitRxRevisionMutation,
   useUpdateRxByIdMutation,
   useGetPatientVisitsQuery,
+  useGetVisitByIdQuery,
+  useGetPatientByIdQuery,
+  useGetMeQuery,
 } from '@/src/store/api';
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
+import { RxPresetImportDialog } from './RxPresetImportDialog';
 
 import {
   Table,
@@ -37,25 +42,32 @@ import { PaginationControl } from '@/components/ui/pagination-control';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
+import { clinicDateISO } from '@/src/lib/clinicTime';
+import { clinicDateISOFromMs } from '@/src/lib/clinicTime';
+
+type PatientSex = 'M' | 'F' | 'O' | 'U';
 
 type Props = {
   visitId: string;
   patientId?: string;
   patientName?: string;
   patientPhone?: string;
+
+  patientSdId?: string;
+  opdNo?: string;
+
   doctorName?: string;
+
   visitDateLabel?: string;
   visitStatus?: 'QUEUED' | 'IN_PROGRESS' | 'DONE';
 
-  /** lets the top page button know when revision mode is active */
   onRevisionModeChange?: (enabled: boolean) => void;
 };
 
 function toISODate(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  return clinicDateISO(d);
 }
-
 function lineToText(line: RxLineType): string {
   const med = (line as any)?.medicineName ?? (line as any)?.medicine ?? 'Medicine';
   const dose = (line as any)?.dose ? `${(line as any).dose}` : '';
@@ -98,19 +110,108 @@ function MedicinesReadOnly({ lines }: { lines: RxLineType[] }) {
   );
 }
 
+function safeParseDate(input: unknown): Date | null {
+  if (!input) return null;
+  if (input instanceof Date) return Number.isFinite(input.getTime()) ? input : null;
+
+  if (typeof input === 'number') {
+    const d = new Date(input);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+
+  if (typeof input === 'string') {
+    const s = input.trim();
+    if (!s) return null;
+    const d = new Date(s);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+
+  return null;
+}
+
+function calcAgeYears(dob: Date, at: Date): number {
+  let age = at.getFullYear() - dob.getFullYear();
+  const m = at.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && at.getDate() < dob.getDate())) age -= 1;
+  return age < 0 ? 0 : age;
+}
+
+/** If doctorName looks like "Doctor (uuid)" or raw uuid, treat it as not-a-name. */
+function looksLikeDoctorIdLabel(name?: string) {
+  if (!name) return true;
+  const s = name.trim();
+  if (!s) return true;
+
+  if (/^Doctor\s*\(.+\)$/i.test(s)) return true;
+
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
+
+  return false;
+}
+
 /** ✅ Quick-look dialog for prescription */
 function VisitPrescriptionQuickLookDialog(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   visitId: string | null;
+
+  patientId?: string;
   patientName?: string;
   patientPhone?: string;
+
+  patientSdId?: string;
+  opdNo?: string;
+
   doctorName?: string;
+  doctorRegdLabel?: string;
 }) {
-  const { open, onOpenChange, visitId, patientName, patientPhone, doctorName } = props;
+  const {
+    open,
+    onOpenChange,
+    visitId,
+    patientId,
+    patientName,
+    patientPhone,
+    patientSdId,
+    opdNo,
+    doctorName,
+    doctorRegdLabel,
+  } = props;
 
   const rxQuery = useGetVisitRxQuery({ visitId: visitId ?? '' }, { skip: !open || !visitId });
   const lines = rxQuery.data?.rx?.lines ?? [];
+
+  const visitQuery = useGetVisitByIdQuery(visitId ?? '', { skip: !open || !visitId });
+  const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !open || !patientId });
+
+  const visitCreatedAtDate = useMemo(() => {
+    const createdAt = (visitQuery.data as any)?.createdAt;
+    return safeParseDate(createdAt);
+  }, [visitQuery.data]);
+
+  const visitDateLabelComputed = useMemo(() => {
+    const ms = visitCreatedAtDate?.getTime();
+    return ms ? `Visit: ${clinicDateISOFromMs(ms)}` : '';
+  }, [visitCreatedAtDate]);
+
+  const patientSex = useMemo(() => {
+    const p = patientQuery.data as any;
+    const s = (p?.sex ?? p?.gender ?? p?.patientSex ?? '').toString().trim().toUpperCase();
+    if (s === 'M' || s === 'F' || s === 'O' || s === 'U') return s as PatientSex;
+    if (s === 'MALE') return 'M';
+    if (s === 'FEMALE') return 'F';
+    if (s === 'OTHER') return 'O';
+    return undefined;
+  }, [patientQuery.data]);
+
+  const patientAge = useMemo(() => {
+    const p = patientQuery.data as any;
+    const dobRaw = p?.dob ?? p?.dateOfBirth ?? p?.birthDate ?? p?.dobIso ?? null;
+    const dob = safeParseDate(dobRaw);
+    const at = visitCreatedAtDate ?? new Date();
+    if (!dob) return undefined;
+    return calcAgeYears(dob, at);
+  }, [patientQuery.data, visitCreatedAtDate]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -128,8 +229,13 @@ function VisitPrescriptionQuickLookDialog(props: {
             <PrescriptionPreview
               patientName={patientName}
               patientPhone={patientPhone}
+              patientAge={patientAge}
+              patientSex={patientSex}
+              sdId={patientSdId}
+              opdNo={opdNo}
               doctorName={doctorName}
-              visitDateLabel={rxQuery.data?.rx?.visitId ? `Visit: ${rxQuery.data.rx.visitId}` : ''}
+              doctorRegdLabel={doctorRegdLabel}
+              visitDateLabel={visitDateLabelComputed}
               lines={lines}
             />
           )}
@@ -166,13 +272,73 @@ export function PrescriptionWorkspace(props: Props) {
     patientId,
     patientName,
     patientPhone,
+    patientSdId,
+    opdNo,
     doctorName,
-    visitDateLabel,
+    visitDateLabel: visitDateLabelFromParent,
     visitStatus,
     onRevisionModeChange,
   } = props;
 
   const router = useRouter();
+
+  // ✅ /me: doctor details
+  const meQuery = useGetMeQuery();
+
+  const doctorNameFromMe =
+    meQuery.data?.doctorProfile?.fullName ?? meQuery.data?.displayName ?? undefined;
+
+  const doctorRegdNoFromMe = meQuery.data?.doctorProfile?.registrationNumber;
+
+  // ✅ Doctor name with loading placeholder behavior
+  const resolvedDoctorName = useMemo(() => {
+    if (doctorName && !looksLikeDoctorIdLabel(doctorName)) return doctorName;
+    if (doctorNameFromMe && !looksLikeDoctorIdLabel(doctorNameFromMe)) return doctorNameFromMe;
+
+    if (meQuery.isLoading || meQuery.isFetching) return undefined;
+    return undefined;
+  }, [doctorName, doctorNameFromMe, meQuery.isLoading, meQuery.isFetching]);
+
+  // ✅ Doctor reg label with loading placeholder behavior
+  const resolvedDoctorRegdLabel = useMemo(() => {
+    if (doctorRegdNoFromMe) return `B.D.S Regd. - ${doctorRegdNoFromMe}`;
+
+    if (meQuery.isLoading || meQuery.isFetching) return undefined;
+    return undefined;
+  }, [doctorRegdNoFromMe, meQuery.isLoading, meQuery.isFetching]);
+
+  // ✅ Fetch visit + patient for createdAt + dob/sex
+  const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
+  const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
+
+  const visitCreatedAtDate = useMemo(() => {
+    const createdAt = (visitQuery.data as any)?.createdAt;
+    return safeParseDate(createdAt);
+  }, [visitQuery.data]);
+
+  const computedVisitDateLabel = useMemo(() => {
+    if (visitCreatedAtDate) return `Visit: ${toISODate(visitCreatedAtDate)}`;
+    return visitDateLabelFromParent ?? '';
+  }, [visitCreatedAtDate, visitDateLabelFromParent]);
+
+  const patientSex = useMemo(() => {
+    const p = patientQuery.data as any;
+    const s = (p?.sex ?? p?.gender ?? p?.patientSex ?? '').toString().trim().toUpperCase();
+    if (s === 'M' || s === 'F' || s === 'O' || s === 'U') return s as PatientSex;
+    if (s === 'MALE') return 'M';
+    if (s === 'FEMALE') return 'F';
+    if (s === 'OTHER') return 'O';
+    return undefined;
+  }, [patientQuery.data]);
+
+  const patientAge = useMemo(() => {
+    const p = patientQuery.data as any;
+    const dobRaw = p?.dob ?? p?.dateOfBirth ?? p?.birthDate ?? p?.dobIso ?? null;
+    const dob = safeParseDate(dobRaw);
+    const at = visitCreatedAtDate ?? new Date();
+    if (!dob) return undefined;
+    return calcAgeYears(dob, at);
+  }, [patientQuery.data, visitCreatedAtDate]);
 
   // ---------------------------
   // Prescription editor state
@@ -199,6 +365,16 @@ export function PrescriptionWorkspace(props: Props) {
   const setRevisionMode = (enabled: boolean) => {
     setIsRevisionMode(enabled);
     onRevisionModeChange?.(enabled);
+  };
+
+  // ---------------------------
+  // Rx Preset Import
+  // ---------------------------
+  const [importOpen, setImportOpen] = useState(false);
+
+  const handleImportPreset = (presetLines: RxLineType[]) => {
+    // ✅ append into existing list; editable immediately
+    setLines((prev) => [...prev, ...presetLines]);
   };
 
   // Hydrate once
@@ -267,7 +443,6 @@ export function PrescriptionWorkspace(props: Props) {
 
   const showStartRevision = isDone && !isRevisionMode;
 
-  // Print
   const canPrint = lines.length > 0;
 
   const printPrescription = () => {
@@ -304,7 +479,7 @@ export function PrescriptionWorkspace(props: Props) {
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
 
   const selectedDateStr = useMemo(
-    () => (selectedDate ? toISODate(selectedDate) : null),
+    () => (selectedDate ? clinicDateISO(selectedDate) : null),
     [selectedDate],
   );
 
@@ -313,7 +488,6 @@ export function PrescriptionWorkspace(props: Props) {
     return allVisits.filter((v) => v.visitDate === selectedDateStr);
   }, [allVisits, selectedDateStr]);
 
-  // bottom list pagination
   const PAGE_SIZE = 2;
   const [page, setPage] = useState(1);
   useEffect(() => setPage(1), [selectedDateStr]);
@@ -323,11 +497,9 @@ export function PrescriptionWorkspace(props: Props) {
     return filteredVisits.slice(start, start + PAGE_SIZE);
   }, [filteredVisits, page]);
 
-  // full overlay pagination
   const VIEW_ALL_PAGE_SIZE = 10;
   const [viewAllPage, setViewAllPage] = useState(1);
 
-  // ✅ animated overlay toggle
   const [visitsExpanded, setVisitsExpanded] = useState(false);
 
   useEffect(() => {
@@ -360,12 +532,8 @@ export function PrescriptionWorkspace(props: Props) {
     setXrayQuickOpen(true);
   };
 
-  // ---------------------------
-  // UI
-  // ---------------------------
   return (
     <div className="relative w-full min-w-0">
-      {/* Main grid content (cards + bottom table) */}
       <motion.div
         className="grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-10"
         animate={
@@ -419,8 +587,13 @@ export function PrescriptionWorkspace(props: Props) {
             <PrescriptionPreview
               patientName={patientName}
               patientPhone={patientPhone}
-              doctorName={doctorName}
-              visitDateLabel={visitDateLabel}
+              patientAge={patientAge}
+              patientSex={patientSex}
+              sdId={patientSdId}
+              opdNo={opdNo}
+              doctorName={resolvedDoctorName}
+              doctorRegdLabel={resolvedDoctorRegdLabel}
+              visitDateLabel={computedVisitDateLabel}
               lines={lines}
             />
           </div>
@@ -428,8 +601,13 @@ export function PrescriptionWorkspace(props: Props) {
           <PrescriptionPrintSheet
             patientName={patientName}
             patientPhone={patientPhone}
-            doctorName={doctorName}
-            visitDateLabel={visitDateLabel}
+            patientAge={patientAge}
+            patientSex={patientSex}
+            sdId={patientSdId}
+            opdNo={opdNo}
+            doctorName={resolvedDoctorName}
+            doctorRegdLabel={resolvedDoctorRegdLabel}
+            visitDateLabel={computedVisitDateLabel}
             lines={lines}
           />
         </div>
@@ -442,7 +620,13 @@ export function PrescriptionWorkspace(props: Props) {
             <div className="flex items-center gap-2">
               {canEdit ? <XrayUploader visitId={visitId} variant="outline" /> : null}
 
-              <Button type="button" variant="outline" className="rounded-xl" disabled={!canEdit}>
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                disabled={!canEdit}
+                onClick={() => setImportOpen(true)}
+              >
                 Import Preset
               </Button>
             </div>
@@ -465,7 +649,7 @@ export function PrescriptionWorkspace(props: Props) {
           </div>
         </Card>
 
-        {/* Bottom Visits section (small) */}
+        {/* Bottom Visits section */}
         <Card className="w-full rounded-2xl border bg-white p-4 lg:col-span-10">
           <div className="flex items-center justify-between gap-3">
             <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
@@ -604,213 +788,28 @@ export function PrescriptionWorkspace(props: Props) {
         </Card>
       </motion.div>
 
-      {/* Animated overlay (grows into full view) */}
-      <AnimatePresence>
-        {visitsExpanded ? (
-          <motion.div
-            className="absolute inset-0 z-50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.18 }}
-          >
-            {/* Backdrop */}
-            <motion.div
-              className="absolute inset-0 bg-black/20"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-            />
-
-            {/* Panel */}
-            <motion.div
-              className="absolute inset-0 m-2 rounded-2xl bg-white shadow-xl md:m-4"
-              initial={{ y: 40, opacity: 0, scale: 0.98 }}
-              animate={{ y: 0, opacity: 1, scale: 1 }}
-              exit={{ y: 30, opacity: 0, scale: 0.98 }}
-              transition={{ duration: 0.25, ease: 'easeOut' }}
-            >
-              <div className="flex h-full flex-col">
-                {/* Header */}
-                <div className="flex items-center justify-between gap-3 border-b p-4">
-                  <div className="min-w-0">
-                    <div className="text-lg font-semibold text-gray-900">All Visits</div>
-                    <div className="mt-0.5 text-sm text-gray-600">
-                      {patientName ? (
-                        <>
-                          <span className="font-semibold text-gray-900">{patientName}</span>
-                          {patientPhone ? (
-                            <span className="ml-2 text-gray-500">({patientPhone})</span>
-                          ) : null}
-                        </>
-                      ) : (
-                        <span className="text-gray-500">Patient</span>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="w-[220px] justify-start gap-2 rounded-xl"
-                        >
-                          <CalendarIcon className="h-4 w-4" />
-                          <span className={selectedDateStr ? 'text-gray-900' : 'text-gray-500'}>
-                            {dateLabel}
-                          </span>
-                        </Button>
-                      </PopoverTrigger>
-
-                      <PopoverContent align="end" className="w-auto rounded-2xl p-2">
-                        <Calendar
-                          mode="single"
-                          selected={selectedDate}
-                          onSelect={(d) => {
-                            setSelectedDate(d);
-                            setDatePickerOpen(false);
-                          }}
-                        />
-                        {selectedDateStr ? (
-                          <div className="px-2 pb-2 pt-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              className="h-8 rounded-xl text-xs"
-                              onClick={() => {
-                                setSelectedDate(undefined);
-                                setDatePickerOpen(false);
-                              }}
-                            >
-                              Clear
-                            </Button>
-                          </div>
-                        ) : null}
-                      </PopoverContent>
-                    </Popover>
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="rounded-xl"
-                      onClick={() => setVisitsExpanded(false)}
-                    >
-                      View Less
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Content (scrollable) */}
-                <div className="min-h-0 flex-1 overflow-auto p-4">
-                  <div className="overflow-hidden rounded-2xl border">
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="bg-gray-50">
-                          <TableHead className="font-semibold text-gray-600">Visit Date</TableHead>
-                          <TableHead className="font-semibold text-gray-600">Reason</TableHead>
-                          <TableHead className="font-semibold text-gray-600">Status</TableHead>
-                          <TableHead className="text-right font-semibold text-gray-600">
-                            Actions
-                          </TableHead>
-                        </TableRow>
-                      </TableHeader>
-
-                      <TableBody>
-                        {!patientId ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={4}
-                              className="py-10 text-center text-sm text-gray-500"
-                            >
-                              Loading patient context…
-                            </TableCell>
-                          </TableRow>
-                        ) : visitsQuery.isLoading ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={4}
-                              className="py-10 text-center text-sm text-gray-500"
-                            >
-                              Loading visits…
-                            </TableCell>
-                          </TableRow>
-                        ) : viewAllItems.length === 0 ? (
-                          <TableRow>
-                            <TableCell
-                              colSpan={4}
-                              className="py-10 text-center text-sm text-gray-500"
-                            >
-                              No visits found{selectedDateStr ? ` for ${selectedDateStr}` : ''}.
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          viewAllItems.map((v) => (
-                            <TableRow key={v.visitId} className="hover:bg-gray-50/60">
-                              <TableCell className="font-medium">{v.visitDate}</TableCell>
-                              <TableCell className="text-gray-800">{v.reason ?? '—'}</TableCell>
-                              <TableCell className="text-gray-800">{v.status ?? '—'}</TableCell>
-                              <TableCell className="text-right">
-                                <div className="flex justify-end gap-2">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-8 rounded-xl px-3 text-xs"
-                                    onClick={() => openRxQuick(v.visitId)}
-                                  >
-                                    View Prescription
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-8 rounded-xl px-3 text-xs"
-                                    onClick={() => openXrayQuick(v.visitId)}
-                                  >
-                                    View X-rays
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-8 rounded-xl px-3 text-xs"
-                                    onClick={() => openVisit(v)}
-                                  >
-                                    View
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-
-                    {filteredVisits.length > VIEW_ALL_PAGE_SIZE ? (
-                      <div className="border-t bg-white px-3 py-2">
-                        <PaginationControl
-                          page={viewAllPage}
-                          pageSize={VIEW_ALL_PAGE_SIZE}
-                          totalItems={filteredVisits.length}
-                          onPageChange={setViewAllPage}
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        ) : null}
-      </AnimatePresence>
+      {/* ✅ Rx Preset Import Dialog */}
+      <RxPresetImportDialog
+        open={importOpen}
+        onOpenChange={setImportOpen}
+        disabled={!canEdit}
+        append
+        existingCount={lines.length}
+        onImport={(importedLines) => handleImportPreset(importedLines)}
+      />
 
       {/* Quick look dialogs */}
       <VisitPrescriptionQuickLookDialog
         open={rxQuickOpen}
         onOpenChange={(o) => setRxQuickOpen(o)}
         visitId={quickVisitId}
+        patientId={patientId}
         patientName={patientName}
         patientPhone={patientPhone}
-        doctorName={doctorName}
+        patientSdId={patientSdId}
+        opdNo={opdNo}
+        doctorName={resolvedDoctorName}
+        doctorRegdLabel={resolvedDoctorRegdLabel}
       />
 
       <VisitXrayQuickLookDialog
