@@ -20,7 +20,6 @@ export default function NewDoctorRxPresetPage() {
       submitting={isLoading}
       submitLabel="Create Preset"
       onSubmit={async (payload) => {
-        // default scope: PRIVATE (doctor can change later once you expose scope in editor UI)
         const created = await createPreset({ ...payload, scope: 'PRIVATE' as any }).unwrap();
         router.replace(`/doctor/rx-presets/${created.id}`);
       }}

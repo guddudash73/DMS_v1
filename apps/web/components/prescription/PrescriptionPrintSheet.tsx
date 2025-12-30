@@ -259,7 +259,8 @@ export function PrescriptionPrintSheet(props: Props) {
           {/* Medicines */}
           <div className="min-h-0 flex-1 pt-4">
             {lines.length === 0 ? (
-              <div className="text-[13px] text-gray-500">No medicines added yet.</div>
+              // ✅ Blank area for "blank Rx" print (no placeholder text)
+              <div className="h-full" />
             ) : (
               <ol className="space-y-2 text-[14px] leading-6 text-gray-900">
                 {lines.map((l, idx) => (

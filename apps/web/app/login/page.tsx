@@ -36,7 +36,6 @@ export default function LoginPage() {
     mode: 'onBlur',
   });
 
-  // ✅ Role → default landing route
   const defaultRouteByRole = (role: LoginResponse['role']) => {
     if (role === 'RECEPTION') return '/';
     if (role === 'DOCTOR') return '/doctor';
@@ -44,9 +43,6 @@ export default function LoginPage() {
     return '/';
   };
 
-  // ✅ Safe internal redirect target validator
-  // - must start with single "/" (internal)
-  // - must NOT start with "//" (protocol-relative)
   const isSafeInternalPath = (p: string) => p.startsWith('/') && !p.startsWith('//');
 
   const onSubmit = async (values: LoginRequest) => {
@@ -58,8 +54,6 @@ export default function LoginPage() {
       dispatch(setCredentials(response));
       toast.success('Logged in successfully.');
 
-      // ✅ If user was originally trying to access something (e.g., /admin/doctors),
-      // honor it IF it is a safe internal path; otherwise route by role.
       const target = from && isSafeInternalPath(from) ? from : defaultRouteByRole(response.role);
 
       router.replace(target);

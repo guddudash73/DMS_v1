@@ -1,4 +1,3 @@
-// apps/web/src/store/api.ts
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import type { BaseQueryFn } from '@reduxjs/toolkit/query';
 import type { FetchArgs, FetchBaseQueryError } from '@reduxjs/toolkit/query';
@@ -33,8 +32,6 @@ import type {
   BillingCheckoutInput,
   PrescriptionPreset,
   PrescriptionPresetSearchQuery,
-
-  // ✅ Admin types
   AdminMedicineListResponse,
   AdminMedicineSearchQuery,
   AdminUpdateMedicineRequest,
@@ -52,6 +49,7 @@ import type {
   MedicineCatalogListResponse,
   MedicineCatalogSearchQuery,
   DoctorUpdateMedicineRequest,
+  AdminResetUserPasswordRequest,
 } from '@dms/types';
 
 import { createDoctorQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
@@ -88,13 +86,11 @@ export const TAG_TYPES = [
   'Visit',
   'Billing',
 
-  // ✅ Clinic dashboard tags (Reception panel)
   'DailyPatientSummary',
   'DailyReport',
   'DailyVisitsBreakdown',
   'ClinicRealtime',
 
-  // ✅ Admin tags
   'AdminMedicines',
   'AdminRxPresets',
   'AdminUsers',
@@ -120,6 +116,14 @@ export type MeResponse = {
     createdAt: number;
     updatedAt: number;
   } | null;
+};
+
+export type UpdateMeRequest = {
+  displayName?: string;
+  doctorProfile?: {
+    fullName?: string;
+    contact?: string;
+  };
 };
 
 export type DoctorPublicListItem = {
@@ -148,13 +152,11 @@ const rawBaseQuery = fetchBaseQuery({
 });
 
 function normalizeIsoDate(input: string): string {
-  // already YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
 
   const d = new Date(input);
   if (!Number.isFinite(d.getTime())) return input;
 
-  // NOTE: uses clinic timezone day key if you want:
   return clinicDateISO(d);
 }
 
@@ -218,12 +220,6 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
   return result;
 };
 
-/**
- * ✅ Shared WS Manager (singleton per tab)
- * - Ensures ONLY ONE WebSocket is opened even if multiple RTKQ endpoints subscribe.
- * - Each subscriber provides a message handler; all handlers receive all messages.
- * - Closes WS when no subscribers left (and also supports idle close).
- */
 type WsListener = (msg: RealtimeMessage) => void;
 
 let sharedSocket: WebSocket | null = null;
@@ -256,7 +252,6 @@ function sharedSafeClose() {
 function sharedResetIdleTimer() {
   if (sharedIdleTimer) clearTimeout(sharedIdleTimer);
   sharedIdleTimer = setTimeout(() => {
-    // idle close — will be reopened on activity/visibility if there are subscribers
     sharedSafeClose();
   }, IDLE_CLOSE_MS);
 }
@@ -295,16 +290,14 @@ async function ensureFreshAccessTokenForWs(args: {
 async function sharedOpenSocketIfNeeded(args: { dispatch: any; getState: () => unknown }) {
   if (typeof window === 'undefined') return;
   if (document.visibilityState !== 'visible') return;
-  if (sharedSocket) return; // already open
+  if (sharedSocket) return;
 
   const token = await ensureFreshAccessTokenForWs(args);
   if (!token) return;
 
-  // open
   sharedSocket = createDoctorQueueWebSocket({
     token,
     onMessage: (msg) => {
-      // fan-out to all listeners
       for (const fn of sharedListeners) {
         try {
           fn(msg);
@@ -315,12 +308,10 @@ async function sharedOpenSocketIfNeeded(args: { dispatch: any; getState: () => u
       sharedResetIdleTimer();
     },
     onClose: () => {
-      // allow reopen
       sharedSocket = null;
       sharedStopTimers();
     },
     onError: () => {
-      // allow reopen
       sharedSocket = null;
       sharedStopTimers();
     },
@@ -352,7 +343,6 @@ function subscribeSharedRealtime(args: {
   sharedRefCount += 1;
   sharedListeners.add(args.onMessage);
 
-  // attach global events only when first subscriber appears
   const isFirst = sharedRefCount === 1;
 
   if (isFirst && typeof window !== 'undefined') {
@@ -365,7 +355,6 @@ function subscribeSharedRealtime(args: {
       }
     };
 
-    // store handlers on window for later removal
     (window as any).__dms_ws_activityHandler = activityHandler;
     (window as any).__dms_ws_visibilityHandler = visibilityHandler;
 
@@ -373,7 +362,6 @@ function subscribeSharedRealtime(args: {
     document.addEventListener('visibilitychange', visibilityHandler);
   }
 
-  // try open
   if (typeof window !== 'undefined' && document.visibilityState === 'visible') {
     void sharedOpenSocketIfNeeded(args);
   }
@@ -383,7 +371,6 @@ function subscribeSharedRealtime(args: {
     sharedRefCount = Math.max(0, sharedRefCount - 1);
 
     if (sharedRefCount === 0) {
-      // detach global events
       if (typeof window !== 'undefined') {
         const activityEvents = ['mousemove', 'keydown', 'mousedown', 'touchstart'] as const;
         const activityHandler = (window as any).__dms_ws_activityHandler as
@@ -404,7 +391,6 @@ function subscribeSharedRealtime(args: {
         delete (window as any).__dms_ws_visibilityHandler;
       }
 
-      // close socket
       sharedSafeClose();
     }
   };
@@ -419,8 +405,6 @@ export const apiSlice = createApi({
   tagTypes: TAG_TYPES,
 
   endpoints: (builder) => ({
-    // ✅ Realtime subscription for RECEPTION / CLINIC dashboard
-    // Uses shared WS => only ONE connection per tab
     clinicRealtime: builder.query<null, void>({
       queryFn: () => ({ data: null }),
       providesTags: () => [{ type: 'ClinicRealtime' as const, id: 'WS' }],
@@ -450,7 +434,6 @@ export const apiSlice = createApi({
       },
     }),
 
-    // --- Auth ---
     login: builder.mutation<LoginResponse, LoginRequestBody>({
       query: (body) => ({
         url: '/auth/login',
@@ -487,7 +470,6 @@ export const apiSlice = createApi({
       },
     }),
 
-    // --- Reports / Dashboard ---
     getDailyReport: builder.query<DailyReport, string>({
       query: (date) => ({
         url: '/reports/daily',
@@ -548,14 +530,13 @@ export const apiSlice = createApi({
       providesTags: ['Doctors'],
     }),
 
-    // ✅ Admin doctors list (ADMIN/RECEPTION only) — keep for admin screens
     adminGetDoctors: builder.query<AdminDoctorListItem[], void>({
       query: () => ({
         url: '/admin/doctors',
       }),
       providesTags: ['Doctors'],
     }),
-    // --- Me ---
+
     getMyPreferences: builder.query<UserPreferences, void>({
       query: () => ({
         url: '/me/preferences',
@@ -572,7 +553,6 @@ export const apiSlice = createApi({
       invalidatesTags: ['UserPreferences'],
     }),
 
-    // --- Patients ---
     getPatients: builder.query<PatientsListResponse, Partial<PatientSearchQuery>>({
       query: ({ query, limit, cursor } = {}) => ({
         url: '/patients',
@@ -614,7 +594,6 @@ export const apiSlice = createApi({
       providesTags: (_result, _error, patientId) => [{ type: 'Patient' as const, id: patientId }],
     }),
 
-    // --- Visits / Queue ---
     getDoctorQueue: builder.query<
       DoctorQueueResponse,
       { doctorId: string; date?: string; status?: 'QUEUED' | 'IN_PROGRESS' | 'DONE' }
@@ -629,7 +608,6 @@ export const apiSlice = createApi({
       }),
       providesTags: (_result, _error, args) => [{ type: 'Doctors' as const, id: args.doctorId }],
 
-      // ✅ Now uses shared WS — does NOT open its own socket
       async onCacheEntryAdded(arg, { cacheDataLoaded, cacheEntryRemoved, dispatch, getState }) {
         await cacheDataLoaded;
 
@@ -691,11 +669,10 @@ export const apiSlice = createApi({
       }),
       invalidatesTags: (_result, _error, arg) => [
         { type: 'Visit' as const, id: arg.visitId },
-        'Doctors', // invalidate ALL doctor queues
+        'Doctors',
       ],
     }),
 
-    // ✅ Billing
     getVisitBill: builder.query<Billing, { visitId: string }>({
       query: ({ visitId }) => ({
         url: `/visits/${visitId}/bill`,
@@ -713,15 +690,9 @@ export const apiSlice = createApi({
       invalidatesTags: (_r, _e, arg) => [
         { type: 'Billing' as const, id: arg.visitId },
         { type: 'Visit' as const, id: arg.visitId },
-        // NOTE: followups are now multi per visit; the reminders screen uses /followups/daily so it will refresh naturally.
       ],
     }),
 
-    // --- Followups ---
-    /**
-     * ✅ Multi-followup compatible:
-     * /followups/daily returns items with a stable followupId
-     */
     getDailyFollowups: builder.query<
       {
         items: {
@@ -747,10 +718,6 @@ export const apiSlice = createApi({
       providesTags: (_result, _error, date) => [{ type: 'Followups' as const, id: date }],
     }),
 
-    /**
-     * ✅ Update by followupId (not visitId).
-     * Backend should expose: PATCH /followups/:followupId/status { status }
-     */
     updateFollowupStatus: builder.mutation<
       {
         followupId: string;
@@ -768,7 +735,7 @@ export const apiSlice = createApi({
       }
     >({
       query: ({ visitId, followupId, status }) => ({
-        url: `/visits/${visitId}/followups/${followupId}/status`, // ✅ correct
+        url: `/visits/${visitId}/followups/${followupId}/status`,
         method: 'PATCH',
         body: { status },
       }),
@@ -794,7 +761,6 @@ export const apiSlice = createApi({
       },
     }),
 
-    // --- Doctor charts ---
     getDoctorPatientsCountSeries: builder.query<
       DoctorPatientsCountSeries,
       { startDate: string; endDate: string }
@@ -820,7 +786,6 @@ export const apiSlice = createApi({
       providesTags: () => [{ type: 'Doctors' as const, id: 'ME' }],
     }),
 
-    // --- Xray ---
     presignXrayUpload: builder.mutation<
       {
         xrayId: string;
@@ -884,7 +849,6 @@ export const apiSlice = createApi({
       }),
     }),
 
-    // --- Medicines ---
     searchMedicines: builder.query<
       { items: MedicineTypeaheadItem[] },
       { query: string; limit?: number }
@@ -908,7 +872,6 @@ export const apiSlice = createApi({
       invalidatesTags: ['Medicines'],
     }),
 
-    // ✅ Admin medicines
     adminListMedicines: builder.query<AdminMedicineListResponse, Partial<AdminMedicineSearchQuery>>(
       {
         query: ({ query, limit, cursor, status } = {} as any) => ({
@@ -1005,7 +968,6 @@ export const apiSlice = createApi({
       invalidatesTags: [{ type: 'MedicinesCatalog' as const, id: 'LIST' }],
     }),
 
-    // --- Rx Presets (non-admin) ---
     getRxPresets: builder.query<
       { items: PrescriptionPreset[] },
       Partial<PrescriptionPresetSearchQuery>
@@ -1021,7 +983,6 @@ export const apiSlice = createApi({
       providesTags: () => [{ type: 'RxPresets' as const, id: 'LIST' }],
     }),
 
-    // ✅ Admin Rx presets
     adminListRxPresets: builder.query<AdminRxPresetListResponse, Partial<AdminRxPresetSearchQuery>>(
       {
         query: ({ query, limit, cursor } = {}) => ({
@@ -1084,7 +1045,6 @@ export const apiSlice = createApi({
       invalidatesTags: [{ type: 'RxPresets' as const, id: 'LIST' }],
     }),
 
-    // --- Prescription (Rx) ---
     upsertVisitRx: builder.mutation<
       { rxId: string; visitId: string; version: number; createdAt: number; updatedAt: number },
       { visitId: string; lines: RxLineType[] }
@@ -1256,6 +1216,14 @@ export const apiSlice = createApi({
       }),
     }),
 
+    updateMe: builder.mutation<MeResponse, UpdateMeRequest>({
+      query: (body) => ({
+        url: '/me',
+        method: 'PATCH',
+        body,
+      }),
+    }),
+
     createVisitFollowup: builder.mutation<
       {
         followupId: string;
@@ -1273,8 +1241,8 @@ export const apiSlice = createApi({
       }
     >({
       query: ({ visitId, ...body }) => ({
-        url: `/visits/${visitId}/followups`, // ✅ correct
-        method: 'POST', // ✅ correct
+        url: `/visits/${visitId}/followups`,
+        method: 'POST',
         body,
       }),
       invalidatesTags: (_r, _e, arg) => [{ type: 'Followups' as const, id: arg.followUpDate }],
@@ -1286,6 +1254,17 @@ export const apiSlice = createApi({
       }),
       providesTags: (_r, _e, patientId) => [{ type: 'Patient' as const, id: patientId }],
     }),
+
+    adminResetUserPassword: builder.mutation<
+      { ok: true },
+      { userId: string; body: AdminResetUserPasswordRequest }
+    >({
+      query: ({ userId, body }) => ({
+        url: `/admin/users/${userId}/reset-password`,
+        method: 'POST',
+        body,
+      }),
+    }),
   }),
 });
 
@@ -1294,7 +1273,6 @@ export const {
   useRefreshMutation,
   useLogoutMutation,
 
-  // ✅ Reception/Clinic realtime
   useClinicRealtimeQuery,
 
   useGetPatientsQuery,
@@ -1313,6 +1291,7 @@ export const {
   useAdminGetDoctorsQuery,
 
   useGetMeQuery,
+  useUpdateMeMutation,
   useGetMyPreferencesQuery,
   useUpdateMyPreferencesMutation,
 
@@ -1340,7 +1319,6 @@ export const {
   useLazySearchMedicinesQuery,
   useQuickAddMedicineMutation,
 
-  // ✅ Admin hooks
   useAdminListMedicinesQuery,
   useAdminCreateMedicineMutation,
   useAdminUpdateMedicineMutation,
@@ -1379,6 +1357,7 @@ export const {
   useListMedicinesCatalogQuery,
   useDoctorUpdateMedicineMutation,
   useDoctorDeleteMedicineMutation,
+  useAdminResetUserPasswordMutation,
 } = apiSlice;
 
 export const api = apiSlice;

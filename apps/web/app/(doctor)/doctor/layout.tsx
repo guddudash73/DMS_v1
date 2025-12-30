@@ -12,14 +12,9 @@ export default function DoctorLayout({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (auth.status !== 'authenticated') return;
 
-    // ✅ Keep existing behavior: reception does NOT belong in doctor routes
     if (auth.role === 'RECEPTION') router.replace('/');
-
-    // ✅ IMPORTANT CHANGE: Admin is allowed to be here (no redirect)
-    // if (auth.role === 'ADMIN') router.replace('/admin');
   }, [auth.status, auth.role, router]);
 
-  // ✅ Allow DOCTOR and ADMIN to render doctor shell
   if (
     auth.status === 'authenticated' &&
     auth.role &&

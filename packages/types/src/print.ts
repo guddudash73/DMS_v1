@@ -1,4 +1,3 @@
-// packages/types/src/print.ts
 import { z } from 'zod';
 
 export const VisitTagForPrint = z.enum(['N', 'F', 'Z']);

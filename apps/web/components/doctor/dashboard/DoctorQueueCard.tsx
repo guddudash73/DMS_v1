@@ -34,12 +34,9 @@ function toDoctorFirstNameLabel(rawName: string | undefined | null): string {
   return first ? `Dr. ${first}` : 'Doctor';
 }
 
-// ✅ Choose font size based on length so it won't wrap
 function getDoctorNameTextClass(label: string): string {
   const len = label.trim().length;
 
-  // Keep your original as default: text-3xl
-  // Scale down progressively for long names.
   if (len <= 10) return 'text-3xl';
   if (len <= 14) return 'text-2xl';
   if (len <= 18) return 'text-xl';
@@ -164,8 +161,8 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
             className={[
               doctorNameTextClass,
               'font-semibold text-gray-900',
-              'whitespace-nowrap truncate', // ✅ prevent wrapping, keep one line
-              'max-w-[16rem] sm:max-w-[20rem] md:max-w-[24rem]', // ✅ keeps layout stable
+              'whitespace-nowrap truncate',
+              'max-w-[16rem] sm:max-w-[20rem] md:max-w-[24rem]',
             ].join(' ')}
             title={doctorName}
           >

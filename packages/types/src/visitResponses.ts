@@ -1,4 +1,3 @@
-// packages/types/src/visitResponses.ts
 import { z } from 'zod';
 import { Visit } from './visit';
 import { TokenPrintPayload } from './print';

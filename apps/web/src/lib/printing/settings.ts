@@ -1,11 +1,10 @@
-// apps/web/src/lib/printing/settings.ts
 import { z } from 'zod';
 
 const KEY = 'dms.print.settings.v1';
 
 export const PrintSettings = z.object({
   autoPrintToken: z.boolean().default(true),
-  printerName: z.string().min(1).optional(), // QZ printer name
+  printerName: z.string().min(1).optional(),
 });
 
 export type PrintSettings = z.infer<typeof PrintSettings>;

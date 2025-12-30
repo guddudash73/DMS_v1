@@ -7,7 +7,13 @@ import {
   TransactWriteCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
-import type { Visit, Prescription, RxId, RxLineType } from '@dms/types';
+import {
+  Prescription as PrescriptionSchema, // ✅ zod schema
+  type Visit,
+  type Prescription,
+  type RxId,
+  type RxLineType,
+} from '@dms/types';
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: { removeUndefinedValues: true },
@@ -28,6 +34,11 @@ const buildVisitMetaKey = (visitId: string) => ({
   SK: 'META',
 });
 
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
+const getStringProp = (v: unknown, key: string): string | undefined =>
+  isObject(v) && typeof v[key] === 'string' ? (v[key] as string) : undefined;
+
 export interface PrescriptionRepository {
   upsertDraftForVisit(params: {
     visit: Visit;
@@ -45,7 +56,6 @@ export interface PrescriptionRepository {
     jsonKey: string;
   }): Promise<Prescription | null>;
 
-  // ✅ NEW
   updateReceptionNotesById(params: {
     rxId: RxId;
     receptionNotes: string;
@@ -65,8 +75,13 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
         ConsistentRead: true,
       }),
     );
-    if (!Item || (Item as any).entityType !== 'RX') return null;
-    return Item as Prescription;
+
+    if (!Item) return null;
+
+    const parsed = PrescriptionSchema.safeParse(Item);
+    if (!parsed.success) return null;
+
+    return parsed.data;
   }
 
   async listByVisit(visitId: string): Promise<Prescription[]> {
@@ -83,8 +98,12 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     );
 
     if (!Items || Items.length === 0) return [];
-    const prescriptions = Items as Prescription[];
-    return prescriptions.slice().sort((a, b) => a.version - b.version);
+
+    const parsed = Items.map((it) => PrescriptionSchema.safeParse(it))
+      .filter((r): r is { success: true; data: Prescription } => r.success)
+      .map((r) => r.data);
+
+    return parsed.slice().sort((a, b) => a.version - b.version);
   }
 
   async getCurrentForVisit(visitId: string): Promise<Prescription | null> {
@@ -96,18 +115,13 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       }),
     );
 
-    if (!Item || (Item as any).entityType !== 'VISIT') return null;
-    const currentRxId = (Item as any).currentRxId as string | undefined;
+    const currentRxId = getStringProp(Item, 'currentRxId');
     if (!currentRxId) return null;
 
     return this.getById(currentRxId);
   }
 
-  async upsertDraftForVisit(params: {
-    visit: Visit;
-    lines: RxLineType[];
-    jsonKey: string;
-  }): Promise<Prescription> {
+  async upsertDraftForVisit(params: { visit: Visit; lines: RxLineType[]; jsonKey: string }) {
     const { visit, lines, jsonKey } = params;
 
     const { Item: visitMeta } = await docClient.send(
@@ -118,7 +132,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       }),
     );
 
-    const currentRxId = (visitMeta as any)?.currentRxId as string | undefined;
+    const currentRxId = getStringProp(visitMeta, 'currentRxId');
 
     if (currentRxId) {
       const updated = await this.updateById({ rxId: currentRxId, lines, jsonKey });
@@ -193,11 +207,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     return base;
   }
 
-  async createNewVersionForVisit(params: {
-    visit: Visit;
-    lines: RxLineType[];
-    jsonKey: string;
-  }): Promise<Prescription> {
+  async createNewVersionForVisit(params: { visit: Visit; lines: RxLineType[]; jsonKey: string }) {
     const { visit, lines, jsonKey } = params;
 
     const existing = await this.listByVisit(visit.visitId);
@@ -271,11 +281,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     return base;
   }
 
-  async updateById(params: {
-    rxId: RxId;
-    lines: RxLineType[];
-    jsonKey: string;
-  }): Promise<Prescription | null> {
+  async updateById(params: { rxId: RxId; lines: RxLineType[]; jsonKey: string }) {
     const { rxId, lines, jsonKey } = params;
     const existing = await this.getById(rxId);
     if (!existing) return null;
@@ -334,11 +340,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     return next;
   }
 
-  // ✅ NEW: receptionist notes update
-  async updateReceptionNotesById(params: {
-    rxId: RxId;
-    receptionNotes: string;
-  }): Promise<Prescription | null> {
+  async updateReceptionNotesById(params: { rxId: RxId; receptionNotes: string }) {
     const { rxId, receptionNotes } = params;
     const existing = await this.getById(rxId);
     if (!existing) return null;

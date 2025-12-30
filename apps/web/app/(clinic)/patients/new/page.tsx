@@ -36,9 +36,8 @@ const asErrorResponse = (data: unknown): ErrorResponse | null => {
   return null;
 };
 
-// ✅ IMPORTANT: use BOTH input + output types for the schema
-type PatientCreateFormInput = z.input<typeof PatientCreateSchema>; // gender?: unknown
-type PatientCreateFormOutput = z.output<typeof PatientCreateSchema>; // gender?: "MALE" | ...
+type PatientCreateFormInput = z.input<typeof PatientCreateSchema>;
+type PatientCreateFormOutput = z.output<typeof PatientCreateSchema>;
 
 export default function NewPatientPage() {
   const router = useRouter();
@@ -60,9 +59,7 @@ export default function NewPatientPage() {
     },
   });
 
-  // ✅ onSubmit receives the *parsed/output* type from zodResolver
   const onSubmit = async (values: PatientCreateFormOutput) => {
-    // values.gender is now correctly typed as MALE/FEMALE/OTHER/UNKNOWN | undefined
     const payload: PatientCreate = values as PatientCreate;
 
     try {
@@ -83,7 +80,6 @@ export default function NewPatientPage() {
     }
   };
 
-  // ✅ errors are keyed by the *input* fields
   const onSubmitError: SubmitErrorHandler<PatientCreateFormInput> = (formErrors) => {
     const messages = Object.values(formErrors)
       .map((e) => e?.message)

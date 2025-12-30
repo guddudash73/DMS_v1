@@ -1,4 +1,3 @@
-// apps/api/src/middlewares/auth.ts
 import type { Request, Response, NextFunction } from 'express';
 import type { Role } from '@dms/types';
 import { verifyAccessToken } from '../lib/authTokens';
@@ -41,7 +40,6 @@ export const authMiddleware = async (req: Request, _res: Response, next: NextFun
   try {
     const decoded = verifyAccessToken(token);
 
-    // ✅ NEW: enforce active user for every request
     const user = await userRepository.getById(decoded.sub);
     if (!user) {
       return next(new AuthError('UNAUTHORIZED', 401, 'UNAUTHORIZED'));

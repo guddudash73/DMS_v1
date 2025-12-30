@@ -1,3 +1,4 @@
+// apps/web/app/(admin)/admin/medicines/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -33,6 +34,7 @@ import {
 } from '@/src/store/api';
 
 const FREQUENCIES = ['QD', 'BID', 'TID', 'QID', 'HS', 'PRN'] as const;
+type Frequency = (typeof FREQUENCIES)[number];
 
 const MEDICINE_FORMS: MedicineForm[] = [
   'TABLET',
@@ -48,7 +50,7 @@ const MEDICINE_FORMS: MedicineForm[] = [
 type FormState = {
   displayName: string;
   defaultDose?: string;
-  defaultFrequency?: (typeof FREQUENCIES)[number] | '';
+  defaultFrequency?: Frequency | '';
   defaultDuration?: number;
   form?: MedicineForm | '';
 };
@@ -67,6 +69,14 @@ const toNumberOrUndef = (v: string) => {
   const n = Number(t);
   return Number.isFinite(n) ? n : undefined;
 };
+
+const isMedicineForm = (v: unknown): v is MedicineForm =>
+  typeof v === 'string' && (MEDICINE_FORMS as readonly string[]).includes(v);
+
+const toFormValue = (v: unknown): MedicineForm | '' => (isMedicineForm(v) ? v : '');
+
+const toFrequencyValue = (v: unknown): Frequency | '' =>
+  typeof v === 'string' && (FREQUENCIES as readonly string[]).includes(v) ? (v as Frequency) : '';
 
 const formatDefaults = (m: MedicinePreset) => {
   const dose = m.defaultDose?.trim() ? m.defaultDose : '—';
@@ -98,6 +108,15 @@ function SelectLike({
   );
 }
 
+function getStringProp(obj: unknown, keys: string[]): string | undefined {
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const k of keys) {
+    const v = (obj as Record<string, unknown>)[k];
+    if (typeof v === 'string' && v.trim()) return v;
+  }
+  return undefined;
+}
+
 export default function AdminMedicinesPage() {
   const [tab, setTab] = React.useState<AdminMedicinesStatus>('PENDING');
 
@@ -108,7 +127,6 @@ export default function AdminMedicinesPage() {
     return () => window.clearTimeout(t);
   }, [searchTerm]);
 
-  // ✅ Dynamo "prev" via local stack
   const [cursor, setCursor] = React.useState<string | null>(null);
   const [cursorStack, setCursorStack] = React.useState<string[]>([]);
 
@@ -117,35 +135,31 @@ export default function AdminMedicinesPage() {
     setCursorStack([]);
   }, [tab, debounced]);
 
-  const listQ = useAdminListMedicinesQuery(
-    {
-      status: tab,
-      query: debounced || undefined,
-      limit: 10,
-      cursor: cursor || undefined,
-    } as any,
-    { refetchOnMountOrArgChange: true },
-  );
+  type ListArg = Parameters<typeof useAdminListMedicinesQuery>[0];
+  const listArgs: ListArg = {
+    status: tab,
+    query: debounced || undefined,
+    limit: 10,
+    cursor: cursor || undefined,
+  };
 
-  // ✅ For "Created By" name lookup (INLINE_DOCTOR creators)
+  const listQ = useAdminListMedicinesQuery(listArgs, { refetchOnMountOrArgChange: true });
+
   const doctorsQ = useGetDoctorsQuery();
   const doctorNameByUserId = React.useMemo(() => {
     const map = new Map<string, string>();
-    for (const d of doctorsQ.data ?? []) {
-      // Adjust these keys if your AdminDoctorListItem uses different field names
-      const id = (d as any).userId ?? (d as any).doctorId ?? (d as any).id;
-      const name =
-        (d as any).displayName ?? (d as any).fullName ?? (d as any).name ?? (d as any).email;
-      if (typeof id === 'string' && typeof name === 'string') map.set(id, name);
+    const list = doctorsQ.data ?? [];
+
+    for (const d of list) {
+      const id = getStringProp(d, ['userId', 'doctorId', 'id']);
+      const name = getStringProp(d, ['displayName', 'fullName', 'name', 'email']);
+      if (id && name) map.set(id, name);
     }
     return map;
   }, [doctorsQ.data]);
 
   const createdByLabel = (m: MedicinePreset) => {
-    // If it was imported by admin, show Admin (unless you later add real admin user lookup)
     if (m.source === 'ADMIN_IMPORT') return 'Admin';
-
-    // Otherwise try doctor lookup (INLINE_DOCTOR)
     const nm = doctorNameByUserId.get(m.createdByUserId);
     return nm ?? m.createdByUserId;
   };
@@ -174,9 +188,9 @@ export default function AdminMedicinesPage() {
     setEditForm({
       displayName: m.displayName ?? '',
       defaultDose: m.defaultDose ?? '',
-      defaultFrequency: (m.defaultFrequency as any) ?? '',
+      defaultFrequency: toFrequencyValue(m.defaultFrequency),
       defaultDuration: m.defaultDuration,
-      form: (m.form as any) ?? '',
+      form: toFormValue(m.form),
     });
     setEditOpen(true);
   };
@@ -190,7 +204,7 @@ export default function AdminMedicinesPage() {
       defaultDose: addForm.defaultDose?.trim() || undefined,
       defaultFrequency: addForm.defaultFrequency?.trim() || undefined,
       defaultDuration: addForm.defaultDuration,
-      form: (addForm.form || undefined) as any,
+      form: addForm.form || undefined,
     }).unwrap();
 
     setAddOpen(false);
@@ -209,7 +223,7 @@ export default function AdminMedicinesPage() {
         defaultDose: editForm.defaultDose?.trim() || undefined,
         defaultFrequency: editForm.defaultFrequency?.trim() || undefined,
         defaultDuration: editForm.defaultDuration,
-        form: (editForm.form || undefined) as any,
+        form: editForm.form || undefined,
       },
     }).unwrap();
 
@@ -363,7 +377,7 @@ export default function AdminMedicinesPage() {
                 <Label className="text-xs">Frequency</Label>
                 <SelectLike
                   value={addForm.defaultFrequency ?? ''}
-                  onChange={(v) => setAddForm((p) => ({ ...p, defaultFrequency: v as any }))}
+                  onChange={(v) => setAddForm((p) => ({ ...p, defaultFrequency: v as Frequency }))}
                   placeholder="Select…"
                 >
                   {FREQUENCIES.map((f) => (
@@ -396,7 +410,7 @@ export default function AdminMedicinesPage() {
               <Label className="text-xs">Form (optional)</Label>
               <SelectLike
                 value={addForm.form ?? ''}
-                onChange={(v) => setAddForm((p) => ({ ...p, form: v as any }))}
+                onChange={(v) => setAddForm((p) => ({ ...p, form: toFormValue(v) }))}
                 placeholder="Select…"
               >
                 {MEDICINE_FORMS.map((f) => (
@@ -456,7 +470,7 @@ export default function AdminMedicinesPage() {
                 <Label className="text-xs">Frequency</Label>
                 <SelectLike
                   value={editForm.defaultFrequency ?? ''}
-                  onChange={(v) => setEditForm((p) => ({ ...p, defaultFrequency: v as any }))}
+                  onChange={(v) => setEditForm((p) => ({ ...p, defaultFrequency: v as Frequency }))}
                   placeholder="Select…"
                 >
                   {FREQUENCIES.map((f) => (
@@ -488,7 +502,7 @@ export default function AdminMedicinesPage() {
               <Label className="text-xs">Form (optional)</Label>
               <SelectLike
                 value={editForm.form ?? ''}
-                onChange={(v) => setEditForm((p) => ({ ...p, form: v as any }))}
+                onChange={(v) => setEditForm((p) => ({ ...p, form: toFormValue(v) }))}
                 placeholder="Select…"
               >
                 {MEDICINE_FORMS.map((f) => (

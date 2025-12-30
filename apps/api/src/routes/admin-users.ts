@@ -1,8 +1,11 @@
-// apps/api/src/routes/admin-users.ts
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';
-import { AdminCreateUserRequest, AdminUpdateUserRequest } from '@dms/types';
+import {
+  AdminCreateUserRequest,
+  AdminUpdateUserRequest,
+  AdminResetUserPasswordRequest,
+} from '@dms/types';
 import type { AdminUserListItem, Role } from '@dms/types';
 import { userRepository } from '../repositories/userRepository';
 import { logAudit } from '../lib/logger';
@@ -32,7 +35,6 @@ r.get('/', async (req, res, next) => {
       updatedAt: u.updatedAt,
     }));
 
-    // filters
     if (query) {
       items = items.filter(
         (u) => u.email.toLowerCase().includes(query) || u.displayName.toLowerCase().includes(query),
@@ -41,7 +43,6 @@ r.get('/', async (req, res, next) => {
     if (role) items = items.filter((u) => u.role === role);
     if (typeof active === 'boolean') items = items.filter((u) => u.active === active);
 
-    // newest first
     items.sort((a, b) => (b.updatedAt ?? b.createdAt) - (a.updatedAt ?? a.createdAt));
 
     return res.status(200).json({ items });
@@ -54,7 +55,6 @@ r.post('/', validate(AdminCreateUserRequest), async (req, res, next) => {
   try {
     const input = req.body as AdminCreateUserRequest;
 
-    // prevent creating DOCTOR via this endpoint
     if (input.role === 'DOCTOR') {
       return res.status(400).json({
         error: 'INVALID_ROLE',
@@ -63,7 +63,6 @@ r.post('/', validate(AdminCreateUserRequest), async (req, res, next) => {
       });
     }
 
-    // optionally enforce only RECEPTION/VIEWER/ADMIN
     if (!SAFE_ROLES.includes(input.role)) {
       return res.status(400).json({
         error: 'INVALID_ROLE',
@@ -167,6 +166,56 @@ r.patch('/:userId', validate(AdminUpdateUserRequest), async (req, res, next) => 
   }
 });
 
+r.post(
+  '/:userId/reset-password',
+  validate(AdminResetUserPasswordRequest),
+  async (req, res, next) => {
+    try {
+      const userId = req.params.userId;
+      if (!userId) {
+        return res.status(400).json({
+          error: 'INVALID_USER_ID',
+          message: 'User id is required',
+          traceId: req.requestId,
+        });
+      }
+
+      if (req.auth?.userId === userId) {
+        return res.status(400).json({
+          error: 'CANNOT_RESET_SELF',
+          message: 'You cannot reset your own password from this screen.',
+          traceId: req.requestId,
+        });
+      }
+
+      const body = req.body as AdminResetUserPasswordRequest;
+      const passwordHash = await bcrypt.hash(body.password, 10);
+
+      const updated = await userRepository.setUserPassword(userId, passwordHash);
+      if (!updated) {
+        return res.status(404).json({
+          error: 'USER_NOT_FOUND',
+          message: 'User not found',
+          traceId: req.requestId,
+        });
+      }
+
+      if (req.auth) {
+        logAudit({
+          actorUserId: req.auth.userId,
+          action: 'ADMIN_RESET_USER_PASSWORD',
+          entity: { type: 'USER', id: userId },
+          meta: { targetEmail: updated.email },
+        });
+      }
+
+      return res.status(200).json({ ok: true });
+    } catch (err) {
+      return next(err);
+    }
+  },
+);
+
 r.delete('/:userId', async (req, res, next) => {
   try {
     const userId = req.params.userId;
@@ -178,7 +227,6 @@ r.delete('/:userId', async (req, res, next) => {
       });
     }
 
-    // disallow deleting self (optional but strongly recommended)
     if (req.auth?.userId === userId) {
       return res.status(400).json({
         error: 'CANNOT_DELETE_SELF',

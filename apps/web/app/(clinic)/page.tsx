@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -19,7 +18,6 @@ export default function DashboardPage() {
   const auth = useAuth();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
-  // ✅ Clinic “today” key (Asia/Kolkata)
   const todayIso = React.useMemo(() => clinicDateISO(new Date()), []);
   const dateForPatients = selectedDate ?? todayIso;
 
@@ -41,7 +39,6 @@ export default function DashboardPage() {
       })),
     );
 
-    // ✅ Latest on top
     flat.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
     return flat;
   }, [breakdownQuery.data]);

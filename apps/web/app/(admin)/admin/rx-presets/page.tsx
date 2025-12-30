@@ -55,7 +55,6 @@ export default function AdminRxPresetsPage() {
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [cursorStack, setCursorStack] = useState<(string | undefined)[]>([]);
 
-  // ✅ Reset pagination + debounce search when query OR filter changes
   useEffect(() => {
     const t = window.setTimeout(() => {
       setDebounced(query.trim());
@@ -74,7 +73,6 @@ export default function AdminRxPresetsPage() {
 
   const [deleteRxPreset, deleteState] = useAdminDeleteRxPresetMutation();
 
-  // ✅ doctor lookup like Medicines page
   const doctorsQ = useGetDoctorsQuery(undefined, { skip: !canUseApi });
   const doctorNameByUserId = useMemo(() => {
     const map = new Map<string, string>();
@@ -100,7 +98,6 @@ export default function AdminRxPresetsPage() {
   const total = list.data?.total ?? 0;
   const nextCursor = list.data?.nextCursor ?? null;
 
-  // ✅ client-side filter (admin endpoint doesn’t support filter param)
   const items = useMemo(() => {
     if (filter === 'ALL') return rawItems;
 
@@ -116,7 +113,6 @@ export default function AdminRxPresetsPage() {
     });
   }, [rawItems, filter, auth.userId]);
 
-  // ✅ show count for the current page after filtering
   const showing = items.length;
 
   const canPrev = cursorStack.length > 0;
@@ -125,7 +121,6 @@ export default function AdminRxPresetsPage() {
   const headerRight = useMemo(() => {
     return (
       <div className="flex items-center gap-2">
-        {/* ✅ Filter dropdown like doctor page */}
         <Select value={filter} onValueChange={(v) => setFilter(v as RxPresetFilter)}>
           <SelectTrigger className="h-9 w-48 rounded-xl bg-white text-sm">
             <SelectValue placeholder="Filter" />

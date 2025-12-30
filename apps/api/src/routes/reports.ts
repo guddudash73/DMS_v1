@@ -1,11 +1,9 @@
-// apps/api/src/routes/reports.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import {
   DailyReportQuery,
   DailyPatientSummaryRangeQuery,
   DailyVisitsBreakdownQuery,
   DoctorDailyVisitsBreakdownQuery,
-  DoctorRecentVisitsQuery,
   DoctorRecentCompletedQuery,
 } from '@dms/types';
 import type {
@@ -13,7 +11,6 @@ import type {
   DailyPatientSummary,
   DailyVisitsBreakdownResponse,
   DoctorDailyVisitsBreakdownResponse,
-  DoctorRecentVisitsResponse,
   DoctorRecentCompletedResponse,
 } from '@dms/types';
 import { visitRepository } from '../repositories/visitRepository';
@@ -38,12 +35,6 @@ function pad2(n: number): string {
   return String(n).padStart(2, '0');
 }
 
-/**
- * Add days to a YYYY-MM-DD "day key" safely (pure day math).
- *
- * ✅ Does not use toISOString().slice(0,10) to avoid spreading that pattern.
- * ✅ Operates in UTC because dateISO is already a day key (timezone-independent).
- */
 function addDaysISO(dateISO: string, days: number): string {
   const [y, m, d] = dateISO.split('-').map((x) => Number(x));
   const dt = new Date(Date.UTC(y, m - 1, d + days));
@@ -61,8 +52,9 @@ function isValidISODate(dateISO: string): boolean {
 
 const asyncHandler =
   (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
-  (req: Request, res: Response, next: NextFunction) =>
-    void fn(req, res, next).catch(next);
+  (req: Request, res: Response, next: NextFunction) => {
+    fn(req, res, next).catch(next);
+  };
 
 async function buildDailyPatientSummary(date: string): Promise<DailyPatientSummary> {
   const visits = await visitRepository.listByDate(date);
@@ -98,25 +90,16 @@ async function buildDailyPatientSummary(date: string): Promise<DailyPatientSumma
 
   const totalPatients = newPatients + followupPatients + zeroBilledVisits;
 
-  return {
-    date,
-    newPatients,
-    followupPatients,
-    zeroBilledVisits,
-    totalPatients,
-  };
+  return { date, newPatients, followupPatients, zeroBilledVisits, totalPatients };
 }
 
 router.get(
   '/daily',
   asyncHandler(async (req, res) => {
     const parsed = DailyReportQuery.safeParse(req.query);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
     const { date } = parsed.data;
-
     const visits = await visitRepository.listByDate(date);
 
     const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
@@ -158,19 +141,12 @@ router.get(
         for (const line of billing.items) {
           const key = line.code ?? line.description;
           if (!key) continue;
-
-          const current = procedureCounts[key] ?? 0;
-          procedureCounts[key] = current + line.quantity;
+          procedureCounts[key] = (procedureCounts[key] ?? 0) + line.quantity;
         }
       }
     }
 
-    return res.status(200).json({
-      date,
-      visitCountsByStatus,
-      totalRevenue,
-      procedureCounts,
-    });
+    return res.status(200).json({ date, visitCountsByStatus, totalRevenue, procedureCounts });
   }),
 );
 
@@ -178,14 +154,10 @@ router.get(
   '/daily/patients',
   asyncHandler(async (req, res) => {
     const parsed = DailyReportQuery.safeParse(req.query);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
     const { date } = parsed.data;
-
     const summary = await buildDailyPatientSummary(date);
-
     return res.status(200).json(summary);
   }),
 );
@@ -194,12 +166,9 @@ router.get(
   '/daily/patients/series',
   asyncHandler(async (req, res) => {
     const parsed = DailyPatientSummaryRangeQuery.safeParse(req.query);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
     const { startDate, endDate } = parsed.data;
-
     const points: DailyPatientSummary[] = [];
 
     if (!isValidISODate(startDate) || !isValidISODate(endDate) || startDate > endDate) {
@@ -208,8 +177,7 @@ router.get(
 
     let current = startDate;
     while (current <= endDate) {
-      const summary = await buildDailyPatientSummary(current);
-      points.push(summary);
+      points.push(await buildDailyPatientSummary(current));
       current = addDaysISO(current, 1);
     }
 
@@ -221,43 +189,55 @@ router.get(
   '/daily/doctor/patients/series',
   asyncHandler(async (req, res) => {
     const parsed = DailyPatientSummaryRangeQuery.safeParse(req.query);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
     const doctorId = req.auth?.userId;
-    if (!doctorId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    if (!doctorId) return res.status(401).json({ error: 'Unauthorized' });
 
     const { startDate, endDate } = parsed.data;
-
     const points: DailyPatientSummary[] = [];
 
     if (!isValidISODate(startDate) || !isValidISODate(endDate) || startDate > endDate) {
       return res.status(200).json({ points });
     }
 
+    // Build one day at a time, scoped to the authenticated doctor
     let current = startDate;
     while (current <= endDate) {
-      const dateStr = current;
+      const visits = await visitRepository.getDoctorQueue({ doctorId, date: current });
 
-      const visits = await visitRepository.getDoctorQueue({ doctorId, date: dateStr });
+      const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
+      const patientResults = await Promise.all(
+        uniquePatientIds.map((id) => patientRepository.getById(id)),
+      );
+
+      const existingPatients = patientResults.filter((p): p is Patient => p !== null);
+      const allowedPatientIds = new Set(existingPatients.map((p) => p.patientId));
+      const filteredVisits = visits.filter((v) => allowedPatientIds.has(v.patientId));
 
       let newPatients = 0;
       let followupPatients = 0;
       let zeroBilledVisits = 0;
 
-      for (const v of visits) {
-        if (v.tag === 'N') newPatients++;
-        else if (v.tag === 'F') followupPatients++;
-        else if (v.tag === 'Z') zeroBilledVisits++;
+      for (const visit of filteredVisits) {
+        switch (visit.tag) {
+          case 'N':
+            newPatients++;
+            break;
+          case 'F':
+            followupPatients++;
+            break;
+          case 'Z':
+            zeroBilledVisits++;
+            break;
+          default:
+        }
       }
 
       const totalPatients = newPatients + followupPatients + zeroBilledVisits;
 
       points.push({
-        date: dateStr,
+        date: current,
         newPatients,
         followupPatients,
         zeroBilledVisits,
@@ -271,22 +251,14 @@ router.get(
   }),
 );
 
-/**
- * ✅ Doctor panel: daily breakdown (logged-in doctor only)
- * GET /reports/daily/doctor/visits-breakdown?date=YYYY-MM-DD
- */
 router.get(
   '/daily/doctor/visits-breakdown',
   asyncHandler(async (req, res) => {
     const parsed = DoctorDailyVisitsBreakdownQuery.safeParse(req.query);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
     const doctorId = req.auth?.userId;
-    if (!doctorId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    if (!doctorId) return res.status(401).json({ error: 'Unauthorized' });
 
     const { date } = parsed.data;
 
@@ -328,8 +300,8 @@ router.get(
           createdAt: v.createdAt,
           updatedAt: v.updatedAt,
           patientName: p.name,
-          patientPhone: (p as any).phone,
-          patientGender: (p as any).gender,
+          patientPhone: p.phone,
+          patientGender: p.gender,
         };
       })
       .filter((x): x is NonNullable<typeof x> => x !== null)
@@ -347,21 +319,13 @@ router.get(
   }),
 );
 
-/**
- * Reception panel:
- * given a date, return all visits for that date grouped by doctor,
- * including doctor displayName and patient details.
- */
 router.get(
   '/daily/visits-breakdown',
   asyncHandler(async (req, res) => {
     const parsed = DailyVisitsBreakdownQuery.safeParse(req.query);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
     const { date } = parsed.data;
-
     const visits = await visitRepository.listByDate(date);
 
     if (!visits.length) {
@@ -405,8 +369,8 @@ router.get(
 
           patientId: p.patientId,
           patientName: p.name,
-          patientPhone: (p as any).phone,
-          patientGender: (p as any).gender,
+          patientPhone: p.phone,
+          patientGender: p.gender,
 
           doctorId: v.doctorId,
           doctorName,
@@ -447,14 +411,10 @@ router.get(
   '/daily/doctor/recent-completed',
   asyncHandler(async (req, res) => {
     const parsed = DoctorRecentCompletedQuery.safeParse(req.query);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
     const doctorId = req.auth?.userId;
-    if (!doctorId) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
+    if (!doctorId) return res.status(401).json({ error: 'Unauthorized' });
 
     const todayIso = clinicDateISO();
     const date = parsed.data.date ?? todayIso;
@@ -469,11 +429,7 @@ router.get(
       .slice(0, limit);
 
     if (done.length === 0) {
-      const empty: DoctorRecentCompletedResponse = {
-        date,
-        doctorId,
-        items: [],
-      };
+      const empty: DoctorRecentCompletedResponse = { date, doctorId, items: [] };
       return res.status(200).json(empty);
     }
 

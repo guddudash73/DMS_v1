@@ -1,4 +1,3 @@
-// apps/api/src/routes/followups.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { sendZodValidationError } from '../lib/validation';
@@ -19,8 +18,9 @@ const DailyFollowupsQuery = z.object({
 
 const asyncHandler =
   (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
-  (req: Request, res: Response, next: NextFunction) =>
-    void fn(req, res, next).catch(next);
+  (req: Request, res: Response, next: NextFunction) => {
+    fn(req, res, next).catch(next);
+  };
 
 const handleValidationError = (req: Request, res: Response, issues: z.ZodError['issues']) =>
   sendZodValidationError(req, res, issues);
@@ -36,13 +36,24 @@ router.get(
     const date = parsed.data.date ?? todayIso();
 
     try {
-      // ✅ RETURN ALL STATUSES
       const followups = await followupRepository.listByFollowUpDate(date);
 
-      const items = [];
+      const items: Array<{
+        followupId: string;
+        visitId: string;
+        followUpDate: string;
+        reason?: string;
+        contactMethod: string;
+        status: string;
+        createdAt: number;
+        updatedAt: number;
+        patientId: string;
+        patientName: string;
+        patientPhone?: string;
+      }> = [];
 
       for (const fu of followups) {
-        const visit = await visitRepository.getById(fu.visitId as any);
+        const visit = await visitRepository.getById(fu.visitId);
         if (!visit) continue;
 
         const patient = await patientRepository.getById(visit.patientId);
@@ -59,7 +70,7 @@ router.get(
           updatedAt: fu.updatedAt,
           patientId: patient.patientId,
           patientName: patient.name,
-          patientPhone: patient.phone ?? undefined,
+          patientPhone: patient.phone || undefined,
         });
       }
 

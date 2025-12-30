@@ -1,4 +1,3 @@
-// apps/api/src/routes/auth.ts
 import { Router, type Response } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';
@@ -13,7 +12,8 @@ import { logInfo, logAudit } from '../lib/logger';
 import { loginRateLimiter } from '../middlewares/rateLimit';
 
 const r = Router();
-const MAX_LOGIN_ATTEMPTS = 5;
+
+const MAX_LOGIN_ATTEMPTS = 20;
 const LOCK_WINDOW_MS = 15 * 60 * 1000;
 
 const COOKIE_NAME = 'refreshToken';
@@ -62,7 +62,6 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
       });
     }
 
-    // ✅ NEW: inactive users cannot login
     if (user.active === false) {
       return res.status(403).json({
         error: 'USER_INACTIVE',
@@ -164,7 +163,6 @@ r.post('/refresh', async (req, res, next) => {
       throw new AuthError('User not found', 401, 'INVALID_REFRESH_TOKEN');
     }
 
-    // ✅ NEW: inactive users cannot refresh
     if (user.active === false) {
       clearRefreshCookie(res);
       throw new AuthError('User inactive', 403, 'USER_INACTIVE');

@@ -1,4 +1,3 @@
-// apps/api/src/repositories/visitRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   ConditionalCheckFailedException,
@@ -56,11 +55,6 @@ const buildDoctorDayLockKey = (doctorId: string, visitDate: string) => ({
   SK: 'IN_PROGRESS_LOCK',
 });
 
-/**
- * ✅ IMPORTANT
- * Never use toISOString().slice(0,10) for "clinic day".
- * That is UTC and causes the midnight IST bug.
- */
 const clinicDateKeyFromMs = (timestampMs: number): string => clinicDateISOFromMs(timestampMs);
 
 const buildGsi2keys = (doctorId: string, date: string, status: VisitStatus, ts: number) => ({
@@ -73,17 +67,11 @@ const buildGsi3Keys = (date: string, visitId: string) => ({
   GSI3SK: `TYPE#VISIT#ID#${visitId}`,
 });
 
-// ----------------------------
-// ✅ OPD number counters
-// ----------------------------
-
-// Daily counter (all visits for date)
 const buildOpdDailyCounterKey = (visitDate: string) => ({
   PK: `COUNTER#OPD#${visitDate}`,
   SK: 'META',
 });
 
-// Per-tag counter (N/F/Z for date)
 const buildOpdTagCounterKey = (visitDate: string, tag: VisitTag) => ({
   PK: `COUNTER#OPD_TAG#${visitDate}#${tag}`,
   SK: 'META',
@@ -112,7 +100,6 @@ async function nextCounter(key: { PK: string; SK: string }): Promise<number> {
 }
 
 function tagLabel(tag: VisitTag | undefined): string {
-  // Default to SDNEW if tag missing
   if (tag === 'F') return 'SDFOLLOWUP';
   if (tag === 'Z') return 'SDZEROBILLED';
   return 'SDNEW';
@@ -124,7 +111,6 @@ function formatOpdNo(
   tag: VisitTag | undefined,
   tagSeq: number,
 ) {
-  // yy/mm/dd/001/SDNEW/001
   const yy = visitDate.slice(2, 4);
   const mm = visitDate.slice(5, 7);
   const dd = visitDate.slice(8, 10);
@@ -162,13 +148,11 @@ export class DynamoDBVisitRepository implements VisitRepository {
     const now = Date.now();
     const visitId = randomUUID();
 
-    // ✅ clinic-local day key
     const visitDate = clinicDateKeyFromMs(now);
 
     const status: VisitStatus = 'QUEUED';
     const tag: VisitTag | undefined = input.tag;
 
-    // ✅ OPD No uses clinic-local visitDate
     const dailySeq = await nextCounter(buildOpdDailyCounterKey(visitDate));
     const tagForCounter: VisitTag = tag ?? 'N';
     const tagSeq = await nextCounter(buildOpdTagCounterKey(visitDate, tagForCounter));
@@ -457,7 +441,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
   async getDoctorQueue(params: VisitQueueQuery): Promise<Visit[]> {
     const { doctorId, date, status } = params;
 
-    // ✅ default date MUST be clinic-local date key
     const todayClinic = clinicDateKeyFromMs(Date.now());
     const queryDate = date ?? todayClinic;
 

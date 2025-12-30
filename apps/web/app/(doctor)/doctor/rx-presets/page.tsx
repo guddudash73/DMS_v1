@@ -20,7 +20,7 @@ import {
   useGetMeQuery,
   useGetRxPresetsQuery,
   useDeleteRxPresetMutation,
-  useUpdateRxPresetMutation, // ✅ used for PUBLIC <-> PRIVATE
+  useUpdateRxPresetMutation,
 } from '@/src/store/api';
 import type { PrescriptionPreset, RxPresetFilter } from '@dms/types';
 
@@ -100,7 +100,6 @@ export default function DoctorRxPresetsPage() {
     await updatePreset({ id, patch: { scope: 'PUBLIC' } }).unwrap();
   };
 
-  // ✅ NEW: Make Private again
   const onMakePrivate = async (id: string, name: string) => {
     const ok = window.confirm(
       `Make "${name}" private again?\n\nOnly you will be able to see it (and admins).`,
@@ -224,13 +223,9 @@ export default function DoctorRxPresetsPage() {
                 const isPrivate = !scope || scope === 'PRIVATE';
                 const isPublic = scope === 'PUBLIC';
 
-                // ✅ Existing rules:
                 const canEdit = !isAdminPreset && (isOwner || auth.role === 'ADMIN');
                 const canDelete = !isAdminPreset && (isOwner || auth.role === 'ADMIN');
 
-                // ✅ NEW toggle rules:
-                // - Only owner can toggle PRIVATE <-> PUBLIC
-                // - Admin presets cannot be toggled
                 const canToggleScope = !isAdminPreset && isOwner;
 
                 return (
@@ -261,7 +256,6 @@ export default function DoctorRxPresetsPage() {
 
                     <td className="px-5 py-4">
                       <div className="flex items-center justify-end gap-2">
-                        {/* ✅ View always */}
                         <Button asChild variant="outline" className="h-8 rounded-xl px-3 text-xs">
                           <Link href={`/doctor/rx-presets/${p.id}/view`}>
                             <Eye className="mr-2 h-4 w-4" />
@@ -269,10 +263,8 @@ export default function DoctorRxPresetsPage() {
                           </Link>
                         </Button>
 
-                        {/* ✅ Admin preset => ONLY view */}
                         {!isAdminPreset ? (
                           <>
-                            {/* ✅ Edit */}
                             {canEdit ? (
                               <Button
                                 asChild
@@ -286,7 +278,6 @@ export default function DoctorRxPresetsPage() {
                               </Button>
                             ) : null}
 
-                            {/* ✅ NEW: Toggle scope buttons */}
                             {canToggleScope && isPrivate ? (
                               <Button
                                 variant="secondary"
@@ -311,7 +302,6 @@ export default function DoctorRxPresetsPage() {
                               </Button>
                             ) : null}
 
-                            {/* ✅ Delete */}
                             {canDelete ? (
                               <Button
                                 variant="destructive"

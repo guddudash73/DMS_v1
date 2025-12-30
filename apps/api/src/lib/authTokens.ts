@@ -1,4 +1,3 @@
-// apps/api/src/lib/authTokens.ts
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'node:crypto';
 import {
@@ -6,9 +5,6 @@ import {
   REFRESH_TOKEN_TTL_SEC,
   JWT_ACCESS_SECRET,
   JWT_REFRESH_SECRET,
-  // Recommended to add:
-  // JWT_ISSUER,
-  // JWT_AUDIENCE,
 } from '../config/env';
 import { JwtClaims, RefreshTokenClaims } from '@dms/types';
 import type { Role } from '@dms/types';
@@ -24,15 +20,12 @@ export const signAccessToken = (userId: string, role: Role): { token: string; ex
   const nowSec = Math.floor(Date.now() / 1000);
   const exp = nowSec + ACCESS_TOKEN_TTL_SEC;
 
-  // Recommended: add `type: 'access'` to your JwtClaims schema.
   const payload = {
     sub: userId,
     role,
     iat: nowSec,
     exp,
     type: 'access' as const,
-    // iss: JWT_ISSUER,
-    // aud: JWT_AUDIENCE,
   };
 
   const token = jwt.sign(payload, JWT_ACCESS_SECRET, { algorithm: 'HS256' });
@@ -54,8 +47,6 @@ export const signRefreshToken = (
     exp,
     jti,
     type: 'refresh' as const,
-    // iss: JWT_ISSUER,
-    // aud: JWT_AUDIENCE,
   };
 
   const token = jwt.sign(payload, JWT_REFRESH_SECRET, { algorithm: 'HS256' });
@@ -66,18 +57,12 @@ export const verifyAccessToken = (token: string) => {
   const decoded = jwt.verify(token, JWT_ACCESS_SECRET, {
     algorithms: ['HS256'],
     clockTolerance: CLOCK_TOLERANCE_SEC,
-    // issuer: JWT_ISSUER,
-    // audience: JWT_AUDIENCE,
   });
 
-  // Runtime shape validation (no trusting casts)
   const parsed = JwtClaims.safeParse(decoded);
   if (!parsed.success) {
     throw new Error('Invalid access token claims');
   }
-
-  // If you add `type: 'access'` to JwtClaims schema, enforce it:
-  // if (parsed.data.type !== 'access') throw new Error('Invalid access token type');
 
   return parsed.data;
 };
@@ -86,8 +71,6 @@ export const verifyRefreshToken = (token: string) => {
   const decoded = jwt.verify(token, JWT_REFRESH_SECRET, {
     algorithms: ['HS256'],
     clockTolerance: CLOCK_TOLERANCE_SEC,
-    // issuer: JWT_ISSUER,
-    // audience: JWT_AUDIENCE,
   });
 
   const parsed = RefreshTokenClaims.safeParse(decoded);
@@ -95,7 +78,6 @@ export const verifyRefreshToken = (token: string) => {
     throw new Error('Invalid refresh token claims');
   }
 
-  // Your schema already enforces this, but it’s fine to keep explicit checks too
   if (parsed.data.type !== 'refresh') {
     throw new Error('Invalid refresh token type');
   }

@@ -8,7 +8,6 @@ module.exports = {
     sourceType: 'module',
   },
   settings: {
-    // Resolve TS path aliases and workspace package exports in monorepo
     'import/resolver': {
       typescript: {
         project: ['./apps/*/tsconfig.json', './packages/*/tsconfig.json'],

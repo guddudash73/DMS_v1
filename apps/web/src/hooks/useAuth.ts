@@ -1,4 +1,3 @@
-// apps/web/src/hooks/useAuth.ts
 'use client';
 
 import { useSelector } from 'react-redux';
@@ -8,7 +7,6 @@ export function useAuth() {
   return useSelector((state: RootState) => state.auth);
 }
 
-// Backwards-compatible alias for your layouts
 export function useRequireAuth() {
   return useAuth();
 }

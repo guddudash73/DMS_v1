@@ -41,11 +41,6 @@ type ApiError = {
 
 type FollowupStatus = 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
 
-/**
- * ✅ IMPORTANT: Use LOCAL YYYY-MM-DD (NOT toISOString)
- * toISOString() converts to UTC and causes off-by-one in IST.
- */
-
 function parseISODateToLocalDate(iso: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
   const [y, m, d] = iso.split('-').map((x) => Number(x));
@@ -109,16 +104,10 @@ export default function RemindersPage() {
     skip: !canUseApi,
   });
 
-  /**
-   * ✅ Local overlay so items don't disappear after marking done/cancel.
-   * - Keeps UI stable even if RTK mutation optimistically removes.
-   * - NOTE: To persist across refresh, backend must return non-ACTIVE too.
-   */
   const [localStatusById, setLocalStatusById] = useState<Record<string, FollowupStatus>>({});
   const [localOrder, setLocalOrder] = useState<string[]>([]);
   const [localItemsById, setLocalItemsById] = useState<Record<string, any>>({});
 
-  // Merge fetched items into local store (so we can keep them visible)
   useEffect(() => {
     const fetched = followupsQuery.data?.items ?? [];
     if (fetched.length === 0) return;
@@ -142,15 +131,12 @@ export default function RemindersPage() {
     });
   }, [followupsQuery.data?.items]);
 
-  // Current visible list for the selected date
   const items = useMemo(() => {
     const fetched = followupsQuery.data?.items ?? [];
     const fetchedIds = new Set(fetched.map((x) => x.followupId));
 
-    // Start with fetched items
     const base = [...fetched];
 
-    // Add locally-kept items that were previously fetched but disappeared due to status change
     for (const id of localOrder) {
       if (fetchedIds.has(id)) continue;
       const it = localItemsById[id];
@@ -159,7 +145,6 @@ export default function RemindersPage() {
       base.push(it);
     }
 
-    // Apply local status override
     return base.map((it: any) => {
       const local = localStatusById[it.followupId];
       return local ? { ...it, status: local } : it;
@@ -180,12 +165,6 @@ export default function RemindersPage() {
   const [updateStatus, updateStatusState] = useUpdateFollowupStatusMutation();
   const [createFollowup, createFollowupState] = useCreateVisitFollowupMutation();
 
-  /**
-   * ✅ Auto-create flow (arrives from printing page)
-   * /reminders?mode=add&visitId=...&date=YYYY-MM-DD&contact=CALL&reason=...
-   *
-   * Run once, then clean URL.
-   */
   const autoCreateRan = useRef(false);
 
   useEffect(() => {
@@ -226,13 +205,11 @@ export default function RemindersPage() {
 
         toast.success('Follow-up added');
 
-        // Ensure it appears immediately in local store even before refetch
         setLocalItemsById((prev) => ({ ...prev, [created.followupId]: created }));
         setLocalOrder((prev) =>
           prev.includes(created.followupId) ? prev : [...prev, created.followupId],
         );
 
-        // Clean URL
         const next = new URLSearchParams(searchParams.toString());
         next.delete('mode');
         next.delete('visitId');
@@ -247,7 +224,6 @@ export default function RemindersPage() {
         toast.error(e?.data?.message ?? e?.message ?? 'Failed to add follow-up');
       }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canUseApi, searchParams, createFollowup, router]);
 
   const markCompleted = async (visitId: string, followupId: string) => {
@@ -256,7 +232,6 @@ export default function RemindersPage() {
       return;
     }
 
-    // Optimistic UI: keep row + show Done badge immediately
     setLocalStatusById((prev) => ({ ...prev, [followupId]: 'COMPLETED' }));
 
     try {
@@ -268,7 +243,6 @@ export default function RemindersPage() {
       }).unwrap();
       toast.success('Marked as completed');
     } catch (e: any) {
-      // rollback
       setLocalStatusById((prev) => {
         const next = { ...prev };
         delete next[followupId];
@@ -284,7 +258,6 @@ export default function RemindersPage() {
       return;
     }
 
-    // Optimistic UI: keep row + show Cancelled badge immediately
     setLocalStatusById((prev) => ({ ...prev, [followupId]: 'CANCELLED' }));
 
     try {
@@ -296,7 +269,6 @@ export default function RemindersPage() {
       }).unwrap();
       toast.success('Cancelled');
     } catch (e: any) {
-      // rollback
       setLocalStatusById((prev) => {
         const next = { ...prev };
         delete next[followupId];

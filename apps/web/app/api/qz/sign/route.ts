@@ -1,8 +1,7 @@
-// apps/web/app/api/qz/sign/route.ts
 import { NextResponse } from 'next/server';
 import crypto from 'node:crypto';
 
-export const runtime = 'nodejs'; // IMPORTANT: ensure Node runtime (not Edge)
+export const runtime = 'nodejs';
 
 type Body = { request?: string };
 
@@ -23,10 +22,8 @@ export async function POST(req: Request) {
       );
     }
 
-    // Decode base64 env -> PEM text
     const privateKeyPem = Buffer.from(pemB64, 'base64').toString('utf8').trim();
 
-    // sanity check
     if (!privateKeyPem.includes('BEGIN PRIVATE KEY')) {
       return NextResponse.json(
         { error: 'QZ_KEY_INVALID', message: 'Decoded key is not a PEM private key' },
@@ -34,14 +31,12 @@ export async function POST(req: Request) {
       );
     }
 
-    // QZ expects SHA512withRSA
     const signature = crypto.sign('RSA-SHA512', Buffer.from(requestToSign, 'utf8'), {
       key: privateKeyPem,
     });
 
     return NextResponse.json({ signature: signature.toString('base64') });
   } catch (err) {
-    // Log for local dev
     console.error('[qz/sign] failed:', err);
     return NextResponse.json(
       { error: 'SIGN_FAILED', message: err instanceof Error ? err.message : String(err) },

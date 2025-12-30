@@ -37,7 +37,7 @@ export const createRateLimiter = (options: RateLimitOptions) => {
       try {
         onLimitReached(req);
       } catch {
-        // Intentionally ignore errors from onLimitReached to avoid impacting the request flow
+        // Ignore
       }
     }
 

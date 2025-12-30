@@ -1,4 +1,3 @@
-// apps/web/src/lib/printing/qz.ts
 import qz from 'qz-tray';
 
 async function fetchTextOrEmpty(url: string): Promise<string> {
@@ -22,7 +21,6 @@ export async function initQzSecurity() {
   securityInitialized = true;
 
   qz.security.setCertificatePromise(async () => {
-    // apps/web/public/qz/digital-certificate.txt
     return await fetchTextOrEmpty('/qz/digital-certificate.txt');
   });
 
@@ -48,7 +46,6 @@ export async function ensureQzConnected() {
   if (!connectInFlight) {
     connectInFlight = (async () => {
       await initQzSecurity();
-      // local dev: ws://localhost:8182
       await qz.websocket.connect({ usingSecure: false });
     })().finally(() => {
       connectInFlight = null;
@@ -66,31 +63,21 @@ export async function listPrinters(): Promise<string[]> {
   return [];
 }
 
-// -----------------------------
-// ✅ NEW: preferred printer pick
-// -----------------------------
 function normalize(s: string) {
   return s.trim().toLowerCase();
 }
 
-/**
- * Picks a printer from the list based on preferred names.
- * - Exact match (case-insensitive) wins
- * - Otherwise: substring match (case-insensitive)
- */
 export function pickPreferredPrinter(printers: string[], preferredNames: string[]): string | null {
   if (!printers.length) return null;
 
   const preferredNorm = preferredNames.map(normalize).filter(Boolean);
   const printersNorm = printers.map((p) => ({ raw: p, norm: normalize(p) }));
 
-  // 1) exact match
   for (const pref of preferredNorm) {
     const exact = printersNorm.find((p) => p.norm === pref);
     if (exact) return exact.raw;
   }
 
-  // 2) substring match
   for (const pref of preferredNorm) {
     const partial = printersNorm.find((p) => p.norm.includes(pref));
     if (partial) return partial.raw;
@@ -99,9 +86,6 @@ export function pickPreferredPrinter(printers: string[], preferredNames: string[
   return null;
 }
 
-/**
- * Print raw ESC/POS "command" text.
- */
 export async function printRaw(printerName: string, rawCommand: string): Promise<void> {
   await ensureQzConnected();
 

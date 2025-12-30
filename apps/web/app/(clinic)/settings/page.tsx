@@ -40,48 +40,64 @@ export default function SettingPage() {
   };
 
   return (
-    <section className="space-y-4">
-      <h1 className="text-xl font-semibold">Settings</h1>
-
-      <Card className="rounded-2xl border bg-white p-4 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-sm font-medium">Auto-print token on Visit creation</div>
-            <div className="text-xs text-gray-500">Requires QZ Tray on the reception PC.</div>
+    <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
+      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 2xl:gap-10">
+        <div>
+          <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
+          <div className="mt-1 text-xs text-gray-500">
+            Configure printing and token behavior for reception.
           </div>
-          <Switch checked={autoPrintToken} onCheckedChange={setAutoPrintToken} />
         </div>
 
-        <div className="space-y-2">
-          <div className="text-sm font-medium">Receipt printer</div>
+        <Card className="rounded-2xl border bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-6">
+            <div className="flex items-center justify-between gap-4">
+              <div>
+                <div className="text-sm font-medium text-gray-900">
+                  Auto-print token on Visit creation
+                </div>
+                <div className="mt-1 text-xs text-gray-500">
+                  Requires QZ Tray on the reception PC.
+                </div>
+              </div>
+              <Switch checked={autoPrintToken} onCheckedChange={setAutoPrintToken} />
+            </div>
 
-          <div className="flex gap-2">
-            <Button type="button" variant="outline" onClick={refreshPrinters} disabled={busy}>
-              {busy ? 'Loading…' : 'Detect printers'}
-            </Button>
-            <Button type="button" onClick={save}>
-              Save
-            </Button>
+            <div className="h-px w-full bg-gray-100" />
+
+            <div className="flex flex-col gap-3">
+              <div>
+                <div className="text-sm font-medium text-gray-900">Receipt printer</div>
+                <div className="mt-1 text-xs text-gray-500">
+                  Printer must be visible to QZ Tray (USB or network).
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={refreshPrinters} disabled={busy}>
+                  {busy ? 'Loading…' : 'Detect printers'}
+                </Button>
+                <Button type="button" onClick={save} disabled={busy}>
+                  Save
+                </Button>
+              </div>
+
+              <select
+                className="h-10 w-full rounded-xl border bg-white px-3 text-sm"
+                value={printerName}
+                onChange={(e) => setPrinterName(e.target.value)}
+              >
+                <option value="">Select printer…</option>
+                {printers.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
-
-          <select
-            className="mt-2 h-10 w-full rounded-xl border bg-white px-3 text-sm"
-            value={printerName}
-            onChange={(e) => setPrinterName(e.target.value)}
-          >
-            <option value="">Select printer…</option>
-            {printers.map((p) => (
-              <option key={p} value={p}>
-                {p}
-              </option>
-            ))}
-          </select>
-
-          <p className="text-xs text-gray-500">
-            Printer must be visible to QZ Tray (USB or network).
-          </p>
-        </div>
-      </Card>
+        </Card>
+      </div>
     </section>
   );
 }

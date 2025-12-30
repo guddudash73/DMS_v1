@@ -39,9 +39,6 @@ function IconCheck(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-/**
- * ✅ LOCAL YYYY-MM-DD (IST-safe). Never use toISOString().slice(0,10) for date-only UI.
- */
 function toLocalISODate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -61,7 +58,6 @@ function safeParseDobToDate(dob: unknown): Date | null {
     const s = dob.trim();
     if (!s) return null;
 
-    // handle YYYY-MM-DD safely as local date
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
     if (m) {
       const y = Number(m[1]);
@@ -103,7 +99,6 @@ function normalizeSex(raw: unknown): PatientSex | undefined {
   return undefined;
 }
 
-/** If doctorName looks like "Doctor (uuid)" or raw uuid, treat it as not-a-name. */
 function looksLikeDoctorIdLabel(name?: string) {
   if (!name) return true;
   const s = name.trim();
@@ -140,27 +135,20 @@ export default function VisitCheckoutPrintingPage() {
   const billQuery = useGetVisitBillQuery({ visitId }, { skip: !visitId });
   const bill = billQuery.data ?? null;
 
-  // ✅ Doctor list (used to map doctorId -> fullName + registrationNumber)
   const doctorsQuery = useGetDoctorsQuery(undefined);
 
   const [xrayPrintOpen, setXrayPrintOpen] = React.useState(false);
   const [billPrintOpen, setBillPrintOpen] = React.useState(false);
   const [doneSuccess, setDoneSuccess] = React.useState(false);
 
-  // ------------------------
-  // Patient computed fields
-  // ------------------------
   const patientName = patientQuery.data?.name;
   const patientPhone = patientQuery.data?.phone;
 
-  // ✅ SD ID fallback: patient.sdId -> visit.sdId
   const patientSdId = (patientQuery.data as any)?.sdId ?? (visit as any)?.sdId ?? undefined;
 
-  // ✅ OPD fallback keys
   const opdNo =
     (visit as any)?.opdNo ?? (visit as any)?.opdId ?? (visit as any)?.opdNumber ?? undefined;
 
-  // ✅ DOB + Sex => Age/Sex (visit createdAt safe)
   const patientDobRaw =
     (patientQuery.data as any)?.dob ??
     (patientQuery.data as any)?.dateOfBirth ??
@@ -182,9 +170,6 @@ export default function VisitCheckoutPrintingPage() {
   const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
   const patientSex = normalizeSex(patientSexRaw);
 
-  // ------------------------
-  // Doctor resolved fields
-  // ------------------------
   const doctorId = (visit as any)?.doctorId as string | undefined;
 
   const doctorFromList = React.useMemo(() => {
@@ -201,15 +186,12 @@ export default function VisitCheckoutPrintingPage() {
 
   const doctorRegNoResolved = (doctorFromList as any)?.registrationNumber ?? undefined;
 
-  // ✅ workspace-like loading placeholder:
-  // while list is loading/fetching, show '—' instead of "Doctor (id)"
   const resolvedDoctorName = React.useMemo(() => {
     if (doctorNameResolved && !looksLikeDoctorIdLabel(doctorNameResolved))
       return doctorNameResolved;
 
     if (doctorsQuery.isLoading || doctorsQuery.isFetching) return undefined;
 
-    // fallback (if still not found)
     return doctorId ? `Doctor (${doctorId})` : undefined;
   }, [doctorNameResolved, doctorsQuery.isLoading, doctorsQuery.isFetching, doctorId]);
 
@@ -223,18 +205,10 @@ export default function VisitCheckoutPrintingPage() {
 
   const doctorLabelForCards = resolvedDoctorName ?? (doctorId ? `Doctor (${doctorId})` : 'Doctor');
 
-  /**
-   * ✅ For PrescriptionPrintSheet:
-   * - visitDateLabel drives top-right "Date" in your sheet
-   * - pass VISIT CREATED DATE here (same as workspace)
-   */
   const visitCreatedDateLabel = visitCreatedAtMs
     ? `Visit: ${toLocalISODate(new Date(visitCreatedAtMs))}`
     : undefined;
 
-  /**
-   * Keep this for BillPrintSheet (existing behavior)
-   */
   const visitDateLabel = (visit as any)?.visitDate
     ? `Visit: ${(visit as any).visitDate}`
     : undefined;
@@ -266,7 +240,6 @@ export default function VisitCheckoutPrintingPage() {
   const xraysAvailable = xrayIds.length > 0;
   const billAvailable = !!bill;
 
-  // Follow-up draft state
   const [followUpEnabled, setFollowUpEnabled] = React.useState(false);
   const [followUpDate, setFollowUpDate] = React.useState(() => {
     const d = new Date();
@@ -293,7 +266,6 @@ export default function VisitCheckoutPrintingPage() {
     router.push(`/reminders?${qs.toString()}`);
   };
 
-  // ✅ avoid TS errors if PrescriptionPrintSheet props typing doesn’t include doctorRegdLabel yet
   const RxSheetAny: any = PrescriptionPrintSheet;
 
   return (
@@ -556,7 +528,6 @@ export default function VisitCheckoutPrintingPage() {
         </Card>
       </div>
 
-      {/* ✅ Print sheets: now includes SD ID + OPD + Age/Sex + Doctor name + Regd label + createdAt date */}
       <RxSheetAny
         patientName={patientName}
         patientPhone={patientPhone}

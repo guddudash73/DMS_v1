@@ -1,4 +1,3 @@
-// apps/web/app/(admin)/admin/layout.tsx
 'use client';
 
 import { useEffect, useMemo } from 'react';
@@ -42,14 +41,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       return;
     }
 
-    // role resolved and not admin → redirect away
     if (isAuthed && role && role !== 'ADMIN') {
       router.replace('/');
     }
   }, [isChecking, status, isAuthed, role, router]);
 
-  // ✅ IMPORTANT: prevent Admin UI flash by NOT rendering AdminShell
-  // until we are 100% sure user is ADMIN
   if (isChecking || (isAuthed && !role)) {
     return (
       <div className="flex h-screen items-center justify-center bg-white">
@@ -61,7 +57,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   if (!isAdmin) {
-    // role is known and user isn't admin → don't show admin UI even for 1 frame
     return (
       <div className="flex h-screen items-center justify-center bg-white">
         <div className="rounded-2xl border bg-white px-6 py-4 text-sm text-gray-600 shadow-sm">

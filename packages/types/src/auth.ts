@@ -1,4 +1,3 @@
-// packages/types/src/auth.ts
 import { z } from 'zod';
 import { Role, UserId } from './user';
 
@@ -8,8 +7,6 @@ export const LoginRequest = z.object({
 });
 export type LoginRequest = z.infer<typeof LoginRequest>;
 
-// Keep for backwards compatibility during transition.
-// (We primarily use cookie-based refresh.)
 export const RefreshRequest = z.object({
   refreshToken: z.string().min(20).optional(),
 });
@@ -29,7 +26,6 @@ export const RefreshTokenClaims = JwtClaims.extend({
 });
 export type RefreshTokenClaims = z.infer<typeof RefreshTokenClaims>;
 
-// ✅ What the browser stores/uses
 export const AccessTokenBundle = z.object({
   accessToken: z.string(),
   expiresInSec: z.number().int().nonnegative(),

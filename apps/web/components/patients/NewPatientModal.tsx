@@ -1,37 +1,44 @@
+// apps/web/components/patients/NewPatientModal.tsx
 'use client';
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
-import { useForm, type SubmitErrorHandler } from 'react-hook-form';
+import { useForm, type SubmitErrorHandler, type SubmitHandler } from 'react-hook-form';
+import { z } from 'zod';
 import { zodResolver } from '@hookform/resolvers/zod';
-import type { z } from 'zod';
 import { toast } from 'react-toastify';
 import { format } from 'date-fns';
 import { Calendar as CalendarIcon } from 'lucide-react';
-
-import { PatientCreate as PatientCreateSchema } from '@dms/types';
-import type { PatientCreate } from '@dms/types';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
-import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
+import PatientDobCalendar from '@/components/patients/PatientDobCalendar';
 import { useCreatePatientMutation, type ErrorResponse } from '@/src/store/api';
 
-type Props = {
-  onClose: () => void;
-};
+type Props = { onClose: () => void };
+type ApiError = { status?: number; data?: unknown };
 
-type ApiError = {
-  status?: number;
-  data?: unknown;
-};
+// ✅ local form schema (stable with RHF)
+// - phone REQUIRED (shows red when blank on submit)
+// - address OPTIONAL (no error when empty)
+const PatientCreateFormSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required'),
+  phone: z
+    .string()
+    .trim()
+    .min(1, 'Contact number is required') // ✅ required + shows error on submit
+    .min(6, 'Contact number is too short'),
+  dob: z.string().trim().optional(), // YYYY-MM-DD
+  gender: z.enum(['MALE', 'FEMALE', 'OTHER', 'UNKNOWN']).optional(),
+  address: z.string().trim().optional(), // ✅ optional (no transform here)
+});
 
-type PatientCreateInput = z.input<typeof PatientCreateSchema>;
+type PatientCreateFormValues = z.infer<typeof PatientCreateFormSchema>;
 
 const asErrorResponse = (data: unknown): ErrorResponse | null => {
   if (!data || typeof data !== 'object') return null;
@@ -51,8 +58,6 @@ const asErrorResponse = (data: unknown): ErrorResponse | null => {
 };
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
-
-// Store DOB as YYYY-MM-DD (avoids timezone drift)
 const toIsoDate = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 
 const fromIsoDate = (iso: string): Date | null => {
@@ -72,20 +77,36 @@ export default function NewPatientModal({ onClose }: Props) {
   const [mounted, setMounted] = React.useState(false);
   const [closing, setClosing] = React.useState(false);
 
+  // ✅ controlled popover
+  const [dobOpen, setDobOpen] = React.useState(false);
+
   React.useEffect(() => {
     const r = requestAnimationFrame(() => setMounted(true));
     return () => cancelAnimationFrame(r);
   }, []);
 
+  const handleClose = React.useCallback(() => {
+    if (closing) return;
+    setClosing(true);
+    window.setTimeout(() => onClose(), 180);
+  }, [closing, onClose]);
+
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') handleClose();
+      if (e.key === 'Escape') {
+        setDobOpen(false);
+        handleClose();
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [handleClose]);
 
+  /**
+   * ✅ IMPORTANT:
+   * Do NOT pass a generic to useForm when using zodResolver,
+   * otherwise you get the same resolver/type mismatch again.
+   */
   const {
     register,
     handleSubmit,
@@ -93,34 +114,39 @@ export default function NewPatientModal({ onClose }: Props) {
     setValue,
     formState: { errors, isSubmitting },
   } = useForm({
-    resolver: zodResolver(PatientCreateSchema),
-    mode: 'onBlur',
+    resolver: zodResolver(PatientCreateFormSchema),
+    mode: 'onSubmit', // ✅ show errors when trying to submit
+    reValidateMode: 'onChange',
+    defaultValues: {
+      name: '',
+      phone: '',
+      dob: undefined,
+      gender: undefined,
+      address: '', // user can type; we will send undefined if empty
+    },
   });
 
-  const dobValue = watch('dob') as unknown as string | undefined;
-  const selectedDob = dobValue ? fromIsoDate(dobValue) : null;
+  const dobIso = watch('dob') as string | undefined;
+  const selectedDob = dobIso ? fromIsoDate(dobIso) : null;
 
-  // Control popover so we can close it ONLY when we want (onSelect)
-  const [dobOpen, setDobOpen] = React.useState(false);
-
-  const currentYear = new Date().getFullYear();
-
-  const handleClose = () => {
-    if (closing) return;
-    setClosing(true);
-    window.setTimeout(() => onClose(), 180);
-  };
-
-  const onSubmit = async (values: PatientCreate) => {
+  const onSubmit: SubmitHandler<PatientCreateFormValues> = async (values) => {
     try {
-      const patient = await createPatient(values).unwrap();
+      const payload = {
+        name: values.name.trim(),
+        phone: values.phone.trim(), // ✅ required
+        dob: values.dob?.trim() ? values.dob.trim() : undefined,
+        gender: values.gender,
+        // ✅ optional: if empty string, send undefined
+        address: values.address?.trim() ? values.address.trim() : undefined,
+      };
+
+      const patient = await createPatient(payload as any).unwrap();
       toast.success('Patient created successfully.');
       handleClose();
       router.push(`/patients/${patient.patientId}`);
     } catch (err) {
       const e = err as ApiError;
       const maybe = asErrorResponse(e.data);
-
       toast.error(
         maybe?.message ??
           (e.status === 409
@@ -130,12 +156,8 @@ export default function NewPatientModal({ onClose }: Props) {
     }
   };
 
-  const onSubmitError: SubmitErrorHandler<PatientCreateInput> = (formErrors) => {
-    const messages = Object.values(formErrors)
-      .map((e) => e?.message)
-      .filter((m): m is string => Boolean(m));
-
-    toast.error(messages.length ? messages.join('\n') : 'Please check the highlighted fields.');
+  const onSubmitError: SubmitErrorHandler<PatientCreateFormValues> = () => {
+    toast.error('Please check the highlighted fields.');
   };
 
   return (
@@ -169,35 +191,31 @@ export default function NewPatientModal({ onClose }: Props) {
               onSubmit={handleSubmit(onSubmit, onSubmitError)}
               noValidate
             >
-              <div>
+              <div className="space-y-4">
                 <div className="space-y-1">
                   <Label className="text-sm font-medium text-gray-800">Name</Label>
                   <Input
-                    className={`h-10 rounded-xl text-sm ${
+                    className={[
+                      'h-10 rounded-xl text-sm',
                       errors.name
                         ? 'border-red-500 focus-visible:ring-red-500'
-                        : 'border-gray-200 focus-visible:ring-gray-300'
-                    }`}
+                        : 'border-gray-200 focus-visible:ring-gray-300',
+                    ].join(' ')}
                     {...register('name')}
                   />
-                  <p className="h-3 text-xs text-red-600">
-                    {(errors.name?.message as any) ?? '\u00A0'}
-                  </p>
                 </div>
 
                 <div className="space-y-1">
                   <Label className="text-sm font-medium text-gray-800">Contact No.</Label>
                   <Input
-                    className={`h-10 rounded-xl text-sm ${
+                    className={[
+                      'h-10 rounded-xl text-sm',
                       errors.phone
                         ? 'border-red-500 focus-visible:ring-red-500'
-                        : 'border-gray-200 focus-visible:ring-gray-300'
-                    }`}
+                        : 'border-gray-200 focus-visible:ring-gray-300',
+                    ].join(' ')}
                     {...register('phone')}
                   />
-                  <p className="h-3 text-xs text-red-600">
-                    {(errors.phone?.message as any) ?? '\u00A0'}
-                  </p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
@@ -205,33 +223,32 @@ export default function NewPatientModal({ onClose }: Props) {
                     <Label className="text-sm font-medium text-gray-800">Gender</Label>
                     <select
                       {...register('gender')}
-                      className={`h-10 w-full rounded-xl border bg-white px-3 text-sm ${
+                      className={[
+                        'h-10 w-full rounded-xl border bg-white px-3 text-sm',
                         errors.gender
                           ? 'border-red-500 focus-visible:ring-red-500'
-                          : 'border-gray-200 focus-visible:ring-gray-300'
-                      }`}
+                          : 'border-gray-200 focus-visible:ring-gray-300',
+                      ].join(' ')}
+                      defaultValue=""
                     >
                       <option value="">Choose</option>
-                      <option value="male">Male</option>
-                      <option value="female">Female</option>
-                      <option value="other">Other</option>
+                      <option value="MALE">Male</option>
+                      <option value="FEMALE">Female</option>
+                      <option value="OTHER">Other</option>
+                      <option value="UNKNOWN">Unknown</option>
                     </select>
-                    <p className="h-3 text-xs text-red-600">
-                      {(errors.gender?.message as any) ?? '\u00A0'}
-                    </p>
                   </div>
 
                   <div className="space-y-1">
                     <Label className="text-sm font-medium text-gray-800">DOB</Label>
 
-                    <Popover open={dobOpen} onOpenChange={setDobOpen}>
+                    <Popover modal open={dobOpen} onOpenChange={setDobOpen}>
                       <PopoverTrigger asChild>
                         <Button
                           type="button"
                           variant="outline"
                           className={[
-                            'h-10 w-full justify-between rounded-xl px-3 text-sm font-normal',
-                            'bg-white',
+                            'h-10 w-full justify-between rounded-xl px-3 text-sm font-normal bg-white',
                             errors.dob
                               ? 'border-red-500 focus-visible:ring-red-500'
                               : 'border-gray-200 focus-visible:ring-gray-300',
@@ -247,54 +264,44 @@ export default function NewPatientModal({ onClose }: Props) {
                       </PopoverTrigger>
 
                       <PopoverContent
-                        className="w-auto p-2"
                         align="start"
-                        // ✅ IMPORTANT: prevents the popover from collapsing when the native <select> dropdown opens
+                        className="w-auto p-0 border-none shadow-none bg-transparent"
+                        onPointerDownOutside={(e) => e.preventDefault()}
+                        onFocusOutside={(e) => e.preventDefault()}
                         onInteractOutside={(e) => e.preventDefault()}
                         onCloseAutoFocus={(e) => e.preventDefault()}
                       >
-                        <Calendar
-                          mode="single"
-                          selected={selectedDob ?? undefined}
-                          onSelect={(d) => {
+                        <PatientDobCalendar
+                          value={selectedDob ?? undefined}
+                          onChange={(d) => {
                             if (!d) return;
-                            setValue('dob' as any, toIsoDate(d) as any, {
+                            setValue('dob' as any, toIsoDate(d), {
                               shouldDirty: true,
                               shouldTouch: true,
                               shouldValidate: true,
                             });
                             setDobOpen(false);
                           }}
-                          // DOB: disable future dates
-                          disabled={(d) => d > new Date()}
-                          // ✅ This produces the exact month/year dropdown header like your screenshot
-                          captionLayout="dropdown"
                           fromYear={1900}
-                          toYear={currentYear}
-                          initialFocus
+                          toYear={new Date().getFullYear()}
+                          disabled={(d) => d > new Date()}
                         />
                       </PopoverContent>
                     </Popover>
-
-                    <p className="h-3 text-xs text-red-600">
-                      {(errors.dob?.message as any) ?? '\u00A0'}
-                    </p>
                   </div>
                 </div>
 
                 <div className="space-y-1">
-                  <Label className="text-sm font-medium text-gray-800">Address</Label>
+                  <Label className="text-sm font-medium text-gray-800">Address (Optional)</Label>
                   <Textarea
-                    className={`min-h-20 rounded-xl text-sm ${
+                    className={[
+                      'min-h-20 rounded-xl text-sm',
                       errors.address
                         ? 'border-red-500 focus-visible:ring-red-500'
-                        : 'border-gray-200 focus-visible:ring-gray-300'
-                    }`}
+                        : 'border-gray-200 focus-visible:ring-gray-300',
+                    ].join(' ')}
                     {...register('address')}
                   />
-                  <p className="h-3 text-xs text-red-600">
-                    {(errors.address?.message as any) ?? '\u00A0'}
-                  </p>
                 </div>
               </div>
 
@@ -307,6 +314,7 @@ export default function NewPatientModal({ onClose }: Props) {
                 >
                   Cancel
                 </Button>
+
                 <Button
                   type="submit"
                   disabled={isSubmitting || isLoading}

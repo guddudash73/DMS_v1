@@ -44,7 +44,7 @@ function DoctorQueueItemRow({
     <button
       type="button"
       onClick={onClick}
-      className="flex h-10 w-full items-center justify-between rounded-xl bg-white px-3 text-left text-xs text-gray-800 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black/10"
+      className="flex h-10 cursor-pointer w-full items-center justify-between rounded-xl bg-white px-3 text-left text-xs text-gray-800 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black/10"
       title="Open visit"
     >
       <span className="truncate font-medium">{label}</span>
@@ -55,7 +55,6 @@ function DoctorQueueItemRow({
   );
 }
 
-// ✅ IMPORTANT: match the type returned by useGetDoctorsQuery (DoctorPublicListItem)
 type DoctorFromApi = NonNullable<ReturnType<typeof useGetDoctorsQuery>['data']>[number];
 
 type ColumnConfig = {

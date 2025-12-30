@@ -1,4 +1,3 @@
-// apps/web/src/store/authSlice.ts
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
 import type { LoginResponse, RefreshResponse } from '@dms/types';
 

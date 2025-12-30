@@ -1,4 +1,3 @@
-// apps/api/src/routes/visits.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
@@ -13,6 +12,7 @@ import {
   BillingCheckoutInput,
   FollowUpUpsert,
   FollowUpStatusUpdate,
+  FollowUpId,
 } from '@dms/types';
 import { v4 as randomUUID } from 'uuid';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
@@ -79,23 +79,6 @@ export class PrescriptionStorageError extends Error {
   }
 }
 
-/**
- * ✅ Follow-ups (multi)
- * We support multiple followups per visit.
- *
- * Contract:
- * - POST   /visits/:visitId/followups               => create a new followup for a visit
- * - GET    /visits/:visitId/followups               => list followups for a visit
- * - PATCH  /visits/:visitId/followups/:followupId/status => update status for one followup
- *
- * NOTE: The legacy single-followup endpoints are removed:
- * - GET/PUT /visits/:visitId/followup
- * - PATCH   /visits/:visitId/followup/status
- *
- * Update clients to use the new routes.
- */
-const FollowupId = z.string().min(1);
-
 router.post(
   '/',
   asyncHandler(async (req, res) => {
@@ -106,14 +89,11 @@ router.post(
 
     const visit = await visitRepository.create(parsed.data);
 
-    // --- Build token print payload (server-source-of-truth) ---
     const patient = await patientRepository.getById(visit.patientId);
 
-    // Visit number for patient (after create)
     const patientVisits = await visitRepository.listByPatientId(visit.patientId);
     const visitNumberForPatient = patientVisits.length;
 
-    // Waiting number in queue (QUEUED list, 1-based)
     const queue = await visitRepository.getDoctorQueue({
       doctorId: visit.doctorId,
       date: visit.visitDate,
@@ -285,9 +265,6 @@ router.patch(
   }),
 );
 
-/**
- * ✅ Followups (multi) under /visits
- */
 router.get(
   '/:visitId/followups',
   asyncHandler(async (req, res) => {
@@ -295,8 +272,7 @@ router.get(
     if (!id.success) return handleValidationError(req, res, id.error.issues);
 
     try {
-      // expected repo method for multi-followups
-      const items = await (followupRepository as any).listByVisitId(id.data);
+      const items = await followupRepository.listByVisitId(id.data); // ✅ no any
       return res.status(200).json({ items: items ?? [] });
     } catch (err) {
       logError('visit_followups_list_failed', {
@@ -322,8 +298,7 @@ router.post(
     if (!parsedBody.success) return handleValidationError(req, res, parsedBody.error.issues);
 
     try {
-      // expected repo method for multi-followups
-      const created = await (followupRepository as any).createForVisit(id.data, parsedBody.data);
+      const created = await followupRepository.createForVisit(id.data, parsedBody.data);
 
       if (req.auth) {
         logAudit({
@@ -361,13 +336,13 @@ router.patch(
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) return handleValidationError(req, res, id.error.issues);
 
-    const fuId = FollowupId.safeParse(req.params.followupId);
+    const fuId = FollowUpId.safeParse(req.params.followupId); // ✅ use schema
     if (!fuId.success) return handleValidationError(req, res, fuId.error.issues);
 
     const parsedBody = FollowUpStatusUpdate.safeParse(req.body);
     if (!parsedBody.success) return handleValidationError(req, res, parsedBody.error.issues);
 
-    const updated = await (followupRepository as any).updateStatus({
+    const updated = await followupRepository.updateStatus({
       visitId: id.data,
       followupId: fuId.data,
       input: parsedBody.data,

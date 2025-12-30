@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/visits/[visitId]/checkout/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -23,9 +22,6 @@ export default function VisitCheckoutEntryPage() {
     if (!visitId) return;
     if (billQuery.isLoading || billQuery.isFetching) return;
 
-    // If bill exists:
-    // - non-admin -> printing
-    // - admin -> billing (edit flow)
     if (bill) {
       router.replace(
         isAdmin ? `/visits/${visitId}/checkout/billing` : `/visits/${visitId}/checkout/printing`,
@@ -33,13 +29,10 @@ export default function VisitCheckoutEntryPage() {
       return;
     }
 
-    // If bill missing:
     if (billNotFound) {
       router.replace(`/visits/${visitId}/checkout/billing`);
       return;
     }
-
-    // otherwise keep waiting (errors etc)
   }, [visitId, bill, billNotFound, billQuery.isLoading, billQuery.isFetching, isAdmin, router]);
 
   return <div className="p-6 text-sm text-gray-600">Loading…</div>;

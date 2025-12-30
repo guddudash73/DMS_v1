@@ -85,7 +85,6 @@ export default function VisitsByDayPage() {
       })),
     );
 
-    // ✅ Latest on top globally
     flat.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
     return flat;
   }, [q.data]);
@@ -107,7 +106,6 @@ export default function VisitsByDayPage() {
     const g: Record<VisitStatus, Row[]> = { QUEUED: [], IN_PROGRESS: [], DONE: [] };
     for (const r of filtered) g[r.status].push(r);
 
-    // keep each group latest-first too
     (Object.keys(g) as VisitStatus[]).forEach((k) => {
       g[k].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
     });

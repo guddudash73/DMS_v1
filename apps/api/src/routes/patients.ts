@@ -1,4 +1,3 @@
-// apps/api/src/routes/patients.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { PatientCreate, PatientUpdate, PatientSearchQuery, PatientId } from '@dms/types';
 import { patientRepository, DuplicatePatientError } from '../repositories/patientRepository';
@@ -44,7 +43,7 @@ router.post(
           meta: {
             name: patient.name,
             phone: patient.phone,
-            sdId: (patient as any).sdId,
+            sdId: patient.sdId,
           },
         });
       }
@@ -88,7 +87,6 @@ router.get(
   }),
 );
 
-// ✅ NEW: Patient summary endpoint
 router.get(
   '/:patientId/summary',
   asyncHandler(async (req, res) => {
@@ -127,7 +125,7 @@ router.get(
 
     for (const v of visits) {
       try {
-        const followups = await followupRepository.listByVisitId(v.visitId as any);
+        const followups = await followupRepository.listByVisitId(v.visitId);
         for (const fu of followups ?? []) {
           if (fu.status !== 'ACTIVE') continue;
           const d = String(fu.followUpDate);

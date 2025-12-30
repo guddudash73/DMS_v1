@@ -44,15 +44,6 @@
   --sidebar-ring: oklch(0.704 0.04 256.788);
 }
 
-/* (Optional) If/when you want to customize theme in v4:
-@theme {
-  --color-brand: #0ea5e9;  // example custom token
-}
-*/
-
-/* ---break---
-*/
-
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -91,9 +82,6 @@
   --color-sidebar-ring: var(--sidebar-ring);
 }
 
-/* ---break---
-*/
-
 .dark {
   --background: oklch(0.129 0.042 264.695);
   --foreground: oklch(0.984 0.003 247.858);
@@ -127,9 +115,6 @@
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.551 0.027 264.364);
 }
-
-/* ---break---
-*/
 
 @layer base {
   * {

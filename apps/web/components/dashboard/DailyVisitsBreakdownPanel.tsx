@@ -1,4 +1,3 @@
-// apps/web/components/dashboard/DailyVisitsBreakdownPanel.tsx
 'use client';
 
 import * as React from 'react';
@@ -19,7 +18,7 @@ function statusBadge(status: string) {
     'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset';
   if (status === 'DONE') return `${base} bg-emerald-50 text-emerald-700 ring-emerald-200`;
   if (status === 'IN_PROGRESS') return `${base} bg-amber-50 text-amber-700 ring-amber-200`;
-  return `${base} bg-slate-50 text-slate-700 ring-slate-200`; // QUEUED
+  return `${base} bg-slate-50 text-slate-700 ring-slate-200`;
 }
 
 function tagBadge(tag?: string) {
@@ -44,7 +43,7 @@ function currency(v?: number) {
 }
 
 type Props = {
-  date: string; // YYYY-MM-DD clinic date key
+  date: string;
   onBack: () => void;
 };
 

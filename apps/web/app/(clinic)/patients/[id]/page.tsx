@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/patients/[id]/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -10,6 +9,7 @@ import {
   useGetPatientVisitsQuery,
   useGetDoctorsQuery,
   useGetPatientSummaryQuery,
+  useGetMeQuery,
   type ErrorResponse,
 } from '@/src/store/api';
 
@@ -17,7 +17,6 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 
-// ✅ Register Visit popup modal
 import RegisterVisitModal from '@/components/visits/RegisterVisitModal';
 
 import {
@@ -33,12 +32,15 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar } from '@/components/ui/calendar';
 
 import { ArrowRight, Calendar as CalendarIcon } from 'lucide-react';
-import { formatClinicDateShort } from '@/src/lib/clinicTime';
+import { clinicDateISO, formatClinicDateShort } from '@/src/lib/clinicTime';
+import { PrescriptionPrintSheet } from '@/components/prescription/PrescriptionPrintSheet';
 
 type ApiError = {
   status?: number;
   data?: unknown;
 };
+
+type PatientSex = 'M' | 'F' | 'O' | 'U';
 
 const asErrorResponse = (data: unknown): ErrorResponse | null => {
   if (!data || typeof data !== 'object') return null;
@@ -58,17 +60,44 @@ const asErrorResponse = (data: unknown): ErrorResponse | null => {
 };
 
 const formatVisitDate = (dateStr: string) => {
-  // dateStr is YYYY-MM-DD clinic key
   return formatClinicDateShort(dateStr);
 };
 
 const toISODate = (d: Date) => {
-  // Date-only key without UTC shifting
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 };
+
+function safeParseDobToDate(dob?: string): Date | null {
+  if (!dob) return null;
+  const s = dob.trim();
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const da = Number(m[3]);
+  const d = new Date(y, mo, da);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function calculateAge(dob: Date, at: Date): number {
+  let age = at.getFullYear() - dob.getFullYear();
+  const m = at.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && at.getDate() < dob.getDate())) age -= 1;
+  return age < 0 ? 0 : age;
+}
+
+function normalizeSexFromPatientGender(raw?: string): PatientSex | undefined {
+  if (!raw) return undefined;
+  const s = String(raw).trim().toUpperCase();
+  if (s === 'MALE' || s === 'M') return 'M';
+  if (s === 'FEMALE' || s === 'F') return 'F';
+  if (s === 'OTHER' || s === 'O') return 'O';
+  if (s === 'UNKNOWN' || s === 'U') return 'U';
+  return undefined;
+}
 
 function SimplePagination(props: {
   page: number;
@@ -131,6 +160,9 @@ export default function PatientDetailPage() {
 
   const [registerOpen, setRegisterOpen] = React.useState(false);
 
+  const [printMounted, setPrintMounted] = React.useState(false);
+  React.useEffect(() => setPrintMounted(true), []);
+
   if (!rawId || typeof rawId !== 'string') {
     return (
       <section className="p-6">
@@ -156,6 +188,9 @@ export default function PatientDetailPage() {
   const { data: summary } = useGetPatientSummaryQuery(patientId);
 
   const { data: doctors } = useGetDoctorsQuery();
+
+  const meQuery = useGetMeQuery();
+  const me = meQuery.data ?? null;
 
   const [selectedDate, setSelectedDate] = React.useState<string>('');
   const selectedDateObj = React.useMemo(() => {
@@ -219,6 +254,36 @@ export default function PatientDetailPage() {
   }, [filteredVisits, pageSafe]);
 
   const followupLabel = summary?.nextFollowUpDate ?? 'No Follow Up Scheduled';
+
+  const patientDob = safeParseDobToDate(patient?.dob);
+  const patientAge = patientDob ? calculateAge(patientDob, new Date()) : undefined;
+  const patientSex = normalizeSexFromPatientGender(patient?.gender);
+
+  const doctorName = me?.doctorProfile?.fullName?.trim()
+    ? me.doctorProfile.fullName.trim()
+    : undefined;
+
+  const doctorRegdLabel = me?.doctorProfile?.registrationNumber
+    ? `B.D.S Regd. - ${me.doctorProfile.registrationNumber}`
+    : undefined;
+
+  const visitDateLabel = `Visit: ${clinicDateISO()}`;
+
+  const printBlankRx = () => {
+    if (!patient) return;
+
+    const onAfterPrint = () => {
+      document.body.classList.remove('print-rx');
+      window.removeEventListener('afterprint', onAfterPrint);
+    };
+
+    window.addEventListener('afterprint', onAfterPrint);
+    document.body.classList.add('print-rx');
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => window.print());
+    });
+  };
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
@@ -301,7 +366,18 @@ export default function PatientDetailPage() {
             </div>
           )}
 
-          <div className="mt-5 flex justify-end">
+          <div className="mt-5 flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-2xl"
+              onClick={printBlankRx}
+              disabled={!patient || !!patientErrorMessage}
+              title={!patient ? 'Patient not loaded' : 'Print blank prescription'}
+            >
+              Print blank Rx
+            </Button>
+
             <Button
               type="button"
               className="rounded-2xl"
@@ -461,6 +537,22 @@ export default function PatientDetailPage() {
           </Card>
         </div>
       </div>
+
+      {printMounted ? (
+        <PrescriptionPrintSheet
+          patientName={patient?.name}
+          patientPhone={patient?.phone}
+          patientAge={patientAge}
+          patientSex={patientSex}
+          sdId={patient?.sdId}
+          opdNo={undefined}
+          doctorName={doctorName}
+          doctorRegdLabel={doctorRegdLabel}
+          visitDateLabel={visitDateLabel}
+          lines={[]}
+          receptionNotes={''}
+        />
+      ) : null}
     </section>
   );
 }

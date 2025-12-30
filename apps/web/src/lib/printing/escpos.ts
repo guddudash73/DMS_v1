@@ -1,4 +1,3 @@
-// apps/web/src/lib/printing/escpos.ts
 import type { TokenPrintPayload } from '@dms/types';
 import { CLINIC_TZ } from '../clinicTime';
 
@@ -44,27 +43,23 @@ export function buildTokenEscPos(p: TokenPrintPayload): string {
 
   const tag = p.tag ?? 'N';
   const visitNo = p.visitNumberForPatient;
-  const waitingNo = p.tokenNumber; // this is your server-derived queue position
+  const waitingNo = p.tokenNumber;
   const created = fmtDateTime(p.createdAt);
 
-  // ESC/POS commands (common):
   const init = ESC + '@';
   const alignLeft = ESC + 'a' + '\x00';
   const alignCenter = ESC + 'a' + '\x01';
   const boldOn = ESC + 'E' + '\x01';
   const boldOff = ESC + 'E' + '\x00';
 
-  // GS ! n  (upper nibble = width, lower nibble = height)
   const sizeNormal = GS + '!' + '\x00';
-  const sizeBig = GS + '!' + String.fromCharCode((2 << 3) | 1); // w=2,h=2
+  const sizeBig = GS + '!' + String.fromCharCode((2 << 3) | 1);
 
-  // Cut (partial cut): GS V 66 0
   const cut = GS + 'V' + 'B' + '\x00';
 
   let out = '';
   out += init;
 
-  // Header
   out += alignCenter;
   out += boldOn + sizeBig;
   out += `${clinicName}${LF}`;
@@ -73,14 +68,12 @@ export function buildTokenEscPos(p: TokenPrintPayload): string {
   if (clinicPhone) out += `${clinicPhone}${LF}`;
   out += LF;
 
-  // Token line
   out += hr();
   out += boldOn;
   out += `WAITING NO: ${waitingNo}${LF}`;
   out += boldOff;
   out += hr();
 
-  // Body
   out += alignLeft;
   out += `Name   : ${patientName}${LF}`;
   if (phoneMasked) out += `Phone  : ${phoneMasked}${LF}`;

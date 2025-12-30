@@ -1,4 +1,3 @@
-// apps/api/src/repositories/xrayRepository.ts
 import {
   ConditionalCheckFailedException,
   TransactionCanceledException,
@@ -129,7 +128,7 @@ export class DynamoDBXrayRepository implements XrayRepository {
     );
 
     if (!Item || Item.entityType !== 'XRAY') return null;
-    if (Item.deletedAt != null) return null; // (legacy support; safe)
+    if (Item.deletedAt != null) return null;
     if (Item.patientIsDeleted === true || Item.visitIsDeleted === true) return null;
 
     return Item as Xray;
@@ -154,7 +153,6 @@ export class DynamoDBXrayRepository implements XrayRepository {
   }
 
   async hardDelete(xrayId: string): Promise<{ ok: true; visitId: string }> {
-    // Read META to find visitId for visit-scoped row key
     const { Item } = await docClient.send(
       new GetCommand({
         TableName: TABLE_NAME,
@@ -190,7 +188,6 @@ export class DynamoDBXrayRepository implements XrayRepository {
       );
     } catch (err) {
       if (err instanceof TransactionCanceledException) {
-        // Treat as conflict only when transaction truly fails (e.g. capacity / validation)
         throw new XrayDeleteConflictError('Unable to delete X-ray');
       }
       throw err;

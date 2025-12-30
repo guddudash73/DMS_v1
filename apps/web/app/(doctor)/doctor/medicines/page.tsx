@@ -1,4 +1,3 @@
-// apps/web/app/(doctor)/doctor/medicines/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -106,7 +105,6 @@ export default function DoctorMedicinesPage() {
     return () => window.clearTimeout(t);
   }, [searchTerm]);
 
-  // ✅ cursor + prev stack (same pattern as admin)
   const [cursor, setCursor] = React.useState<string | null>(null);
   const [cursorStack, setCursorStack] = React.useState<string[]>([]);
   React.useEffect(() => {

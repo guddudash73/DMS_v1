@@ -14,7 +14,6 @@ import { ArrowLeft, Loader2, Pencil, Plus, Trash2, Save } from 'lucide-react';
 
 import type { RxLineType, MedicineTypeaheadItem } from '@dms/types';
 
-// ✅ use the existing combobox
 import { MedicineCombobox } from '@/components/prescription/MedicineCombobox';
 
 const FREQUENCIES = ['QD', 'BID', 'TID', 'QID', 'HS', 'PRN'] as const;
@@ -94,16 +93,13 @@ export default function RxPresetEditor({
   submitLabel,
   submitting,
 }: RxPresetEditorProps) {
-  // Preset meta
   const [presetName, setPresetName] = useState('');
   const [tagsCsv, setTagsCsv] = useState('');
 
-  // Lines
   const [lines, setLines] = useState<RxLineType[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
-  // Line form
-  const [medicine, setMedicine] = useState(''); // ✅ displayName string
+  const [medicine, setMedicine] = useState('');
   const [dose, setDose] = useState('');
   const [frequency, setFrequency] = useState<Frequency>('BID');
   const [duration, setDuration] = useState<string>('5');
@@ -111,7 +107,6 @@ export default function RxPresetEditor({
   const [sig, setSig] = useState('');
   const [notes, setNotes] = useState('');
 
-  // hydrate from initial
   useEffect(() => {
     if (!initial) return;
 
@@ -119,7 +114,6 @@ export default function RxPresetEditor({
     setTagsCsv((initial.tags ?? []).join(', '));
     setLines((initial.lines ?? []) as RxLineType[]);
 
-    // reset line form
     setEditingIndex(null);
     setMedicine('');
     setDose('');
@@ -128,7 +122,6 @@ export default function RxPresetEditor({
     setTiming('ANY');
     setSig('');
     setNotes('');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initial?.name, (initial?.tags ?? []).join('|'), (initial?.lines ?? []).length]);
 
   const durationNum = useMemo(() => {
@@ -167,22 +160,17 @@ export default function RxPresetEditor({
     setEditingIndex(null);
   };
 
-  // ✅ Apply defaults exactly like MedicinesEditor approach
   const applyMedicineDefaults = (item: MedicineTypeaheadItem) => {
-    // name
     setMedicine(item.displayName ?? '');
 
-    // frequency default
     const df = (item as any).defaultFrequency as unknown;
     if (isFrequency(df)) setFrequency(df);
 
-    // duration default
     const dd = (item as any).defaultDuration as unknown;
     if (typeof dd === 'number' && Number.isFinite(dd) && dd >= 1 && dd <= 365) {
       setDuration(String(dd));
     }
 
-    // optional future-proofing if backend ever returns defaultDose
     const dDose = (item as any).defaultDose as unknown;
     if (typeof dDose === 'string' && dDose.trim()) {
       setDose(dDose.trim());
@@ -288,7 +276,6 @@ export default function RxPresetEditor({
 
         {!loading && !error && (
           <div className="flex flex-col gap-5 xl:flex-row xl:items-start">
-            {/* LEFT */}
             <div className="min-w-0 flex-1">
               <Card className="rounded-3xl border bg-white p-0 shadow-sm">
                 <div className="border-b px-6 py-5">
@@ -435,7 +422,6 @@ export default function RxPresetEditor({
               </Card>
             </div>
 
-            {/* RIGHT */}
             <div className="w-full xl:w-[480px] xl:sticky xl:top-20">
               <Card className="rounded-3xl border bg-white p-0 shadow-sm">
                 <div className="border-b px-6 py-5">
@@ -486,7 +472,6 @@ export default function RxPresetEditor({
                       )}
                     </div>
 
-                    {/* ✅ MedicineCombobox used here (NOW APPLIES DEFAULTS) */}
                     <div className="flex flex-col gap-2">
                       <Label className="text-xs">Medicine (required)</Label>
                       <MedicineCombobox

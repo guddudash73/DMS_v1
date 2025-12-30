@@ -117,7 +117,6 @@ r.patch('/:doctorId', validate(AdminUpdateDoctorRequest), async (req, res, next)
     if (body.active !== undefined) {
       repoPatch.active = body.active;
 
-      // ✅ NEW: also update user.active so login/auth enforcement matches doctor profile
       await userRepository.setUserActive(doctorId, body.active);
     }
 

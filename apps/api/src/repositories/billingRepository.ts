@@ -1,4 +1,3 @@
-// apps/api/src/repositories/billingRepository.ts
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import type { Billing, BillingCheckoutInput, Visit, VisitId } from '@dms/types';
 import { visitRepository } from './visitRepository';
@@ -60,28 +59,14 @@ const buildBillingKey = (visitId: string) => ({
   SK: 'BILLING',
 });
 
-/**
- * ✅ Multi-followup model:
- * Store followups as separate items under the same VISIT partition.
- * PK: VISIT#<visitId>
- * SK: FOLLOWUP#<followupId>
- *
- * Also index by followUpDate in GSI3 so /followups/daily can query by date.
- */
 const buildFollowUpKey = (visitId: string, followupId: string) => ({
   PK: `VISIT#${visitId}`,
   SK: `FOLLOWUP#${followupId}`,
 });
 
-// GSI3 helpers (kept local to avoid hard dependency on packages/types keys changes)
 const gsi3PK_date = (dateISO: string) => `DATE#${dateISO}`;
 const gsi3SK_typeId = (type: 'FOLLOWUP', id: string) => `TYPE#${type}#ID#${id}`;
 
-/**
- * ✅ IMPORTANT:
- * "Today" for clinic rules must be Asia/Kolkata, NOT UTC.
- * Never use new Date().toISOString().slice(0,10) for "clinic day".
- */
 const todayDateString = (): string => isoDateInTimeZone(new Date(), 'Asia/Kolkata');
 
 interface ComputedBillingTotals {
@@ -182,8 +167,8 @@ export class DynamoDBBillingRepository implements BillingRepository {
     if (input.followUp) {
       const { followUpDate, reason, contactMethod } = input.followUp;
 
-      const visitDate = visit.visitDate; // already clinic-local date key
-      const today = todayDateString(); // ✅ IST-based today
+      const visitDate = visit.visitDate;
+      const today = todayDateString();
 
       if (followUpDate < visitDate) {
         throw new FollowUpRuleViolationError(
@@ -197,7 +182,6 @@ export class DynamoDBBillingRepository implements BillingRepository {
         );
       }
 
-      // ✅ multi-followup: always create a NEW followup record
       const followupId = randomUUID();
       const effectiveContactMethod = contactMethod ?? 'CALL';
 
@@ -217,12 +201,10 @@ export class DynamoDBBillingRepository implements BillingRepository {
             createdAt: now,
             updatedAt: now,
 
-            // ✅ GSI3 date index for /followups/daily?date=YYYY-MM-DD
             GSI3PK: gsi3PK_date(followUpDate),
             GSI3SK: gsi3SK_typeId('FOLLOWUP', followupId),
           },
-          // condition is evaluated against the *same* PK+SK item only,
-          // so this does not prevent other followups under the same visit.
+
           ConditionExpression: 'attribute_not_exists(PK)',
         },
       };

@@ -1,10 +1,8 @@
-// apps/web/lib/realtime.ts
 export type RealtimeMessage =
   | {
       type: 'DoctorQueueUpdated';
       payload: { doctorId: string; visitDate: string };
     }
-  // allow ping/pong shapes without breaking parsing
   | { type: 'pong' }
   | { type: 'ping' };
 

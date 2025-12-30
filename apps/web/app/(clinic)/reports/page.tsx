@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/reports/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -69,7 +68,6 @@ export default function ReportsPage() {
   const auth = useAuth();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
-  // Realtime invalidations (queue updates -> report refresh)
   useClinicRealtimeQuery(undefined, { skip: !canUseApi });
 
   const [selectedDate, setSelectedDate] = React.useState<string>(() => clinicDateISO(new Date()));
@@ -112,11 +110,9 @@ export default function ReportsPage() {
 
   const hasErrors = dailyReportQuery.isError || patientSummaryQuery.isError;
 
-  // ✅ EXACT same outer spacing as DashboardPage
   const pageWrapperClass = 'h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10';
   const contentGapClass = 'flex h-full flex-col gap-6 2xl:gap-10';
 
-  // ✅ Drilldown view: match DashboardPage "selectedDate" view width
   if (drilldownDate) {
     return (
       <section className={pageWrapperClass}>
@@ -128,7 +124,6 @@ export default function ReportsPage() {
     );
   }
 
-  // ✅ Keep SAME card layout you already had — only spacing/width like DashboardPage
   return (
     <section className={pageWrapperClass}>
       <div className={contentGapClass}>

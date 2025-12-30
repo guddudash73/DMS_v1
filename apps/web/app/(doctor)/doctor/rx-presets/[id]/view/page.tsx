@@ -1,4 +1,3 @@
-// apps/web/app/(doctor)/doctor/rx-presets/[id]/view/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -46,7 +45,6 @@ function asErrorResponse(data: unknown): ErrorResponse | null {
 }
 
 function formatLineText(line: any): string {
-  // Best-effort formatting across different RxLine shapes.
   const name =
     line?.medicineName ??
     line?.displayName ??

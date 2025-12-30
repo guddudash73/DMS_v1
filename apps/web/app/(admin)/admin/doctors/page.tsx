@@ -59,7 +59,6 @@ export default function AdminDoctorsPage() {
     });
   }, [all, query]);
 
-  // ---- Create modal state ----
   const [createOpen, setCreateOpen] = useState(false);
   const [cEmail, setCEmail] = useState('');
   const [cDisplayName, setCDisplayName] = useState('');
@@ -87,7 +86,6 @@ export default function AdminDoctorsPage() {
     cReg.trim().length > 0 &&
     cSpec.trim().length > 0;
 
-  // ---- Edit modal state ----
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<AdminDoctorListItem | null>(null);
 
@@ -108,7 +106,6 @@ export default function AdminDoctorsPage() {
   const canSaveEdit =
     !!editing && eFullName.trim().length > 0 && eReg.trim().length > 0 && eSpec.trim().length > 0;
 
-  // ---- Header Right ----
   const headerRight = useMemo(() => {
     return (
       <div className="flex items-center gap-2">
@@ -250,7 +247,6 @@ export default function AdminDoctorsPage() {
         </div>
       </Card>
 
-      {/* CREATE DOCTOR */}
       <Dialog
         open={createOpen}
         onOpenChange={(o) => {
@@ -375,7 +371,6 @@ export default function AdminDoctorsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* EDIT DOCTOR */}
       <Dialog
         open={editOpen}
         onOpenChange={(o) => {

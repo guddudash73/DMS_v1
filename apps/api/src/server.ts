@@ -1,4 +1,3 @@
-// apps/api/src/server.ts
 import express from 'express';
 import cors from 'cors';
 import cookieParser from 'cookie-parser';
@@ -17,7 +16,7 @@ import rxPresetsRouter from './routes/rx-presets';
 import adminDoctorsRouter from './routes/admin-doctors';
 import adminRxPresetsRouter from './routes/admin-rx-presets';
 import adminMedicinesRouter from './routes/admin-medicines';
-import doctorsRouter from './routes/doctors'; // ✅ NEW
+import doctorsRouter from './routes/doctors';
 
 import { authMiddleware, requireRole } from './middlewares/auth';
 import { genericSensitiveRateLimiter } from './middlewares/rateLimit';
@@ -148,7 +147,6 @@ export const createApp = () => {
     rxPresetsRouter,
   );
 
-  // ✅ NEW: public doctors list for doctor panel + reception + admin
   app.use(
     '/doctors',
     genericSensitiveRateLimiter,

@@ -2,21 +2,28 @@
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
-  DeleteCommand,
   GetCommand,
   QueryCommand,
   TransactWriteCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
-import type {
-  AdminMedicineSearchQuery,
-  AdminUpdateMedicineRequest,
-  DoctorUpdateMedicineRequest,
-  MedicinePreset,
-  MedicineTypeaheadItem,
-  QuickAddMedicineInput,
+import {
+  MedicinePreset as MedicinePresetSchema, // ✅ zod schema
+  type AdminMedicineSearchQuery,
+  type AdminUpdateMedicineRequest,
+  type DoctorUpdateMedicineRequest,
+  type MedicinePreset,
+  type MedicineTypeaheadItem,
+  type QuickAddMedicineInput,
 } from '@dms/types';
+
+type DynamoCursor = Record<string, unknown>;
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
+const getStringProp = (v: unknown, key: string): string | undefined =>
+  isObject(v) && typeof v[key] === 'string' ? (v[key] as string) : undefined;
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: {
@@ -47,18 +54,17 @@ const normalizeMedicineName = (name: string): string =>
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, '');
 
-const encodeCursor = (key: Record<string, unknown> | undefined): string | null => {
+const encodeCursor = (key: DynamoCursor | undefined): string | null => {
   if (!key) return null;
   return Buffer.from(JSON.stringify(key), 'utf8').toString('base64');
 };
 
-const decodeCursor = (cursor: string | undefined): Record<string, unknown> | undefined => {
+const decodeCursor = (cursor: string | undefined): DynamoCursor | undefined => {
   if (!cursor) return undefined;
   try {
     const raw = Buffer.from(cursor, 'base64').toString('utf8');
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
-    return undefined;
+    const parsed: unknown = JSON.parse(raw);
+    return isObject(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }
@@ -68,7 +74,6 @@ const canDoctorMutate = (m: MedicinePreset, userId: string) =>
   m.source === 'INLINE_DOCTOR' && m.createdByUserId === userId;
 
 export interface MedicinePresetRepository {
-  // Doctor/inline typeahead
   search(params: { query?: string; limit: number }): Promise<MedicineTypeaheadItem[]>;
   quickAdd(params: {
     input: QuickAddMedicineInput;
@@ -76,7 +81,6 @@ export interface MedicinePresetRepository {
     source: 'ADMIN_IMPORT' | 'INLINE_DOCTOR';
   }): Promise<MedicinePreset>;
 
-  // ✅ Doctor catalog list (verified + mine)
   catalogList(params: {
     query?: string;
     limit: number;
@@ -84,7 +88,6 @@ export interface MedicinePresetRepository {
     viewerUserId: string;
   }): Promise<{ items: MedicinePreset[]; nextCursor: string | null }>;
 
-  // ✅ Doctor mutate (only mine)
   doctorUpdate(
     id: string,
     patch: DoctorUpdateMedicineRequest,
@@ -93,7 +96,6 @@ export interface MedicinePresetRepository {
 
   doctorDelete(id: string, userId: string): Promise<boolean | 'FORBIDDEN'>;
 
-  // ✅ Admin
   adminList(
     params: AdminMedicineSearchQuery,
   ): Promise<{ items: MedicinePreset[]; total: number; nextCursor: string | null }>;
@@ -129,9 +131,13 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
       }),
     );
 
-    const presets = (Items ?? []) as MedicinePreset[];
+    // Keep it lenient for typeahead (don’t drop results if one item is malformed)
+    const parsed = (Items ?? [])
+      .map((x) => MedicinePresetSchema.safeParse(x))
+      .filter((r): r is { success: true; data: MedicinePreset } => r.success)
+      .map((r) => r.data);
 
-    return presets.map((p) => ({
+    return parsed.map((p) => ({
       id: p.id,
       displayName: p.displayName,
       defaultFrequency: p.defaultFrequency,
@@ -140,7 +146,6 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     }));
   }
 
-  // ✅ NEW: catalog list (verified + mine)
   async catalogList(params: {
     query?: string;
     limit: number;
@@ -162,7 +167,6 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
       exprValues[':skPrefix'] = `NAME#${normalizedQuery}`;
     }
 
-    // show verified OR createdByUserId === me
     const filterExpression = 'verified = :verifiedTrue OR createdByUserId = :me';
 
     const { Items, LastEvaluatedKey } = await docClient.send(
@@ -178,8 +182,12 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
       }),
     );
 
-    const items = (Items ?? []) as MedicinePreset[];
-    return { items, nextCursor: encodeCursor(LastEvaluatedKey as any) };
+    const items = (Items ?? [])
+      .map((x) => MedicinePresetSchema.safeParse(x))
+      .filter((r): r is { success: true; data: MedicinePreset } => r.success)
+      .map((r) => r.data);
+
+    return { items, nextCursor: encodeCursor(LastEvaluatedKey as DynamoCursor | undefined) };
   }
 
   async adminList(
@@ -204,7 +212,7 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     if (status === 'PENDING') exprValues[':verified'] = false;
 
     let total = 0;
-    let countKey: Record<string, unknown> | undefined = undefined;
+    let countKey: DynamoCursor | undefined = undefined;
 
     for (;;) {
       const resp = await docClient.send(
@@ -221,7 +229,7 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
 
       total += resp.Count ?? 0;
       if (!resp.LastEvaluatedKey) break;
-      countKey = resp.LastEvaluatedKey as any;
+      countKey = resp.LastEvaluatedKey as DynamoCursor;
     }
 
     const { Items, LastEvaluatedKey } = await docClient.send(
@@ -237,8 +245,12 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
       }),
     );
 
-    const items = (Items ?? []) as MedicinePreset[];
-    const nextCursor = encodeCursor(LastEvaluatedKey as any);
+    const items = (Items ?? [])
+      .map((x) => MedicinePresetSchema.safeParse(x))
+      .filter((r): r is { success: true; data: MedicinePreset } => r.success)
+      .map((r) => r.data);
+
+    const nextCursor = encodeCursor(LastEvaluatedKey as DynamoCursor | undefined);
 
     return { items, total, nextCursor };
   }
@@ -252,8 +264,12 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
       }),
     );
 
-    if (!Item || (Item as any).entityType !== 'MEDICINE_PRESET') return null;
-    return Item as MedicinePreset;
+    if (!Item) return null;
+
+    const parsed = MedicinePresetSchema.safeParse(Item);
+    if (!parsed.success) return null;
+
+    return parsed.data;
   }
 
   async adminUpdate(id: string, patch: AdminUpdateMedicineRequest): Promise<MedicinePreset | null> {
@@ -295,23 +311,19 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
           '#updatedAt = :updatedAt',
         ];
 
-        const applyOptional = <K extends keyof AdminUpdateMedicineRequest>(
-          key: K,
-          attr: string,
-        ) => {
-          const v = patch[key];
-          if (v === undefined) return;
+        const applyOptional = (attr: string, value: unknown) => {
+          if (value === undefined) return;
           updateNames[`#${attr}`] = attr;
-          updateValues[`:${attr}`] = v as any;
+          updateValues[`:${attr}`] = value;
           setParts.push(`#${attr} = :${attr}`);
         };
 
-        applyOptional('defaultDose', 'defaultDose');
-        applyOptional('defaultFrequency', 'defaultFrequency');
-        applyOptional('defaultDuration', 'defaultDuration');
-        applyOptional('form', 'form');
-        applyOptional('tags', 'tags');
-        applyOptional('verified', 'verified');
+        applyOptional('defaultDose', patch.defaultDose);
+        applyOptional('defaultFrequency', patch.defaultFrequency);
+        applyOptional('defaultDuration', patch.defaultDuration);
+        applyOptional('form', patch.form);
+        applyOptional('tags', patch.tags);
+        applyOptional('verified', patch.verified);
 
         const newNameIndexItem = {
           ...buildMedicineNameIndexKey(newNormalized),
@@ -360,21 +372,20 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     const values: Record<string, unknown> = { ':updatedAt': Date.now() };
     const setParts: string[] = ['#updatedAt = :updatedAt'];
 
-    const applyOptional = <K extends keyof AdminUpdateMedicineRequest>(key: K, attr: string) => {
-      const v = patch[key];
-      if (v === undefined) return;
+    const applyOptional = (attr: string, value: unknown) => {
+      if (value === undefined) return;
       names[`#${attr}`] = attr;
-      values[`:${attr}`] = v as any;
+      values[`:${attr}`] = value;
       setParts.push(`#${attr} = :${attr}`);
     };
 
-    applyOptional('displayName', 'displayName');
-    applyOptional('defaultDose', 'defaultDose');
-    applyOptional('defaultFrequency', 'defaultFrequency');
-    applyOptional('defaultDuration', 'defaultDuration');
-    applyOptional('form', 'form');
-    applyOptional('tags', 'tags');
-    applyOptional('verified', 'verified');
+    applyOptional('displayName', patch.displayName);
+    applyOptional('defaultDose', patch.defaultDose);
+    applyOptional('defaultFrequency', patch.defaultFrequency);
+    applyOptional('defaultDuration', patch.defaultDuration);
+    applyOptional('form', patch.form);
+    applyOptional('tags', patch.tags);
+    applyOptional('verified', patch.verified);
 
     await docClient.send(
       new UpdateCommand({
@@ -418,7 +429,6 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     return true;
   }
 
-  // ✅ NEW: doctor update (only mine)
   async doctorUpdate(
     id: string,
     patch: DoctorUpdateMedicineRequest,
@@ -463,21 +473,17 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
           '#updatedAt = :updatedAt',
         ];
 
-        const applyOptional = <K extends keyof DoctorUpdateMedicineRequest>(
-          key: K,
-          attr: string,
-        ) => {
-          const v = patch[key];
-          if (v === undefined) return;
+        const applyOptional = (attr: string, value: unknown) => {
+          if (value === undefined) return;
           updateNames[`#${attr}`] = attr;
-          updateValues[`:${attr}`] = v as any;
+          updateValues[`:${attr}`] = value;
           setParts.push(`#${attr} = :${attr}`);
         };
 
-        applyOptional('defaultDose', 'defaultDose');
-        applyOptional('defaultFrequency', 'defaultFrequency');
-        applyOptional('defaultDuration', 'defaultDuration');
-        applyOptional('form', 'form');
+        applyOptional('defaultDose', patch.defaultDose);
+        applyOptional('defaultFrequency', patch.defaultFrequency);
+        applyOptional('defaultDuration', patch.defaultDuration);
+        applyOptional('form', patch.form);
 
         const newNameIndexItem = {
           ...buildMedicineNameIndexKey(newNormalized),
@@ -526,19 +532,18 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     const values: Record<string, unknown> = { ':updatedAt': Date.now() };
     const setParts: string[] = ['#updatedAt = :updatedAt'];
 
-    const applyOptional = <K extends keyof DoctorUpdateMedicineRequest>(key: K, attr: string) => {
-      const v = patch[key];
-      if (v === undefined) return;
+    const applyOptional = (attr: string, value: unknown) => {
+      if (value === undefined) return;
       names[`#${attr}`] = attr;
-      values[`:${attr}`] = v as any;
+      values[`:${attr}`] = value;
       setParts.push(`#${attr} = :${attr}`);
     };
 
-    applyOptional('displayName', 'displayName');
-    applyOptional('defaultDose', 'defaultDose');
-    applyOptional('defaultFrequency', 'defaultFrequency');
-    applyOptional('defaultDuration', 'defaultDuration');
-    applyOptional('form', 'form');
+    applyOptional('displayName', patch.displayName);
+    applyOptional('defaultDose', patch.defaultDose);
+    applyOptional('defaultFrequency', patch.defaultFrequency);
+    applyOptional('defaultDuration', patch.defaultDuration);
+    applyOptional('form', patch.form);
 
     await docClient.send(
       new UpdateCommand({
@@ -554,7 +559,6 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     return await this.getById(id);
   }
 
-  // ✅ NEW: doctor delete (only mine)
   async doctorDelete(id: string, userId: string): Promise<boolean | 'FORBIDDEN'> {
     const existing = await this.getById(id);
     if (!existing) return false;
@@ -599,17 +603,20 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
       }),
     );
 
-    if (existingNameIndex.Item && (existingNameIndex.Item as any).medicinePresetId) {
+    const presetIdFromIndex = getStringProp(existingNameIndex.Item, 'medicinePresetId');
+
+    if (presetIdFromIndex) {
       const { Item } = await docClient.send(
         new GetCommand({
           TableName: TABLE_NAME,
-          Key: buildMedicinePresetKey((existingNameIndex.Item as any).medicinePresetId as string),
+          Key: buildMedicinePresetKey(presetIdFromIndex),
           ConsistentRead: true,
         }),
       );
 
-      if (Item && (Item as any).entityType === 'MEDICINE_PRESET') {
-        return Item as MedicinePreset;
+      if (Item) {
+        const parsed = MedicinePresetSchema.safeParse(Item);
+        if (parsed.success) return parsed.data;
       }
     }
 

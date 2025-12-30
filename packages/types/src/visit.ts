@@ -1,4 +1,3 @@
-// packages/types/src/visit.ts
 import { z } from 'zod';
 import { PatientId } from './patient';
 import { UserId } from './user';
@@ -20,7 +19,6 @@ export const Visit = z.object({
   status: VisitStatus,
   visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 
-  // ✅ OPD number string (generated at visit creation)
   opdNo: z.string().min(1).optional(),
 
   createdAt: z.number().int().nonnegative(),

@@ -1,4 +1,3 @@
-// packages/types/src/medicine.ts
 import { z } from 'zod';
 
 export const MedicinePresetId = z.string().min(1);
@@ -61,11 +60,10 @@ export const MedicineTypeaheadItem = z.object({
 });
 export type MedicineTypeaheadItem = z.infer<typeof MedicineTypeaheadItem>;
 
-// ✅ NEW: Doctor catalog list (paged)
 export const MedicineCatalogSearchQuery = z.object({
   query: z.string().optional(),
   limit: z.number().int().min(1).max(100).default(20),
-  cursor: z.string().optional(), // base64 dynamo key
+  cursor: z.string().optional(),
 });
 export type MedicineCatalogSearchQuery = z.infer<typeof MedicineCatalogSearchQuery>;
 
@@ -75,7 +73,6 @@ export const MedicineCatalogListResponse = z.object({
 });
 export type MedicineCatalogListResponse = z.infer<typeof MedicineCatalogListResponse>;
 
-// ✅ NEW: Doctor update request (no verified/tags)
 export const DoctorUpdateMedicineRequest = z.object({
   displayName: z.string().min(1).optional(),
   defaultDose: z.string().min(1).optional(),
@@ -84,10 +81,6 @@ export const DoctorUpdateMedicineRequest = z.object({
   form: MedicineForm.optional(),
 });
 export type DoctorUpdateMedicineRequest = z.infer<typeof DoctorUpdateMedicineRequest>;
-
-// --------------------
-// ✅ Admin (pagination + total + update/delete + status filter)
-// --------------------
 
 export const AdminMedicinesStatus = z.enum(['PENDING', 'VERIFIED']);
 export type AdminMedicinesStatus = z.infer<typeof AdminMedicinesStatus>;

@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/visits/[visitId]/checkout/billing/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -74,7 +73,6 @@ export default function VisitCheckoutBillingPage() {
   const bill = billQuery.data ?? null;
   const billNotFound = (billQuery as any)?.error?.status === 404;
 
-  // ✅ HARD RULE: if bill exists and user is not admin => redirect (no editing)
   React.useEffect(() => {
     if (!visitId) return;
     if (billQuery.isLoading || billQuery.isFetching) return;
@@ -88,21 +86,17 @@ export default function VisitCheckoutBillingPage() {
 
   const [checkoutVisit, checkoutState] = useCheckoutVisitMutation();
 
-  // ===== billing saved lines =====
   const [lines, setLines] = React.useState<LineDraft[]>([]);
   const [discountAmount, setDiscountAmount] = React.useState(0);
   const [taxAmount, setTaxAmount] = React.useState(0);
 
-  // ===== add row drafts =====
   const [serviceDraft, setServiceDraft] = React.useState('');
   const [amountDraft, setAmountDraft] = React.useState('');
 
-  // ===== inline edit =====
   const [editIndex, setEditIndex] = React.useState<number | null>(null);
   const [editService, setEditService] = React.useState('');
   const [editAmount, setEditAmount] = React.useState('');
 
-  // hydrate from existing bill if present (admin edit only)
   const hydratedRef = React.useRef(false);
   React.useEffect(() => {
     if (!bill) return;
@@ -144,7 +138,6 @@ export default function VisitCheckoutBillingPage() {
   const doctorLabel = visit?.doctorId ? `Doctor (${visit.doctorId})` : 'Doctor';
   const visitDateLabel = visit?.visitDate ? visit.visitDate : '—';
 
-  // ✅ Billing is muted if zero-billed OR (bill exists and not admin) — but non-admin already redirected
   const billingMuted = isZeroBilled;
 
   const serviceRef = React.useRef<HTMLInputElement | null>(null);
@@ -251,7 +244,6 @@ export default function VisitCheckoutBillingPage() {
     }
   };
 
-  // If bill exists and user is not admin, we redirect; avoid flashing UI:
   if (bill && !isAdmin) return <div className="p-6 text-sm text-gray-600">Redirecting…</div>;
 
   return (

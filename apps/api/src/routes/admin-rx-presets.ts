@@ -1,4 +1,4 @@
-import { Router } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { validate } from '../middlewares/zod';
 import {
@@ -14,11 +14,11 @@ import { sendZodValidationError } from '../lib/validation';
 
 const r = Router();
 
-const handleValidationError = (req: any, res: any, issues: z.ZodError['issues']) => {
+const handleValidationError = (req: Request, res: Response, issues: z.ZodIssue[]) => {
   return sendZodValidationError(req, res, issues);
 };
 
-const buildAdminSearchFromRequest = (req: any) => {
+const buildAdminSearchFromRequest = (req: Request) => {
   const query =
     typeof req.query.query === 'string' && req.query.query.trim().length > 0
       ? req.query.query
@@ -72,7 +72,7 @@ r.post('/', validate(AdminCreateRxPresetRequest), async (req, res, next) => {
       lines: input.lines,
       tags: input.tags,
       createdByUserId,
-      scope: 'ADMIN', // ✅ IMPORTANT
+      scope: 'ADMIN',
     });
 
     if (req.auth) {

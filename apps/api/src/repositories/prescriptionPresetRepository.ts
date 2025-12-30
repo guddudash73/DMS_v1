@@ -1,3 +1,4 @@
+// apps/api/src/repositories/prescriptionPresetRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
@@ -8,15 +9,35 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
-import type {
-  AdminRxPresetSearchQuery,
-  PrescriptionPreset,
-  PrescriptionPresetId,
-  PrescriptionPresetSearchQuery,
-  RxLineType,
-  PrescriptionPresetScope,
-  RxPresetFilter,
+import {
+  PrescriptionPreset as PrescriptionPresetSchema, // ✅ zod schema
+  type AdminRxPresetSearchQuery,
+  type PrescriptionPreset,
+  type PrescriptionPresetId,
+  type PrescriptionPresetSearchQuery,
+  type RxLineType,
+  type PrescriptionPresetScope,
+  type RxPresetFilter,
 } from '@dms/types';
+
+type DynamoCursor = Record<string, unknown>;
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
+const encodeCursor = (key: DynamoCursor | undefined): string | null => {
+  if (!key) return null;
+  return Buffer.from(JSON.stringify(key), 'utf8').toString('base64');
+};
+
+const decodeCursor = (cursor: string | undefined): DynamoCursor | undefined => {
+  if (!cursor) return undefined;
+  try {
+    const raw = Buffer.from(cursor, 'base64').toString('utf8');
+    const parsed: unknown = JSON.parse(raw);
+    return isObject(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+};
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: { removeUndefinedValues: true },
@@ -39,23 +60,6 @@ const normalizePresetName = (name: string): string =>
     .replace(/\s+/g, ' ')
     .replace(/[^a-z0-9\s]/g, '')
     .replace(/\s+/g, '');
-
-const encodeCursor = (key: Record<string, unknown> | undefined): string | null => {
-  if (!key) return null;
-  return Buffer.from(JSON.stringify(key), 'utf8').toString('base64');
-};
-
-const decodeCursor = (cursor: string | undefined): Record<string, unknown> | undefined => {
-  if (!cursor) return undefined;
-  try {
-    const raw = Buffer.from(cursor, 'base64').toString('utf8');
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>;
-    return undefined;
-  } catch {
-    return undefined;
-  }
-};
 
 export interface PrescriptionPresetRepository {
   search(
@@ -110,12 +114,6 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
 
     const isAdmin = ctx.role === 'ADMIN';
 
-    // ✅ Visibility rules:
-    // - ADMIN: can see all (unless filter narrows it)
-    // - non-admin: can see ADMIN or PUBLIC, plus their own PRIVATE
-    //
-    // Implemented via FilterExpression:
-    //   (scope <> 'PRIVATE') OR (createdByUserId = :me)
     if (!isAdmin) {
       exprNames['#scope'] = 'scope';
       exprNames['#createdByUserId'] = 'createdByUserId';
@@ -124,7 +122,6 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
       filterParts.push('(#scope <> :privateScope OR #createdByUserId = :me)');
     }
 
-    // ✅ Apply explicit doctor-facing filter dropdown
     if (filter === 'MINE') {
       exprNames['#createdByUserId'] = 'createdByUserId';
       exprValues[':me'] = ctx.userId;
@@ -156,7 +153,10 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
       }),
     );
 
-    return (Items ?? []) as PrescriptionPreset[];
+    return (Items ?? [])
+      .map((x) => PrescriptionPresetSchema.safeParse(x))
+      .filter((r): r is { success: true; data: PrescriptionPreset } => r.success)
+      .map((r) => r.data);
   }
 
   async searchAdmin(
@@ -173,9 +173,8 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
       exprValues[':skPrefix'] = `NAME#${normalizedQuery}`;
     }
 
-    // ✅ total count
     let total = 0;
-    let countKey: Record<string, unknown> | undefined = undefined;
+    let countKey: DynamoCursor | undefined = undefined;
 
     for (;;) {
       const resp = await docClient.send(
@@ -190,7 +189,7 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
       );
       total += resp.Count ?? 0;
       if (!resp.LastEvaluatedKey) break;
-      countKey = resp.LastEvaluatedKey as any;
+      countKey = resp.LastEvaluatedKey as DynamoCursor;
     }
 
     const { Items, LastEvaluatedKey } = await docClient.send(
@@ -205,10 +204,15 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
       }),
     );
 
+    const items = (Items ?? [])
+      .map((x) => PrescriptionPresetSchema.safeParse(x))
+      .filter((r): r is { success: true; data: PrescriptionPreset } => r.success)
+      .map((r) => r.data);
+
     return {
-      items: (Items ?? []) as PrescriptionPreset[],
+      items,
       total,
-      nextCursor: encodeCursor(LastEvaluatedKey as any),
+      nextCursor: encodeCursor(LastEvaluatedKey as DynamoCursor | undefined),
     };
   }
 
@@ -303,7 +307,7 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
       setParts.push('#scope = :scope');
     }
 
-    const { Attributes } = await docClient.send(
+    await docClient.send(
       new UpdateCommand({
         TableName: TABLE_NAME,
         Key: buildRxPresetKey(id),
@@ -311,12 +315,10 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
         ExpressionAttributeNames: names,
         ExpressionAttributeValues: values,
         ConditionExpression: 'attribute_exists(PK)',
-        ReturnValues: 'ALL_NEW',
       }),
     );
 
-    if (!Attributes) return null;
-    return Attributes as PrescriptionPreset;
+    return await this.getById(id);
   }
 
   async getById(id: PrescriptionPresetId): Promise<PrescriptionPreset | null> {
@@ -328,8 +330,12 @@ export class DynamoDBPrescriptionPresetRepository implements PrescriptionPresetR
       }),
     );
 
-    if (!Item || (Item as any).entityType !== 'RX_PRESET') return null;
-    return Item as PrescriptionPreset;
+    if (!Item) return null;
+
+    const parsed = PrescriptionPresetSchema.safeParse(Item);
+    if (!parsed.success) return null;
+
+    return parsed.data;
   }
 
   async delete(id: PrescriptionPresetId): Promise<boolean> {

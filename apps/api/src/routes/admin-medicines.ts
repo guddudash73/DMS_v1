@@ -1,4 +1,3 @@
-// apps/api/src/routes/admin-medicines.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
@@ -69,7 +68,6 @@ router.get(
   }),
 );
 
-// ✅ Create medicine (admin import; verified=true by default)
 router.post(
   '/',
   asyncHandler(async (req, res) => {
@@ -101,7 +99,6 @@ router.post(
   }),
 );
 
-// ✅ Verify medicine
 router.post(
   '/:id/verify',
   asyncHandler(async (req, res) => {

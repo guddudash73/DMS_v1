@@ -48,7 +48,6 @@ function initials(name: string) {
 type PatientsPanelProps = {
   title?: string;
   dateLabel?: string;
-  /** Used for "View all" routing. Example: "2025-01-20" */
   dateIso?: string;
 
   patients?: PatientsPanelItem[];
@@ -225,13 +224,11 @@ export default function PatientsPanel({
     router.push(`/visits/day/${d}`);
   };
 
-  // ✅ Always render EXACTLY 4 "pills" (rows). If more than 4, list scrolls.
   const VISIBLE_ROWS = 4;
   const shouldScroll = patients.length > VISIBLE_ROWS;
 
   const visiblePatients = patients.slice(0, VISIBLE_ROWS);
 
-  // Build exactly 4 items for the non-scroll case (fill with placeholders)
   const placeholdersNeeded = Math.max(0, VISIBLE_ROWS - visiblePatients.length);
 
   return (
@@ -256,13 +253,11 @@ export default function PatientsPanel({
         </Button>
       </div>
 
-      {/* ✅ Fixed 4-row viewport. Scroll only when > 4 */}
       <div className={cn('px-2 pb-4', shouldScroll ? 'max-h-48 overflow-y-auto dms-scroll' : '')}>
         <ul className="space-y-1">
           {loading ? (
             Array.from({ length: VISIBLE_ROWS }).map((_, i) => <SkeletonPill key={i} i={i} />)
           ) : !canUseApi ? (
-            // still keep 4 rows height using placeholders
             <>
               <li className="px-3 py-3">
                 <div className="rounded-2xl bg-gray-50 px-3 py-3 text-xs text-gray-500">
@@ -287,7 +282,6 @@ export default function PatientsPanel({
             </>
           )}
 
-          {/* If there are more than 4 patients, render the rest (scroll area) */}
           {!loading && canUseApi && patients.length > VISIBLE_ROWS
             ? patients
                 .slice(VISIBLE_ROWS)

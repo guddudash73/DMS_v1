@@ -42,7 +42,7 @@ type RxIdParam = z.infer<typeof RxIdParam>;
 
 const RxUpdateBody = z.object({
   lines: z.array(RxLine).min(1),
-  jsonKey: z.string().min(1).optional(), // allow server to set, but can accept if needed
+  jsonKey: z.string().min(1).optional(),
 });
 
 router.get(
@@ -154,7 +154,6 @@ router.put(
         .json({ error: 'RX_NOT_FOUND', message: 'Prescription not found', traceId: req.requestId });
     }
 
-    // If jsonKey not provided, keep old jsonKey (you can also generate a new one if you want)
     const updated = await prescriptionRepository.updateById({
       rxId,
       lines: body.data.lines,

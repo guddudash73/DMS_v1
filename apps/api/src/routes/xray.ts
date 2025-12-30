@@ -403,7 +403,6 @@ router.delete(
     }
 
     try {
-      // 1) HARD DELETE from S3 first (so we don't lose keys)
       const objects = [
         { Key: meta.contentKey },
         ...(meta.thumbKey ? [{ Key: meta.thumbKey }] : []),
@@ -437,7 +436,6 @@ router.delete(
         });
       }
 
-      // 2) HARD DELETE DynamoDB rows
       await xrayRepository.hardDelete(xrayId);
 
       if (req.auth) {

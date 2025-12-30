@@ -31,7 +31,6 @@ export default function DoctorVisitHandlingPage() {
   const visitStatus = visitQuery.data?.status;
   const isDone = visitStatus === 'DONE';
 
-  // ✅ controlled from PrescriptionWorkspace
   const [isRevisionMode, setIsRevisionMode] = useState(false);
 
   const canEndSession =
@@ -64,7 +63,6 @@ export default function DoctorVisitHandlingPage() {
   return (
     <div className="p-4 2xl:p-8">
       <div className="mb-4 flex items-center justify-end gap-3">
-        {/* Hide Hold Session on DONE visits */}
         {!isDone ? (
           <Button type="button" variant="outline" className="rounded-xl" disabled>
             Hold Session

@@ -1,4 +1,3 @@
-// packages/types/src/patientSummary.ts
 import { z } from 'zod';
 
 export const PatientSummary = z.object({

@@ -116,7 +116,7 @@ export default function AdminShell({ children }: AdminShellProps) {
         },
         rightSlot: (
           <LogoutButton
-            className="h-7 w-7 rounded-full text-gray-500 hover:bg-gray-100"
+            className="h-7 w-7 rounded-full text-gray-500 hover:bg-gray-100 cursor-pointer"
             variant="ghost"
             size="icon"
             iconOnly

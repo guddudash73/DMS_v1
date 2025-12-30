@@ -1,4 +1,3 @@
-// apps/web/components/dashboard/VisitorsRatioCharts.tsx
 'use client';
 
 import * as React from 'react';
@@ -65,7 +64,6 @@ function formatShortDate(value: unknown) {
   const dateIso = String(value ?? '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateIso)) return dateIso;
 
-  // Use a stable date anchor then render in clinic TZ
   const dt = new Date(`${dateIso}T00:00:00Z`);
   if (Number.isNaN(dt.getTime())) return dateIso;
 

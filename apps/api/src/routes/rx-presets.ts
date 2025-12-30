@@ -6,7 +6,6 @@ import {
   UpdateRxPresetRequest,
   PrescriptionPresetId,
   type PrescriptionPresetScope,
-  type Role,
 } from '@dms/types';
 import { prescriptionPresetRepository } from '../repositories/prescriptionPresetRepository';
 import { sendZodValidationError } from '../lib/validation';
@@ -22,9 +21,8 @@ const asyncHandler =
   (req: Request, res: Response, next: NextFunction) =>
     void fn(req, res, next).catch(next);
 
-// ✅ Correct: your auth middleware attaches req.auth
 function requireUser(req: Request): { userId: string; role?: string } {
-  const u = (req as any).auth as { userId?: string; role?: string } | undefined;
+  const u = req.auth;
   if (!u?.userId) {
     throw Object.assign(new Error('Unauthorized'), { statusCode: 401 });
   }
@@ -55,7 +53,6 @@ const buildPresetSearchFromRequest = (req: Request): PrescriptionPresetSearchQue
   return parsed.data;
 };
 
-// ✅ list/search (doctor-facing)
 router.get(
   '/',
   asyncHandler(async (req, res) => {
@@ -69,14 +66,12 @@ router.get(
 
     const user = requireUser(req);
 
-    // repository enforces visibility now (no leaking PRIVATE presets)
     const presets = await prescriptionPresetRepository.search(search, user);
 
     return res.status(200).json({ items: presets });
   }),
 );
 
-// ✅ get by id (doctor edit page)
 router.get(
   '/:id',
   asyncHandler(async (req, res) => {
@@ -88,9 +83,6 @@ router.get(
     const preset = await prescriptionPresetRepository.getById(parsedId.data);
     if (!preset) return res.status(404).json({ error: 'NOT_FOUND', message: 'Preset not found.' });
 
-    // ✅ access control:
-    // - ADMIN can read all
-    // - non-admin can read: ADMIN, PUBLIC, and their own PRIVATE
     if (user.role !== 'ADMIN') {
       const isOwner = preset.createdByUserId === user.userId;
       const isVisible = preset.scope === 'ADMIN' || preset.scope === 'PUBLIC' || isOwner;
@@ -101,13 +93,11 @@ router.get(
   }),
 );
 
-// ✅ create (doctor/admin)
 router.post(
   '/',
   asyncHandler(async (req, res) => {
     const user = requireUser(req);
 
-    // extra hardening (server mounts requireRole incl RECEPTION)
     if (user.role === 'RECEPTION') {
       return res
         .status(403)
@@ -119,7 +109,6 @@ router.post(
 
     const desiredScope: PrescriptionPresetScope = parsed.data.scope ?? 'PRIVATE';
 
-    // ✅ only ADMIN can create ADMIN-scoped presets via this route
     if (desiredScope === 'ADMIN' && user.role !== 'ADMIN') {
       return res
         .status(403)
@@ -138,7 +127,6 @@ router.post(
   }),
 );
 
-// ✅ update (doctor: only own presets unless ADMIN)
 router.patch(
   '/:id',
   asyncHandler(async (req, res) => {
@@ -167,7 +155,6 @@ router.patch(
         .json({ error: 'FORBIDDEN', message: 'You can only edit your own presets.' });
     }
 
-    // ✅ scope hardening
     if (parsedPatch.data.scope === 'ADMIN' && user.role !== 'ADMIN') {
       return res
         .status(403)
@@ -181,7 +168,6 @@ router.patch(
   }),
 );
 
-// ✅ delete (doctor: only own presets unless ADMIN)
 router.delete(
   '/:id',
   asyncHandler(async (req, res) => {

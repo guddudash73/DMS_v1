@@ -40,7 +40,6 @@ export function BillPrintSheet(props: Props) {
     onAfterPrint,
   } = props;
 
-  // ✅ hooks must ALWAYS run
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => setMounted(true), []);
 
@@ -65,7 +64,6 @@ export function BillPrintSheet(props: Props) {
     }
   }, [billing?.createdAt]);
 
-  // ✅ print only when open + billing exists
   React.useEffect(() => {
     if (!mounted) return;
     if (!open) return;
@@ -90,7 +88,6 @@ export function BillPrintSheet(props: Props) {
     };
   }, [mounted, open, billing, onAfterPrint]);
 
-  // ✅ early return after hooks is safe
   if (!mounted) return null;
 
   return createPortal(

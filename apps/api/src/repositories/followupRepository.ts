@@ -1,11 +1,10 @@
-// apps/api/src/repositories/followupRepository.ts
 import {
   DynamoDBDocumentClient,
-  GetCommand,
   PutCommand,
   QueryCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
+import { FollowUpContactMethod } from '@dms/types';
 import type {
   FollowUp,
   FollowUpCreate,
@@ -14,6 +13,7 @@ import type {
   Visit,
   VisitId,
   FollowUpId,
+  FollowUpContactMethod as FollowUpContactMethodType,
 } from '@dms/types';
 import { v4 as randomUUID } from 'uuid';
 import { visitRepository } from './visitRepository';
@@ -27,6 +27,11 @@ export class FollowUpRuleViolationError extends Error {
     this.name = 'FollowUpRuleViolationError';
   }
 }
+
+const parseContactMethod = (value: unknown): FollowUpContactMethodType => {
+  const parsed = FollowUpContactMethod.safeParse(value);
+  return parsed.success ? parsed.data : 'OTHER';
+};
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: { removeUndefinedValues: true },
@@ -65,7 +70,7 @@ export interface FollowupRepository {
   listByVisitId(visitId: VisitId): Promise<FollowUp[]>;
   createForVisit(visitId: VisitId, input: FollowUpCreate): Promise<FollowUp>;
   listActiveByFollowUpDate(dateISO: string): Promise<FollowUp[]>;
-  listByFollowUpDate(dateISO: string): Promise<FollowUp[]>; // ✅ NEW
+  listByFollowUpDate(dateISO: string): Promise<FollowUp[]>;
   updateStatus(args: {
     visitId: VisitId;
     followupId: FollowUpId;
@@ -94,7 +99,7 @@ export class DynamoDBFollowupRepository implements FollowupRepository {
         visitId: String(x.visitId),
         followUpDate: String(x.followUpDate),
         reason: x.reason as string | undefined,
-        contactMethod: String(x.contactMethod) as any,
+        contactMethod: parseContactMethod(x.contactMethod),
         status: String(x.status) as FollowUpStatus,
         createdAt: Number(x.createdAt),
         updatedAt: Number(x.updatedAt),
@@ -137,17 +142,11 @@ export class DynamoDBFollowupRepository implements FollowupRepository {
     return item;
   }
 
-  /**
-   * ⚠️ Legacy: ACTIVE only
-   */
   async listActiveByFollowUpDate(dateISO: string): Promise<FollowUp[]> {
     const res = await this.listByFollowUpDate(dateISO);
     return res.filter((x) => x.status === 'ACTIVE');
   }
 
-  /**
-   * ✅ NEW: return ALL followups for a date (ACTIVE + COMPLETED + CANCELLED)
-   */
   async listByFollowUpDate(dateISO: string): Promise<FollowUp[]> {
     const res = await docClient.send(
       new QueryCommand({
@@ -168,7 +167,7 @@ export class DynamoDBFollowupRepository implements FollowupRepository {
         visitId: String(x.visitId),
         followUpDate: String(x.followUpDate),
         reason: x.reason as string | undefined,
-        contactMethod: String(x.contactMethod) as any,
+        contactMethod: parseContactMethod(x.contactMethod),
         status: String(x.status) as FollowUpStatus,
         createdAt: Number(x.createdAt),
         updatedAt: Number(x.updatedAt),

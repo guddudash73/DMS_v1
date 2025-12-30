@@ -35,7 +35,6 @@ function safeSexFromPatient(p: any): PatientSex {
 function parseDob(dob?: string): Date | null {
   if (!dob) return null;
   const s = String(dob).trim();
-  // Expect YYYY-MM-DD
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
   if (!m) return null;
   const y = Number(m[1]);
@@ -50,7 +49,6 @@ function calcAgeYears(dob?: string, onDate?: string): number | null {
   const birth = parseDob(dob);
   if (!birth) return null;
 
-  // Age should be computed as of the visit date if available, else today.
   const ref = onDate ? parseDob(onDate) : null;
   const today = ref ?? new Date();
 
@@ -96,7 +94,6 @@ export default function DoctorVisitPage() {
 
   const [updateVisitStatus, updateVisitStatusState] = useUpdateVisitStatusMutation();
 
-  // ✅ resolve doctor name + regd from list (fallback to id)
   const doctorsQuery = useGetDoctorsQuery(undefined, {
     refetchOnMountOrArgChange: true,
   });
@@ -120,7 +117,6 @@ export default function DoctorVisitPage() {
     return name ?? (id ? `Doctor (${id})` : 'Doctor');
   }, [doctorFromList, visit?.doctorId, doctorId]);
 
-  // ✅ FIX: regd label must come from doctors list data
   const doctorRegdLabel = React.useMemo(() => {
     const reg = (doctorFromList as any)?.registrationNumber ?? undefined;
     return reg ? `B.D.S Regd. - ${reg}` : undefined;
@@ -145,13 +141,11 @@ export default function DoctorVisitPage() {
       return;
     }
 
-    // If already in progress, just continue
     if (status === 'IN_PROGRESS') {
       router.push(`/doctor/visits/${visitId}/prescription`);
       return;
     }
 
-    // If queued, move to IN_PROGRESS first, then open prescription workspace
     if (status === 'QUEUED') {
       try {
         await updateVisitStatus({
@@ -168,7 +162,6 @@ export default function DoctorVisitPage() {
       return;
     }
 
-    // fallback
     router.push(`/doctor/visits/${visitId}/prescription`);
   };
 
@@ -185,7 +178,6 @@ export default function DoctorVisitPage() {
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
-      {/* Header */}
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
           <div className="text-lg font-semibold text-gray-900">Visit</div>
@@ -258,7 +250,6 @@ export default function DoctorVisitPage() {
           </Card>
         </div>
       ) : isDone ? (
-        // ✅ DONE: show prescription preview (left) + xray tray (right)
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
           <Card className="lg:col-span-6 rounded-2xl border bg-white p-4">
             <div className="mb-3 flex items-center gap-2">
@@ -278,7 +269,7 @@ export default function DoctorVisitPage() {
                 sdId={(patient as any)?.sdId}
                 opdNo={opdNo}
                 doctorName={doctorLabel}
-                doctorRegdLabel={doctorRegdLabel} // ✅ FIXED: pass regd label
+                doctorRegdLabel={doctorRegdLabel}
                 visitDateLabel={visitDateLabel}
                 lines={rx?.lines ?? []}
                 receptionNotes={rx?.receptionNotes ?? ''}
@@ -299,7 +290,6 @@ export default function DoctorVisitPage() {
           </Card>
         </div>
       ) : (
-        // ✅ NOT DONE: show visit info + prescription-like panel + start/continue session button
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
           {/* Visit Overview */}
           <Card className="lg:col-span-5 rounded-2xl border bg-white p-6">

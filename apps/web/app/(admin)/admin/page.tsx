@@ -80,7 +80,6 @@ export default function AdminDashboardPage() {
 
   const doctorsQuery = useGetDoctorsQuery(undefined, { skip: !canUseApi });
 
-  // ✅ Use admin list endpoints to get TOTAL accurately (limit 1 to keep payload tiny)
   const medicinesQuery = useAdminListMedicinesQuery({ query: '', limit: 1 }, { skip: !canUseApi });
   const rxPresetsQuery = useAdminListRxPresetsQuery({ query: '', limit: 1 }, { skip: !canUseApi });
 

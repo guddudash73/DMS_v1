@@ -1,4 +1,3 @@
-// apps/api/src/routes/medicines.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
@@ -92,7 +91,6 @@ router.get(
   }),
 );
 
-// ✅ NEW: doctor catalog (verified + own unverified)
 router.get(
   '/catalog',
   asyncHandler(async (req, res) => {
@@ -162,7 +160,6 @@ router.post(
   }),
 );
 
-// ✅ NEW: doctor update (only mine + INLINE_DOCTOR)
 router.patch(
   '/:id',
   asyncHandler(async (req, res) => {
@@ -213,7 +210,6 @@ router.patch(
   }),
 );
 
-// ✅ NEW: doctor delete (only mine + INLINE_DOCTOR)
 router.delete(
   '/:id',
   asyncHandler(async (req, res) => {

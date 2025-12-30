@@ -12,7 +12,7 @@ export const User = z.object({
   email: z.email(),
   displayName: z.string().min(1),
   role: Role,
-  active: z.boolean(), // ✅ NEW
+  active: z.boolean(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 });
@@ -65,7 +65,7 @@ export const AdminCreateUserRequest = z.object({
   displayName: z.string().min(1),
   password: z.string().min(8).max(128),
   role: Role.refine((r) => r !== 'DOCTOR', { message: 'Use admin-doctors to create doctors' }),
-  active: z.boolean().optional(), // default true on backend
+  active: z.boolean().optional(),
 });
 export type AdminCreateUserRequest = z.infer<typeof AdminCreateUserRequest>;
 
@@ -79,6 +79,11 @@ export type AdminUpdateUserRequest = z.infer<typeof AdminUpdateUserRequest>;
 export const AdminUserListItem = User;
 export type AdminUserListItem = z.infer<typeof AdminUserListItem>;
 
+export const AdminResetUserPasswordRequest = z.object({
+  password: z.string().min(8).max(128),
+});
+export type AdminResetUserPasswordRequest = z.infer<typeof AdminResetUserPasswordRequest>;
+
 export const DashboardPreferences = z.object({
   selectedDoctorIds: z.array(DoctorId).max(3),
 });
@@ -88,3 +93,14 @@ export const UserPreferences = z.object({
   dashboard: DashboardPreferences.optional(),
 });
 export type UserPreferences = z.infer<typeof UserPreferences>;
+
+export const UpdateMeRequest = z.object({
+  displayName: z.string().min(1).optional(),
+  doctorProfile: z
+    .object({
+      fullName: z.string().min(1).optional(),
+      contact: z.string().min(5).max(64).optional(),
+    })
+    .optional(),
+});
+export type UpdateMeRequest = z.infer<typeof UpdateMeRequest>;

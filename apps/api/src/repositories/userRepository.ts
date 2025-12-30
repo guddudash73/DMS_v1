@@ -1,4 +1,3 @@
-// apps/api/src/repositories/userRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
@@ -56,7 +55,6 @@ export interface UserRepository {
   ): Promise<UserRecord | null>;
   clearFailedLogins(userId: string): Promise<void>;
 
-  // ✅ Admin users
   listUsers(): Promise<UserRecord[]>;
   updateUser(
     userId: string,
@@ -65,7 +63,8 @@ export interface UserRepository {
   setUserActive(userId: string, active: boolean): Promise<UserRecord | null>;
   deleteUser(userId: string): Promise<{ ok: true }>;
 
-  // Doctors
+  setUserPassword(userId: string, passwordHash: string): Promise<UserRecord | null>;
+
   createDoctor(params: {
     email: string;
     displayName: string;
@@ -123,7 +122,7 @@ export class DynamoDBUserRepository implements UserRepository {
       email,
       displayName,
       role,
-      active: params.active ?? true, // ✅ NEW
+      active: params.active ?? true,
       createdAt: now,
       updatedAt: now,
       passwordHash,
@@ -229,7 +228,6 @@ export class DynamoDBUserRepository implements UserRepository {
     const user = await this.getById(userId);
     if (!user) return { ok: true };
 
-    // Remove both USER and USER_EMAIL_INDEX
     await docClient.send(
       new TransactWriteCommand({
         TransactItems: [
@@ -244,14 +242,12 @@ export class DynamoDBUserRepository implements UserRepository {
             Delete: {
               TableName: TABLE_NAME,
               Key: buildUserEmailIndexKey(user.email),
-              // No condition; safe delete.
             },
           },
         ],
       }),
     );
 
-    // If doctor user: remove doctor profile too (best-effort)
     if (user.role === 'DOCTOR') {
       try {
         await docClient.send(
@@ -330,6 +326,38 @@ export class DynamoDBUserRepository implements UserRepository {
         ConditionExpression: 'attribute_exists(PK)',
       }),
     );
+  }
+
+  async setUserPassword(userId: string, passwordHash: string): Promise<UserRecord | null> {
+    const existing = await this.getById(userId);
+    if (!existing) return null;
+
+    const now = Date.now();
+
+    const { Attributes } = await docClient.send(
+      new UpdateCommand({
+        TableName: TABLE_NAME,
+        Key: buildUserKey(userId),
+        UpdateExpression:
+          'SET #passwordHash = :ph, #failedLoginCount = :zero, #updatedAt = :updatedAt REMOVE #lockUntil',
+        ExpressionAttributeNames: {
+          '#passwordHash': 'passwordHash',
+          '#failedLoginCount': 'failedLoginCount',
+          '#updatedAt': 'updatedAt',
+          '#lockUntil': 'lockUntil',
+        },
+        ExpressionAttributeValues: {
+          ':ph': passwordHash,
+          ':zero': 0,
+          ':updatedAt': now,
+        },
+        ConditionExpression: 'attribute_exists(PK)',
+        ReturnValues: 'ALL_NEW',
+      }),
+    );
+
+    if (!Attributes) return null;
+    return Attributes as UserRecord;
   }
 
   async createDoctor(params: {

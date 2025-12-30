@@ -11,7 +11,6 @@ export default function PatientError({
   reset: () => void;
 }) {
   useEffect(() => {
-    // TODO: replace with structured logger
     console.error(error);
   }, [error]);
 

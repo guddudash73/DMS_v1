@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/visits/[visitId]/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -28,9 +27,6 @@ import { useAuth } from '@/src/hooks/useAuth';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
-/**
- * ✅ LOCAL YYYY-MM-DD (IST-safe). Never use toISOString().slice(0,10) for date-only UI.
- */
 function toLocalISODate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -91,7 +87,6 @@ function normalizeSex(raw: unknown): PatientSex | undefined {
   return undefined;
 }
 
-/** If doctorName looks like "Doctor (uuid)" or raw uuid, treat it as not-a-name. */
 function looksLikeDoctorIdLabel(name?: string) {
   if (!name) return true;
   const s = name.trim();
@@ -140,7 +135,6 @@ export default function ClinicVisitInfoPage() {
     },
   );
 
-  // ✅ Bill presence decides checkout label/route
   const billQuery = useGetVisitBillQuery({ visitId }, { skip: !visitId });
   const bill = billQuery.data ?? null;
   const billNotFound = (billQuery as any)?.error?.status === 404;
@@ -148,10 +142,8 @@ export default function ClinicVisitInfoPage() {
   const role = auth.status === 'authenticated' ? auth.role : undefined;
   const isAdmin = role === 'ADMIN';
 
-  // ✅ Doctor list (map doctorId -> fullName + registrationNumber)
   const doctorsQuery = useGetDoctorsQuery(undefined);
 
-  // Optional refetch safety
   React.useEffect(() => {
     if (!visitId) return;
 
@@ -162,12 +154,12 @@ export default function ClinicVisitInfoPage() {
 
     hydratedRef.current = false;
     setNotes('');
-  }, [visitId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [visitId]);
 
   React.useEffect(() => {
     if (!patientId) return;
     patientQuery.refetch();
-  }, [patientId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [patientId]);
 
   const xrayIds = (xraysQuery.data?.items ?? []).map((x) => x.xrayId);
 
@@ -203,9 +195,6 @@ export default function ClinicVisitInfoPage() {
     }
   };
 
-  // -----------------------------
-  // ✅ Patient fields for Rx view
-  // -----------------------------
   const patientName = patientQuery.data?.name;
   const patientPhone = patientQuery.data?.phone;
 
@@ -235,9 +224,6 @@ export default function ClinicVisitInfoPage() {
   const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
   const patientSex = normalizeSex(patientSexRaw);
 
-  // -----------------------------
-  // ✅ Doctor resolved fields
-  // -----------------------------
   const doctorId = (visit as any)?.doctorId as string | undefined;
 
   const doctorFromList = React.useMemo(() => {
@@ -254,7 +240,6 @@ export default function ClinicVisitInfoPage() {
 
   const doctorRegNoResolved = (doctorFromList as any)?.registrationNumber ?? undefined;
 
-  // ✅ workspace-like loading placeholder behavior
   const resolvedDoctorName = React.useMemo(() => {
     if (doctorNameResolved && !looksLikeDoctorIdLabel(doctorNameResolved))
       return doctorNameResolved;
@@ -272,14 +257,12 @@ export default function ClinicVisitInfoPage() {
     return undefined;
   }, [doctorRegNoResolved, doctorsQuery.isLoading, doctorsQuery.isFetching]);
 
-  // ✅ Use createdAt date label for prescription display/print (same as workspace)
   const rxVisitDateLabel = visitCreatedAtMs
     ? `Visit: ${toLocalISODate(new Date(visitCreatedAtMs))}`
     : undefined;
 
   const visitDone = !!visit && visit.status === 'DONE';
 
-  // ✅ Decide primary action based on bill existence
   const hasBill = !!bill;
   const primaryLabel = hasBill ? 'Print/Followup' : 'Checkout';
   const primaryHref = hasBill
@@ -288,7 +271,6 @@ export default function ClinicVisitInfoPage() {
 
   const primaryDisabled = !visit || !visitDone;
 
-  // ✅ avoid TS errors if Preview/PrintSheet props typing doesn’t include new props yet
   const PreviewAny: any = PrescriptionPreview;
   const PrintSheetAny: any = PrescriptionPrintSheet;
 

@@ -1,4 +1,3 @@
-// apps/web/components/prescription/PrescriptionWorkspace.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -43,8 +42,7 @@ import { Calendar as CalendarIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 import { motion } from 'framer-motion';
-import { clinicDateISO } from '@/src/lib/clinicTime';
-import { clinicDateISOFromMs } from '@/src/lib/clinicTime';
+import { clinicDateISO, clinicDateISOFromMs } from '@/src/lib/clinicTime';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
@@ -65,19 +63,40 @@ type Props = {
   onRevisionModeChange?: (enabled: boolean) => void;
 };
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function getString(obj: unknown, key: string): string | undefined {
+  if (!isRecord(obj)) return undefined;
+  const v = obj[key];
+  return typeof v === 'string' ? v : undefined;
+}
+
+function getNumber(obj: unknown, key: string): number | undefined {
+  if (!isRecord(obj)) return undefined;
+  const v = obj[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
 function toISODate(d: Date): string {
   return clinicDateISO(d);
 }
+
 function lineToText(line: RxLineType): string {
-  const med = (line as any)?.medicineName ?? (line as any)?.medicine ?? 'Medicine';
-  const dose = (line as any)?.dose ? `${(line as any).dose}` : '';
-  const freq = (line as any)?.frequency ? `${(line as any).frequency}` : '';
+  const rec: Record<string, unknown> = isRecord(line) ? line : {};
+
+  const med =
+    (typeof rec.medicineName === 'string' && rec.medicineName.trim()) ||
+    (typeof rec.medicine === 'string' && rec.medicine.trim()) ||
+    'Medicine';
+
+  const dose = rec.dose != null ? String(rec.dose) : '';
+  const freq = rec.frequency != null ? String(rec.frequency) : '';
   const days =
-    (line as any)?.days !== undefined && (line as any)?.days !== null
-      ? `${(line as any).days}`
-      : '';
-  const timing = (line as any)?.timing ? `${(line as any).timing}` : '';
-  const notes = (line as any)?.notes ? `${(line as any).notes}` : '';
+    rec.days !== undefined && rec.days !== null && rec.days !== '' ? String(rec.days) : '';
+  const timing = rec.timing != null ? String(rec.timing) : '';
+  const notes = rec.notes != null ? String(rec.notes) : '';
 
   const parts = [dose, freq, days ? `${days} days` : '', timing].filter(Boolean);
   return `${med}${parts.length ? ` — ${parts.join(' · ')}` : ''}${notes ? ` — ${notes}` : ''}`;
@@ -98,12 +117,26 @@ function MedicinesReadOnly({ lines }: { lines: RxLineType[] }) {
           </TableRow>
         </TableHeader>
         <TableBody>
-          {lines.map((l, idx) => (
-            <TableRow key={(l as any)?.id ?? `${idx}`} className="hover:bg-gray-50/60">
-              <TableCell className="w-[60px] text-gray-700">{idx + 1}</TableCell>
-              <TableCell className="text-gray-800">{lineToText(l)}</TableCell>
-            </TableRow>
-          ))}
+          {lines.map((l, idx) => {
+            const rec: Record<string, unknown> = isRecord(l) ? l : {};
+
+            const idVal = rec['id'];
+            const rxLineIdVal = rec['rxLineId'];
+
+            const key =
+              typeof idVal === 'string'
+                ? idVal
+                : typeof rxLineIdVal === 'string'
+                  ? rxLineIdVal
+                  : `${idx}`;
+
+            return (
+              <TableRow key={key} className="hover:bg-gray-50/60">
+                <TableCell className="w-[60px] text-gray-700">{idx + 1}</TableCell>
+                <TableCell className="text-gray-800">{lineToText(l)}</TableCell>
+              </TableRow>
+            );
+          })}
         </TableBody>
       </Table>
     </div>
@@ -185,7 +218,7 @@ function VisitPrescriptionQuickLookDialog(props: {
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !open || !patientId });
 
   const visitCreatedAtDate = useMemo(() => {
-    const createdAt = (visitQuery.data as any)?.createdAt;
+    const createdAt = isRecord(visitQuery.data) ? visitQuery.data.createdAt : undefined;
     return safeParseDate(createdAt);
   }, [visitQuery.data]);
 
@@ -195,18 +228,21 @@ function VisitPrescriptionQuickLookDialog(props: {
   }, [visitCreatedAtDate]);
 
   const patientSex = useMemo(() => {
-    const p = patientQuery.data as any;
-    const s = (p?.sex ?? p?.gender ?? p?.patientSex ?? '').toString().trim().toUpperCase();
-    if (s === 'M' || s === 'F' || s === 'O' || s === 'U') return s as PatientSex;
-    if (s === 'MALE') return 'M';
-    if (s === 'FEMALE') return 'F';
-    if (s === 'OTHER') return 'O';
+    const p = patientQuery.data;
+    const rec: Record<string, unknown> = isRecord(p) ? p : {};
+    const raw = (rec.sex ?? rec.gender ?? rec.patientSex ?? '').toString().trim().toUpperCase();
+    if (raw === 'M' || raw === 'F' || raw === 'O' || raw === 'U') return raw as PatientSex;
+    if (raw === 'MALE') return 'M';
+    if (raw === 'FEMALE') return 'F';
+    if (raw === 'OTHER') return 'O';
     return undefined;
   }, [patientQuery.data]);
 
   const patientAge = useMemo(() => {
-    const p = patientQuery.data as any;
-    const dobRaw = p?.dob ?? p?.dateOfBirth ?? p?.birthDate ?? p?.dobIso ?? null;
+    const p = patientQuery.data;
+    const rec: Record<string, unknown> = isRecord(p) ? p : {};
+    const dobRaw = rec.dob ?? rec.dateOfBirth ?? rec.birthDate ?? rec.dobIso ?? null;
+
     const dob = safeParseDate(dobRaw);
     const at = visitCreatedAtDate ?? new Date();
     if (!dob) return undefined;
@@ -294,25 +330,21 @@ export function PrescriptionWorkspace(props: Props) {
   const resolvedDoctorName = useMemo(() => {
     if (doctorName && !looksLikeDoctorIdLabel(doctorName)) return doctorName;
     if (doctorNameFromMe && !looksLikeDoctorIdLabel(doctorNameFromMe)) return doctorNameFromMe;
-
-    if (meQuery.isLoading || meQuery.isFetching) return undefined;
     return undefined;
-  }, [doctorName, doctorNameFromMe, meQuery.isLoading, meQuery.isFetching]);
+  }, [doctorName, doctorNameFromMe]);
 
   // ✅ Doctor reg label with loading placeholder behavior
   const resolvedDoctorRegdLabel = useMemo(() => {
     if (doctorRegdNoFromMe) return `B.D.S Regd. - ${doctorRegdNoFromMe}`;
-
-    if (meQuery.isLoading || meQuery.isFetching) return undefined;
     return undefined;
-  }, [doctorRegdNoFromMe, meQuery.isLoading, meQuery.isFetching]);
+  }, [doctorRegdNoFromMe]);
 
   // ✅ Fetch visit + patient for createdAt + dob/sex
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
   const visitCreatedAtDate = useMemo(() => {
-    const createdAt = (visitQuery.data as any)?.createdAt;
+    const createdAt = isRecord(visitQuery.data) ? visitQuery.data.createdAt : undefined;
     return safeParseDate(createdAt);
   }, [visitQuery.data]);
 
@@ -322,18 +354,21 @@ export function PrescriptionWorkspace(props: Props) {
   }, [visitCreatedAtDate, visitDateLabelFromParent]);
 
   const patientSex = useMemo(() => {
-    const p = patientQuery.data as any;
-    const s = (p?.sex ?? p?.gender ?? p?.patientSex ?? '').toString().trim().toUpperCase();
-    if (s === 'M' || s === 'F' || s === 'O' || s === 'U') return s as PatientSex;
-    if (s === 'MALE') return 'M';
-    if (s === 'FEMALE') return 'F';
-    if (s === 'OTHER') return 'O';
+    const p = patientQuery.data;
+    const rec: Record<string, unknown> = isRecord(p) ? p : {};
+    const raw = (rec.sex ?? rec.gender ?? rec.patientSex ?? '').toString().trim().toUpperCase();
+    if (raw === 'M' || raw === 'F' || raw === 'O' || raw === 'U') return raw as PatientSex;
+    if (raw === 'MALE') return 'M';
+    if (raw === 'FEMALE') return 'F';
+    if (raw === 'OTHER') return 'O';
     return undefined;
   }, [patientQuery.data]);
 
   const patientAge = useMemo(() => {
-    const p = patientQuery.data as any;
-    const dobRaw = p?.dob ?? p?.dateOfBirth ?? p?.birthDate ?? p?.dobIso ?? null;
+    const p = patientQuery.data;
+    const rec: Record<string, unknown> = isRecord(p) ? p : {};
+    const dobRaw = rec.dob ?? rec.dateOfBirth ?? rec.birthDate ?? rec.dobIso ?? null;
+
     const dob = safeParseDate(dobRaw);
     const at = visitCreatedAtDate ?? new Date();
     if (!dob) return undefined;
@@ -373,7 +408,6 @@ export function PrescriptionWorkspace(props: Props) {
   const [importOpen, setImportOpen] = useState(false);
 
   const handleImportPreset = (presetLines: RxLineType[]) => {
-    // ✅ append into existing list; editable immediately
     setLines((prev) => [...prev, ...presetLines]);
   };
 
@@ -414,7 +448,11 @@ export function PrescriptionWorkspace(props: Props) {
       setState('saving');
       try {
         if (visitStatus === 'DONE') {
-          await updateRxById({ rxId: activeRxId!, lines }).unwrap();
+          if (!activeRxId) {
+            setState('error');
+            return;
+          }
+          await updateRxById({ rxId: activeRxId, lines }).unwrap();
         } else {
           const res = await upsert({ visitId, lines }).unwrap();
           setActiveRxId(res.rxId);
@@ -442,7 +480,6 @@ export function PrescriptionWorkspace(props: Props) {
           : '';
 
   const showStartRevision = isDone && !isRevisionMode;
-
   const canPrint = lines.length > 0;
 
   const printPrescription = () => {
@@ -497,19 +534,7 @@ export function PrescriptionWorkspace(props: Props) {
     return filteredVisits.slice(start, start + PAGE_SIZE);
   }, [filteredVisits, page]);
 
-  const VIEW_ALL_PAGE_SIZE = 10;
-  const [viewAllPage, setViewAllPage] = useState(1);
-
   const [visitsExpanded, setVisitsExpanded] = useState(false);
-
-  useEffect(() => {
-    if (visitsExpanded) setViewAllPage(1);
-  }, [visitsExpanded, selectedDateStr]);
-
-  const viewAllItems = useMemo(() => {
-    const start = (viewAllPage - 1) * VIEW_ALL_PAGE_SIZE;
-    return filteredVisits.slice(start, start + VIEW_ALL_PAGE_SIZE);
-  }, [filteredVisits, viewAllPage]);
 
   const dateLabel = selectedDateStr ?? 'Pick a date';
 
@@ -538,8 +563,8 @@ export function PrescriptionWorkspace(props: Props) {
         className="grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-10"
         animate={
           visitsExpanded
-            ? { opacity: 0.25, y: -6, filter: 'blur(1px)' as any }
-            : { opacity: 1, y: 0, filter: 'blur(0px)' as any }
+            ? { opacity: 0.25, y: -6, filter: 'blur(1px)' }
+            : { opacity: 1, y: 0, filter: 'blur(0px)' }
         }
         transition={{ duration: 0.25, ease: 'easeOut' }}
         style={{ pointerEvents: visitsExpanded ? 'none' : 'auto' }}
@@ -817,6 +842,30 @@ export function PrescriptionWorkspace(props: Props) {
         onOpenChange={(o) => setXrayQuickOpen(o)}
         visitId={quickVisitId}
       />
+
+      {/* NOTE: visitsExpanded is currently only used to visually blur/disable the main layout.
+         If you intend to show a full “View All Visits” overlay, render it here and call
+         setVisitsExpanded(false) to close it. */}
+      {visitsExpanded ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-3xl rounded-2xl bg-white p-4 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="text-lg font-semibold">All Visits</div>
+              <Button
+                variant="outline"
+                className="rounded-xl"
+                onClick={() => setVisitsExpanded(false)}
+              >
+                Close
+              </Button>
+            </div>
+            <div className="mt-3 text-sm text-gray-600">
+              This overlay is a placeholder. If you already have a “View All” UI elsewhere, you can
+              remove this block.
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

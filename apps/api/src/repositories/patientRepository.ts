@@ -1,4 +1,3 @@
-// apps/api/src/repositories/patientRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   ConditionalCheckFailedException,
@@ -44,7 +43,6 @@ const buildPatientSearchGsi = (normalizedSearchText: string) => ({
   GSI1SK: normalizedSearchText,
 });
 
-// ✅ SD-ID counter helpers
 const buildSdIdCounterKey = (year: string) => ({
   PK: `COUNTER#SDID#${year}`,
   SK: 'META',
@@ -113,7 +111,6 @@ export class DynamoDBPatientRepository implements PatientRepository {
       entityType: 'PATIENT',
       patientId,
 
-      // ✅ NEW
       sdId,
 
       name: input.name,
@@ -227,7 +224,6 @@ export class DynamoDBPatientRepository implements PatientRepository {
     add('dob');
     add('gender');
 
-    // ✅ NEW
     add('address');
 
     const mergedName = (patch.name ?? existing.name)!;

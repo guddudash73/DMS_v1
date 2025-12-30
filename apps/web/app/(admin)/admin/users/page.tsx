@@ -1,4 +1,3 @@
-// apps/web/app/(admin)/admin/users/page.tsx
 'use client';
 
 import { useMemo, useState } from 'react';
@@ -10,7 +9,7 @@ import { Switch } from '@/components/ui/switch';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 
-import { Loader2, Plus, Search, Trash2 } from 'lucide-react';
+import { Loader2, Plus, Search, Trash2, KeyRound } from 'lucide-react';
 
 import type { Role } from '@dms/types';
 import {
@@ -18,6 +17,7 @@ import {
   useAdminCreateUserMutation,
   useAdminUpdateUserMutation,
   useAdminDeleteUserMutation,
+  useAdminResetUserPasswordMutation,
 } from '@/src/store/api';
 
 import { useAuth } from '@/src/hooks/useAuth';
@@ -67,10 +67,16 @@ export default function AdminUsersPage() {
   const [updateUser] = useAdminUpdateUserMutation();
   const [deleteUser, deleteState] = useAdminDeleteUserMutation();
 
+  const [resetPassword, resetState] = useAdminResetUserPasswordMutation();
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetUserId, setResetUserId] = useState<string | null>(null);
+  const [resetUserLabel, setResetUserLabel] = useState<string>('');
+  const [resetPass1, setResetPass1] = useState('');
+  const [resetPass2, setResetPass2] = useState('');
+
   const rawItems = usersQuery.data?.items ?? [];
   const loading = usersQuery.isFetching;
 
-  // ✅ Hide current logged-in admin user from the panel
   const items = useMemo(() => {
     if (!currentUserId) return rawItems;
     return rawItems.filter((u) => u.userId !== currentUserId);
@@ -89,6 +95,16 @@ export default function AdminUsersPage() {
     createName.trim().length > 0 &&
     createPassword.trim().length >= 8 &&
     createRole !== 'DOCTOR';
+
+  const openReset = (userId: string, label: string) => {
+    setResetUserId(userId);
+    setResetUserLabel(label);
+    setResetPass1('');
+    setResetPass2('');
+    setResetOpen(true);
+  };
+
+  const canReset = resetUserId && resetPass1.length >= 8 && resetPass1 === resetPass2;
 
   return (
     <div className="p-4 2xl:p-12">
@@ -117,7 +133,8 @@ export default function AdminUsersPage() {
             <div>
               <div className="text-sm font-semibold text-gray-900">User Directory</div>
               <div className="text-[11px] text-gray-500">
-                Manage roles, active status, and deletion. (Your admin account is hidden.)
+                Manage roles, active status, password reset, and deletion. (Your admin account is
+                hidden.)
               </div>
             </div>
 
@@ -185,7 +202,6 @@ export default function AdminUsersPage() {
                 </tr>
               ) : (
                 items.map((u) => {
-                  // ✅ Defense-in-depth: if current user ever appears, lock actions
                   const isSelf = !!currentUserId && u.userId === currentUserId;
 
                   return (
@@ -217,23 +233,36 @@ export default function AdminUsersPage() {
                       </td>
 
                       <td className="px-5 py-4 text-right">
-                        <Button
-                          variant="destructive"
-                          className="h-8 rounded-xl px-3 text-xs"
-                          disabled={deleteState.isLoading || isSelf}
-                          onClick={async () => {
-                            if (isSelf) return;
-                            const ok = window.confirm(
-                              `Delete "${u.displayName}"?\nThis cannot be undone.`,
-                            );
-                            if (!ok) return;
-                            await deleteUser({ userId: u.userId }).unwrap();
-                          }}
-                          title={isSelf ? 'You cannot delete yourself' : 'Delete user'}
-                        >
-                          <Trash2 className="mr-2 h-4 w-4" />
-                          Delete
-                        </Button>
+                        <div className="flex justify-end gap-2">
+                          <Button
+                            variant="secondary"
+                            className="h-8 rounded-xl px-3 text-xs"
+                            disabled={isSelf}
+                            onClick={() => openReset(u.userId, `${u.displayName} (${u.email})`)}
+                            title={isSelf ? 'Not allowed' : 'Reset password'}
+                          >
+                            <KeyRound className="mr-2 h-4 w-4" />
+                            Reset
+                          </Button>
+
+                          <Button
+                            variant="destructive"
+                            className="h-8 rounded-xl px-3 text-xs"
+                            disabled={deleteState.isLoading || isSelf}
+                            onClick={async () => {
+                              if (isSelf) return;
+                              const ok = window.confirm(
+                                `Delete "${u.displayName}"?\nThis cannot be undone.`,
+                              );
+                              if (!ok) return;
+                              await deleteUser({ userId: u.userId }).unwrap();
+                            }}
+                            title={isSelf ? 'You cannot delete yourself' : 'Delete user'}
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </Button>
+                        </div>
                       </td>
                     </tr>
                   );
@@ -254,7 +283,6 @@ export default function AdminUsersPage() {
         )}
       </Card>
 
-      {/* Create user dialog */}
       <Dialog
         open={createOpen}
         onOpenChange={(o) => {
@@ -360,6 +388,87 @@ export default function AdminUsersPage() {
               <div className="text-[11px] text-red-600">
                 Failed to create user. If email already exists, choose another.
               </div>
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={resetOpen}
+        onOpenChange={(o) => {
+          setResetOpen(o);
+          if (!o) {
+            setResetUserId(null);
+            setResetUserLabel('');
+            setResetPass1('');
+            setResetPass2('');
+          }
+        }}
+      >
+        <DialogContent className="max-w-lg rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>Reset Password</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-2 text-[12px] text-gray-600">
+            Resetting password for:{' '}
+            <span className="font-medium text-gray-800">{resetUserLabel}</span>
+          </div>
+
+          <div className="mt-3 space-y-4">
+            <div className="space-y-2">
+              <Label className="text-xs">New password</Label>
+              <Input
+                className="h-10 rounded-xl"
+                type="password"
+                placeholder="Min 8 characters"
+                value={resetPass1}
+                onChange={(e) => setResetPass1(e.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs">Confirm password</Label>
+              <Input
+                className="h-10 rounded-xl"
+                type="password"
+                placeholder="Repeat password"
+                value={resetPass2}
+                onChange={(e) => setResetPass2(e.target.value)}
+              />
+              {resetPass2.length > 0 && resetPass1 !== resetPass2 ? (
+                <div className="text-[11px] text-red-600">Passwords do not match.</div>
+              ) : null}
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2">
+              <Button
+                variant="secondary"
+                className="h-9 rounded-xl"
+                onClick={() => setResetOpen(false)}
+              >
+                Cancel
+              </Button>
+
+              <Button
+                className="h-9 rounded-xl"
+                disabled={!canReset || resetState.isLoading}
+                onClick={async () => {
+                  if (!resetUserId) return;
+                  await resetPassword({
+                    userId: resetUserId,
+                    body: { password: resetPass1 },
+                  }).unwrap();
+                  setResetOpen(false);
+                }}
+              >
+                {resetState.isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                Reset Password
+              </Button>
+            </div>
+
+            {resetState.isError ? (
+              <div className="text-[11px] text-red-600">Failed to reset password.</div>
             ) : null}
           </div>
         </DialogContent>

@@ -1,4 +1,3 @@
-// packages/types/src/patient.ts
 import { z } from 'zod';
 
 export const PatientId = z.string().min(1);
@@ -7,11 +6,6 @@ export type PatientId = z.infer<typeof PatientId>;
 export const PatientGender = z.enum(['MALE', 'FEMALE', 'OTHER', 'UNKNOWN']);
 export type PatientGender = z.infer<typeof PatientGender>;
 
-/**
- * Backward-compatible gender input:
- * - Accepts uppercase canonical values
- * - Also accepts legacy lowercase values (male/female/other)
- */
 const PatientGenderInput = z.preprocess((val) => {
   if (typeof val !== 'string') return val;
   const v = val.trim();
@@ -31,15 +25,13 @@ const PatientGenderInput = z.preprocess((val) => {
 export const Patient = z.object({
   patientId: PatientId,
 
-  // ✅ NEW: Human friendly SD-ID
   sdId: z.string().min(1),
 
   name: z.string().min(1),
-  phone: z.string().min(5).max(32).optional(),
+  phone: z.string().min(5).max(13),
   dob: z.string().optional(),
   gender: PatientGender.optional(),
 
-  // ✅ NEW
   address: z.string().min(1).max(500).optional(),
 
   createdAt: z.number().int().nonnegative(),
@@ -51,16 +43,14 @@ export type Patient = z.infer<typeof Patient>;
 
 export const PatientCreate = z.object({
   name: z.string().min(1),
-  phone: z.string().min(7).max(20).optional(),
+  phone: z.string().min(7).max(20),
   dob: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
 
-  // ✅ normalized storage (but accepts legacy lowercase input)
   gender: PatientGenderInput.optional(),
 
-  // ✅ NEW
   address: z.string().min(1).max(500).optional(),
 });
 export type PatientCreate = z.infer<typeof PatientCreate>;

@@ -1,4 +1,3 @@
-// packages/types/src/prescription.ts
 import { z } from 'zod';
 import { VisitId } from './visit';
 
@@ -26,7 +25,6 @@ export const Prescription = z.object({
   version: z.number().int().min(1).default(1),
   jsonKey: z.string().min(1),
 
-  // ✅ NEW: reception notes (prints + shows on preview)
   receptionNotes: z.string().max(2000).optional(),
 
   createdAt: z.number().int().nonnegative(),

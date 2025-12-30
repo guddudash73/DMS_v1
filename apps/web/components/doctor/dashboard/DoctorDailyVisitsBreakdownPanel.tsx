@@ -4,7 +4,6 @@ import * as React from 'react';
 import { useGetDoctorDailyVisitsBreakdownQuery } from '@/src/store/api';
 import { Card } from '@/components/ui/card';
 import { formatClinicDatePretty } from '@/src/lib/clinicTime';
-import { cn } from '@/lib/utils';
 
 function statusBadge(status: string) {
   const base =
