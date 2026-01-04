@@ -1,3 +1,4 @@
+// apps/web/app/(clinic)/visits/day/[date]/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -58,6 +59,44 @@ type Row = {
   billingAmount?: number;
 };
 
+// ✅ Support both API payloads (legacy grouped + new clinic-wide)
+type BreakdownItem = {
+  visitId: string;
+  patientName: string;
+  status: string;
+  tag?: string;
+  createdAt?: number;
+  billingAmount?: number;
+  doctorName?: string;
+};
+
+type NewBreakdownResponse = {
+  date: string;
+  totalVisits: number;
+  items: BreakdownItem[];
+};
+
+type LegacyBreakdownDoctor = {
+  doctorId: string;
+  doctorName: string;
+  items?: BreakdownItem[];
+};
+
+type LegacyBreakdownResponse = {
+  date: string;
+  totalVisits: number;
+  doctors: LegacyBreakdownDoctor[];
+};
+
+function hasItemsPayload(x: unknown): x is NewBreakdownResponse {
+  return !!x && typeof x === 'object' && 'items' in (x as any) && Array.isArray((x as any).items);
+}
+function hasDoctorsPayload(x: unknown): x is LegacyBreakdownResponse {
+  return (
+    !!x && typeof x === 'object' && 'doctors' in (x as any) && Array.isArray((x as any).doctors)
+  );
+}
+
 export default function VisitsByDayPage() {
   const router = useRouter();
   const params = useParams<{ date: string }>();
@@ -72,18 +111,33 @@ export default function VisitsByDayPage() {
   const [status, setStatus] = React.useState<'ALL' | VisitStatus>('ALL');
 
   const rows: Row[] = React.useMemo(() => {
-    const doctors = q.data?.doctors ?? [];
-    const flat = doctors.flatMap((d) =>
-      (d.items ?? []).map((it) => ({
-        visitId: it.visitId,
-        patientName: it.patientName,
-        doctorName: it.doctorName,
-        status: it.status as VisitStatus,
-        tag: (it.tag ?? 'O') as PatientTag,
-        createdAt: it.createdAt,
-        billingAmount: it.billingAmount,
-      })),
-    );
+    const dataUnknown = q.data as unknown;
+
+    const items: BreakdownItem[] = (() => {
+      if (hasItemsPayload(dataUnknown)) {
+        return (dataUnknown.items ?? []).slice();
+      }
+      if (hasDoctorsPayload(dataUnknown)) {
+        const doctors = dataUnknown.doctors ?? [];
+        return doctors.flatMap((d) =>
+          (d.items ?? []).map((it) => ({
+            ...it,
+            doctorName: it.doctorName ?? d.doctorName ?? 'Clinic',
+          })),
+        );
+      }
+      return [];
+    })();
+
+    const flat: Row[] = items.map((it) => ({
+      visitId: it.visitId,
+      patientName: it.patientName ?? '—',
+      doctorName: it.doctorName ?? 'Clinic',
+      status: (it.status as VisitStatus) ?? 'QUEUED',
+      tag: ((it.tag ?? 'O') as PatientTag) ?? 'O',
+      createdAt: it.createdAt,
+      billingAmount: it.billingAmount,
+    }));
 
     flat.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
     return flat;
@@ -120,7 +174,6 @@ export default function VisitsByDayPage() {
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
       <div className="mx-auto flex h-full w-full max-w-[1200px] flex-col gap-4">
-        {/* Sticky-ish header block */}
         <Card className="rounded-2xl border-none bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex items-start gap-3">
@@ -182,7 +235,6 @@ export default function VisitsByDayPage() {
           </div>
         </Card>
 
-        {/* Content */}
         <div className="flex-1">
           {!canUseApi ? (
             <Card className="rounded-2xl border-none bg-white p-4 shadow-sm">

@@ -20,7 +20,7 @@ import {
 } from '@/components/ui/select';
 
 import { useAuth } from '@/src/hooks/useAuth';
-import { useGetDoctorDailyPatientSummarySeriesQuery } from '@/src/store/api';
+import { useGetDailyPatientSummarySeriesQuery } from '@/src/store/api';
 import { cn } from '@/lib/utils';
 import { clinicDateISO } from '@/src/lib/clinicTime';
 
@@ -72,7 +72,7 @@ type TooltipProps = {
   label?: unknown;
 };
 
-function DoctorVisitorsTooltip({ active, payload, label }: TooltipProps) {
+function ClinicVisitorsTooltip({ active, payload, label }: TooltipProps) {
   if (!active || !payload?.length) return null;
 
   const row = payload?.[0]?.payload ?? {};
@@ -137,11 +137,11 @@ function DoctorVisitorsTooltip({ active, payload, label }: TooltipProps) {
   );
 }
 
-export type DoctorPatientsChartProps = {
+export type ClinicPatientsChartProps = {
   onDateSelect?: (dateIso: string) => void;
 };
 
-export default function DoctorPatientsChart({ onDateSelect }: DoctorPatientsChartProps) {
+export default function ClinicPatientsChart({ onDateSelect }: ClinicPatientsChartProps) {
   const auth = useAuth();
   const [timeRange, setTimeRange] = React.useState<TimeRange>('90d');
 
@@ -152,7 +152,7 @@ export default function DoctorPatientsChart({ onDateSelect }: DoctorPatientsChar
     isLoading,
     isFetching,
     isError,
-  } = useGetDoctorDailyPatientSummarySeriesQuery(
+  } = useGetDailyPatientSummarySeriesQuery(
     { startDate, endDate },
     { skip: auth.status !== 'authenticated' },
   );
@@ -265,7 +265,7 @@ export default function DoctorPatientsChart({ onDateSelect }: DoctorPatientsChar
                 tickFormatter={(value) => formatShortDate(value)}
               />
 
-              <ChartTooltip cursor={false} content={<DoctorVisitorsTooltip />} />
+              <ChartTooltip cursor={false} content={<ClinicVisitorsTooltip />} />
 
               <Area
                 dataKey="newPatients"

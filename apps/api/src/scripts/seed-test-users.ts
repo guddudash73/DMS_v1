@@ -1,7 +1,8 @@
+// apps/api/src/scripts/seed-test-users.ts
 import '../scripts/load-env';
 import bcrypt from 'bcrypt';
 import { userRepository } from '../repositories/userRepository';
-import { env } from '../config/env';
+import { getEnv } from '../config/env';
 
 type Role = 'ADMIN' | 'DOCTOR' | 'RECEPTION';
 
@@ -34,8 +35,10 @@ const seedUsers: SeedUser[] = [
 ];
 
 async function main() {
+  const env = getEnv();
+
   console.log(
-    `[seed-test-users] NODE_ENV=${env.NODE_ENV}, table=${env.DDB_TABLE_NAME}, region=${env.AWS_REGION}`,
+    `[seed-test-users] NODE_ENV=${env.NODE_ENV}, table=${env.DDB_TABLE_NAME}, region=${env.APP_REGION}`,
   );
 
   for (const u of seedUsers) {

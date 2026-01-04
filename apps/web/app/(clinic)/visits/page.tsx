@@ -7,7 +7,6 @@ import { toast } from 'react-toastify';
 import type { PatientId, VisitCreate } from '@dms/types';
 import {
   useGetPatientByIdQuery,
-  useGetDoctorsQuery,
   useCreateVisitMutation,
   type ErrorResponse,
 } from '@/src/store/api';
@@ -47,7 +46,6 @@ export default function RegisterVisitPage() {
   const patientId = patientIdParam as PatientId | null;
 
   const [reason, setReason] = React.useState('');
-  const [doctorId, setDoctorId] = React.useState('');
   const [tag, setTag] = React.useState<VisitTag | undefined>('N');
   const [submitting, setSubmitting] = React.useState(false);
 
@@ -59,17 +57,7 @@ export default function RegisterVisitPage() {
     skip: !patientId,
   });
 
-  const { data: doctors, isLoading: doctorsLoading } = useGetDoctorsQuery(undefined, {
-    skip: !patientId,
-  });
-
   const [createVisit] = useCreateVisitMutation();
-
-  React.useEffect(() => {
-    if (!doctorId && doctors && doctors.length > 0) {
-      setDoctorId(doctors[0].doctorId);
-    }
-  }, [doctors, doctorId]);
 
   const patientErrorMessage = React.useMemo(() => {
     if (!rawPatientError) return null;
@@ -90,19 +78,14 @@ export default function RegisterVisitPage() {
       return;
     }
 
-    if (!doctorId) {
-      toast.error('Please select a doctor.');
-      return;
-    }
-
     if (!reason.trim()) {
       toast.error('Please enter a reason for the visit.');
       return;
     }
 
+    // ✅ Backend expects ONLY: patientId, reason, tag?
     const payload: VisitCreate = {
       patientId,
-      doctorId,
       reason: reason.trim(),
       ...(tag ? { tag } : {}),
     };
@@ -114,8 +97,8 @@ export default function RegisterVisitPage() {
       handleClose();
     } catch (err) {
       console.error(err);
-      const e = err as ApiError;
-      const maybe = asErrorResponse(e.data);
+      const e2 = err as ApiError;
+      const maybe = asErrorResponse(e2.data);
       toast.error(maybe?.message ?? 'Failed to register visit. Please try again.');
     } finally {
       setSubmitting(false);
@@ -181,26 +164,6 @@ export default function RegisterVisitPage() {
 
             <form className="space-y-4" onSubmit={handleSubmit}>
               <div className="grid gap-4 md:grid-cols-[1.1fr_0.9fr]">
-                <div className="space-y-1">
-                  <label htmlFor="doctor" className="text-sm font-medium text-gray-800">
-                    Doctor
-                  </label>
-                  <select
-                    id="doctor"
-                    className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm"
-                    value={doctorId}
-                    onChange={(e) => setDoctorId(e.target.value)}
-                    disabled={doctorsLoading}
-                  >
-                    <option value="">Choose doctor…</option>
-                    {doctors?.map((d) => (
-                      <option key={d.doctorId} value={d.doctorId}>
-                        {d.fullName || d.displayName || d.doctorId}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
                 <div className="space-y-1">
                   <p className="text-sm font-medium text-gray-800">Tag</p>
                   <div className="flex items-center gap-4 text-xs text-gray-700">

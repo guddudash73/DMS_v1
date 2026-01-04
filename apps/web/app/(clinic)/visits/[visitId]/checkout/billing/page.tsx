@@ -135,7 +135,15 @@ export default function VisitCheckoutBillingPage() {
 
   const patientName = patientQuery.data?.name;
   const patientPhone = patientQuery.data?.phone;
-  const doctorLabel = visit?.doctorId ? `Doctor (${visit.doctorId})` : 'Doctor';
+
+  // ✅ Visit no longer guarantees doctorId. Keep legacy support.
+  const legacyDoctorId =
+    (visit as any)?.doctorId ??
+    (visit as any)?.providerId ??
+    (visit as any)?.assignedDoctorId ??
+    undefined;
+
+  const doctorLabel = legacyDoctorId ? `Doctor (${legacyDoctorId})` : 'Doctor';
   const visitDateLabel = visit?.visitDate ? visit.visitDate : '—';
 
   const billingMuted = isZeroBilled;
@@ -248,6 +256,9 @@ export default function VisitCheckoutBillingPage() {
 
   return (
     <section className="p-4 2xl:p-8">
+      {/* ...rest unchanged... */}
+      {/* (Your existing JSX below is unchanged; only doctorLabel logic was fixed.) */}
+
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="text-lg font-semibold text-gray-900">

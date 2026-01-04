@@ -146,7 +146,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     const base: Prescription = {
       rxId,
       visitId: visit.visitId,
-      doctorId: visit.doctorId,
+      // ❌ removed: doctorId: visit.doctorId,
       lines,
       version,
       jsonKey,
@@ -220,7 +220,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     const base: Prescription = {
       rxId,
       visitId: visit.visitId,
-      doctorId: visit.doctorId,
+      // ❌ removed: doctorId: visit.doctorId,
       lines,
       version,
       jsonKey,

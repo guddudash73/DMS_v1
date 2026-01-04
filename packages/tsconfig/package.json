@@ -1,5 +1,5 @@
 {
-  "name": "@dms/tsconfig",
+  "name": "@dcm/tsconfig",
   "version": "0.0.1",
   "private": true,
   "files": [

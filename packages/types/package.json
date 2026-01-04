@@ -1,5 +1,5 @@
 {
-  "name": "@dms/types",
+  "name": "@dcm/types",
   "version": "0.0.2",
   "private": true,
   "sideEffects": false,

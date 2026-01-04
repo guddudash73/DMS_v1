@@ -1,5 +1,5 @@
 {
-  "name": "@dms/eslint-config",
+  "name": "@dcm/eslint-config",
   "version": "0.0.1",
   "main": "index.cjs",
   "private": true,

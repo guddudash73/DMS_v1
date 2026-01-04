@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/src/hooks/useAuth';
-import { useGetDoctorQueueQuery } from '@/src/store/api';
+import { useGetPatientQueueQuery } from '@/src/store/api';
 import type { Visit } from '@dms/types';
 import { clinicDateISO } from '@/src/lib/clinicTime';
 
@@ -15,16 +15,15 @@ type QueueSummaryCardProps = {
   date?: string;
 };
 
-export default function DoctorQueueSummaryCard({ date }: QueueSummaryCardProps) {
+export default function ClinicQueueSummaryCard({ date }: QueueSummaryCardProps) {
   const auth = useAuth();
   const effectiveDate = date ?? getTodayIso();
 
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
-  const doctorId = auth.userId;
 
-  const { data, isLoading, isFetching, isError } = useGetDoctorQueueQuery(
-    { doctorId: doctorId ?? '', date: effectiveDate },
-    { skip: !canUseApi || !doctorId },
+  const { data, isLoading, isFetching, isError } = useGetPatientQueueQuery(
+    { date: effectiveDate },
+    { skip: !canUseApi },
   );
 
   const { completed, onChair, waiting, total } = useMemo(() => {
@@ -53,7 +52,7 @@ export default function DoctorQueueSummaryCard({ date }: QueueSummaryCardProps) 
 
   return (
     <Card className="w-full rounded-2xl border-none bg-white px-6 py-2 pb-4 shadow-sm md:gap-4 2xl:gap-6">
-      <h3 className="text-2xl font-semibold tracking-wide text-gray-300">Queue Summary:</h3>
+      <h3 className="text-2xl font-semibold tracking-wide text-gray-300">Clinic Queue Summary:</h3>
 
       <div className="pl-4">
         <div className="space-y-2 text-md">
@@ -90,11 +89,13 @@ export default function DoctorQueueSummaryCard({ date }: QueueSummaryCardProps) 
       </div>
 
       {!canUseApi && (
-        <p className="mt-6 text-sm text-gray-400">Please log in to view your queue summary.</p>
+        <p className="mt-6 text-sm text-gray-400">
+          Please log in to view the clinic queue summary.
+        </p>
       )}
 
-      {isError && (
-        <p className="mt-6 text-sm text-red-500">Couldn&apos;t load your queue summary.</p>
+      {canUseApi && isError && (
+        <p className="mt-6 text-sm text-red-500">Couldn&apos;t load the clinic queue summary.</p>
       )}
     </Card>
   );

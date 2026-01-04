@@ -1,6 +1,6 @@
+// packages/types/src/visit.ts
 import { z } from 'zod';
 import { PatientId } from './patient';
-import { UserId } from './user';
 
 export const VisitId = z.string().min(1);
 export type VisitId = z.infer<typeof VisitId>;
@@ -14,7 +14,7 @@ export type VisitTag = z.infer<typeof VisitTag>;
 export const Visit = z.object({
   visitId: VisitId,
   patientId: PatientId,
-  doctorId: UserId,
+
   reason: z.string().min(1).max(500),
   status: VisitStatus,
   visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -30,19 +30,18 @@ export const Visit = z.object({
 });
 export type Visit = z.infer<typeof Visit>;
 
-export const DoctorQueueItem = Visit.extend({
+export const PatientQueueItem = Visit.extend({
   patientName: z.string().min(1).optional(),
 });
-export type DoctorQueueItem = z.infer<typeof DoctorQueueItem>;
+export type PatientQueueItem = z.infer<typeof PatientQueueItem>;
 
-export const DoctorQueueResponse = z.object({
-  items: z.array(DoctorQueueItem),
+export const PatientQueueResponse = z.object({
+  items: z.array(PatientQueueItem),
 });
-export type DoctorQueueResponse = z.infer<typeof DoctorQueueResponse>;
+export type PatientQueueResponse = z.infer<typeof PatientQueueResponse>;
 
 export const VisitCreate = z.object({
   patientId: PatientId,
-  doctorId: UserId,
   reason: z.string().min(1).max(500),
   tag: VisitTag.optional(),
 });
@@ -54,7 +53,6 @@ export const VisitStatusUpdate = z.object({
 export type VisitStatusUpdate = z.infer<typeof VisitStatusUpdate>;
 
 export const VisitQueueQuery = z.object({
-  doctorId: UserId,
   date: z
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
@@ -62,6 +60,8 @@ export const VisitQueueQuery = z.object({
   status: VisitStatus.optional(),
 });
 export type VisitQueueQuery = z.infer<typeof VisitQueueQuery>;
+
+/* ----------------------------- Followups (unchanged) ----------------------------- */
 
 export const FollowUpContactMethod = z.enum(['CALL', 'SMS', 'WHATSAPP', 'OTHER']);
 export type FollowUpContactMethod = z.infer<typeof FollowUpContactMethod>;

@@ -1,7 +1,8 @@
+// apps/api/src/lib/s3.ts
 import { PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { s3Client } from '../config/aws';
-import { S3_ENDPOINT, S3_PUBLIC_ENDPOINT } from '../config/env';
+import { getEnv } from '../config/env';
 
 const DEFAULT_PRESIGN_TTL_SECONDS = 90;
 
@@ -24,13 +25,15 @@ type PresignDownloadParams = {
 };
 
 function rewriteToPublicEndpoint(url: string): string {
-  if (!S3_PUBLIC_ENDPOINT) return url;
+  const env = getEnv();
+
+  if (!env.S3_PUBLIC_ENDPOINT) return url;
 
   try {
     const signed = new URL(url);
 
-    const internal = new URL(S3_ENDPOINT);
-    const publicEp = new URL(S3_PUBLIC_ENDPOINT);
+    const internal = new URL(env.S3_ENDPOINT);
+    const publicEp = new URL(env.S3_PUBLIC_ENDPOINT);
 
     if (signed.host !== internal.host) return url;
 

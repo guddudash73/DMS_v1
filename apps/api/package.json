@@ -1,10 +1,10 @@
 {
-  "name": "@dms/api",
+  "name": "@dcm/api",
   "version": "0.0.1",
   "private": true,
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "prebuild": "npm run build --workspace=@dms/config --workspace=@dms/types",
+    "prebuild": "npm run build --workspace=@dcm/config --workspace=@dcm/types",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --build ../../packages/config ../../packages/types tsconfig.json",

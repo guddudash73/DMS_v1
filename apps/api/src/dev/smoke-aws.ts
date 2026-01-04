@@ -1,3 +1,4 @@
+// apps/api/src/dev/smoke-aws.ts
 import process from 'node:process';
 import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, GetCommand } from '@aws-sdk/lib-dynamodb';
@@ -7,20 +8,22 @@ import {
   PutObjectCommand,
   GetObjectCommand,
 } from '@aws-sdk/client-s3';
-import { AWS_REGION, DYNAMO_ENDPOINT, S3_ENDPOINT } from '../config/env';
+import { getEnv } from '../config/env';
 import { log } from '../lib/logger';
+
+const env = getEnv();
 
 async function main() {
   const ddb = new DynamoDBClient({
-    region: AWS_REGION,
-    endpoint: DYNAMO_ENDPOINT,
+    region: env.APP_REGION,
+    endpoint: env.DYNAMO_ENDPOINT,
     credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
   });
   const ddbDoc = DynamoDBDocumentClient.from(ddb);
 
   const s3 = new S3Client({
-    region: AWS_REGION,
-    endpoint: S3_ENDPOINT,
+    region: env.APP_REGION,
+    endpoint: env.S3_ENDPOINT,
     forcePathStyle: true,
     credentials: { accessKeyId: 'test', secretAccessKey: 'test' },
   });

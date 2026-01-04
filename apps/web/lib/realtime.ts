@@ -1,12 +1,14 @@
+// apps/web/lib/realtime.ts
 export type RealtimeMessage =
   | {
-      type: 'DoctorQueueUpdated';
-      payload: { doctorId: string; visitDate: string };
+      // ✅ Clinic-wide queue updates (no doctorId anymore)
+      type: 'ClinicQueueUpdated';
+      payload: { visitDate: string };
     }
   | { type: 'pong' }
   | { type: 'ping' };
 
-export function createDoctorQueueWebSocket(params: {
+export function createClinicQueueWebSocket(params: {
   token: string;
   onMessage?: (msg: RealtimeMessage) => void;
   onOpen?: (ev: Event) => void;
@@ -62,3 +64,10 @@ export function createDoctorQueueWebSocket(params: {
 
   return socket;
 }
+
+/**
+ * ✅ Backward compatibility (optional):
+ * If you haven't updated all imports/usages yet, keep this alias.
+ * You can delete it after migrating api.ts and any other callers.
+ */
+export const createDoctorQueueWebSocket = createClinicQueueWebSocket;

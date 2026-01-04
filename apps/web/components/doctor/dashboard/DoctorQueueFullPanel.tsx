@@ -5,7 +5,7 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/src/hooks/useAuth';
-import { useGetDoctorQueueQuery } from '@/src/store/api';
+import { useGetPatientQueueQuery } from '@/src/store/api';
 import type { Visit } from '@dms/types';
 import { ArrowLeft } from 'lucide-react';
 import { clinicDateISO } from '@/src/lib/clinicTime';
@@ -46,7 +46,7 @@ function Row({ v }: { v: QueueVisit }) {
   );
 }
 
-export default function DoctorQueueFullPanel({
+export default function ClinicQueueFullPanel({
   date,
   onBack,
 }: {
@@ -55,13 +55,12 @@ export default function DoctorQueueFullPanel({
 }) {
   const auth = useAuth();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
-  const doctorId = auth.userId;
 
   const effectiveDate = date ?? getTodayIso();
 
-  const { data, isLoading, isFetching, isError } = useGetDoctorQueueQuery(
-    { doctorId: doctorId ?? '', date: effectiveDate },
-    { skip: !canUseApi || !doctorId },
+  const { data, isLoading, isFetching, isError } = useGetPatientQueueQuery(
+    { date: effectiveDate },
+    { skip: !canUseApi },
   );
 
   const visits: QueueVisit[] = (data?.items ?? []) as QueueVisit[];
@@ -76,14 +75,14 @@ export default function DoctorQueueFullPanel({
     return { queued, inProgress, done };
   }, [visits]);
 
-  const showLoading = isLoading || isFetching;
+  const showLoading = canUseApi && (isLoading || isFetching);
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
       <div className="mx-auto flex h-full w-full max-w-[1200px] flex-col gap-6 2xl:gap-10">
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-semibold text-gray-900">Today&apos;s Queue</h2>
+            <h2 className="text-2xl font-semibold text-gray-900">Today&apos;s Clinic Queue</h2>
             <p className="mt-1 text-sm text-gray-500">
               All visits for {effectiveDate} (Waiting, On-chair, Completed)
             </p>
@@ -108,6 +107,9 @@ export default function DoctorQueueFullPanel({
             </div>
 
             <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+              {!canUseApi && (
+                <div className="text-sm text-gray-400">Please log in to view queue.</div>
+              )}
               {showLoading && <div className="text-sm text-gray-400">Loading…</div>}
               {!showLoading && isError && (
                 <div className="text-sm text-red-500">Couldn&apos;t load queue.</div>
@@ -126,11 +128,19 @@ export default function DoctorQueueFullPanel({
             </div>
 
             <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+              {!canUseApi && (
+                <div className="text-sm text-gray-400">Please log in to view queue.</div>
+              )}
               {showLoading && <div className="text-sm text-gray-400">Loading…</div>}
-              {!showLoading && grouped.inProgress.length === 0 && (
+              {!showLoading && isError && (
+                <div className="text-sm text-red-500">Couldn&apos;t load queue.</div>
+              )}
+              {!showLoading && !isError && grouped.inProgress.length === 0 && (
                 <div className="text-sm text-gray-400">No on-chair visits.</div>
               )}
-              {!showLoading && grouped.inProgress.map((v) => <Row key={v.visitId} v={v} />)}
+              {!showLoading &&
+                !isError &&
+                grouped.inProgress.map((v) => <Row key={v.visitId} v={v} />)}
             </div>
           </Card>
 
@@ -141,11 +151,17 @@ export default function DoctorQueueFullPanel({
             </div>
 
             <div className="flex-1 space-y-3 overflow-y-auto pr-1">
+              {!canUseApi && (
+                <div className="text-sm text-gray-400">Please log in to view queue.</div>
+              )}
               {showLoading && <div className="text-sm text-gray-400">Loading…</div>}
-              {!showLoading && grouped.done.length === 0 && (
+              {!showLoading && isError && (
+                <div className="text-sm text-red-500">Couldn&apos;t load queue.</div>
+              )}
+              {!showLoading && !isError && grouped.done.length === 0 && (
                 <div className="text-sm text-gray-400">No completed visits yet.</div>
               )}
-              {!showLoading && grouped.done.map((v) => <Row key={v.visitId} v={v} />)}
+              {!showLoading && !isError && grouped.done.map((v) => <Row key={v.visitId} v={v} />)}
             </div>
           </Card>
         </div>

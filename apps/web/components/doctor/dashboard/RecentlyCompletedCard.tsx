@@ -2,7 +2,7 @@
 
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/src/hooks/useAuth';
-import { useGetDoctorRecentCompletedQuery } from '@/src/store/api';
+import { useGetRecentCompletedQuery } from '@/src/store/api';
 import { FileText, Image as ImageIcon } from 'lucide-react';
 import { clinicDateISO } from '@/src/lib/clinicTime';
 
@@ -12,21 +12,41 @@ function getTodayIso(): string {
 
 const ROWS = 5;
 
+type RecentCompletedItem = {
+  visitId: string;
+  patientId: string;
+  patientName: string;
+  hasRx: boolean;
+  hasXray: boolean;
+};
+
+type RecentCompletedResponse = {
+  date: string;
+  items: RecentCompletedItem[];
+};
+
 export default function RecentlyCompletedCard() {
   const auth = useAuth();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
   const todayIso = getTodayIso();
 
-  const { data, isLoading, isFetching, isError } = useGetDoctorRecentCompletedQuery(
+  const { data, isLoading, isFetching, isError } = useGetRecentCompletedQuery(
     { date: todayIso, limit: ROWS },
     { skip: !canUseApi },
-  );
+  ) as {
+    data?: RecentCompletedResponse;
+    isLoading: boolean;
+    isFetching: boolean;
+    isError: boolean;
+  };
 
   const showDots = isLoading || isFetching;
   const items = data?.items ?? [];
 
-  const rows = Array.from({ length: ROWS }).map((_, i) => items[i] ?? null);
+  const rows: Array<RecentCompletedItem | null> = Array.from({ length: ROWS }).map(
+    (_, i) => items[i] ?? null,
+  );
 
   return (
     <Card className="w-full rounded-2xl border-none bg-white px-6 py-4 shadow-sm gap-2">

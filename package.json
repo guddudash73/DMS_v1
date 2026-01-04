@@ -1,5 +1,5 @@
 {
-  "name": "dms",
+  "name": "dcm",
   "private": true,
   "workspaces": [
     "apps/*",

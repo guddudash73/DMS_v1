@@ -1,3 +1,4 @@
+// apps/api/src/realtime/publisher.ts
 import {
   ApiGatewayManagementApiClient,
   PostToConnectionCommand,
@@ -24,20 +25,25 @@ function getClient(): ApiGatewayManagementApiClient | null {
   return client;
 }
 
-export type DoctorQueueUpdatedEvent = {
-  doctorId: string;
+/**
+ * ✅ Clinic-wide queue updated event (no doctorId)
+ */
+export type ClinicQueueUpdatedEvent = {
   visitDate: string;
 };
 
 export type RealtimeEvent = {
-  type: 'DoctorQueueUpdated';
-  payload: DoctorQueueUpdatedEvent;
+  type: 'ClinicQueueUpdated';
+  payload: ClinicQueueUpdatedEvent;
 };
 
-export async function publishDoctorQueueUpdated(event: DoctorQueueUpdatedEvent): Promise<void> {
+/**
+ * ✅ Publish clinic-wide queue update to all connected clients
+ */
+export async function publishClinicQueueUpdated(event: ClinicQueueUpdatedEvent): Promise<void> {
   const wsClient = getClient();
   if (!wsClient) {
-    console.warn('[realtime] REALTIME_WS_ENDPOINT not set; skipping DoctorQueueUpdated event');
+    console.warn('[realtime] REALTIME_WS_ENDPOINT not set; skipping ClinicQueueUpdated event');
     return;
   }
 
@@ -47,7 +53,7 @@ export async function publishDoctorQueueUpdated(event: DoctorQueueUpdatedEvent):
   }
 
   const payload: RealtimeEvent = {
-    type: 'DoctorQueueUpdated',
+    type: 'ClinicQueueUpdated',
     payload: event,
   };
 

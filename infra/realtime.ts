@@ -20,7 +20,7 @@ realtimeWs.route('$connect', {
   handler: 'apps/api/src/realtime/wsConnect.handler',
   link: [connectionsTable],
   environment: {
-    AWS_REGION: 'us-east-1',
+    APP_REGION: 'us-east-1',
     DDB_CONNECTIONS_TABLE: connectionsTable.name,
 
     JWT_ACCESS_SECRET: jwtAccessSecret.value,

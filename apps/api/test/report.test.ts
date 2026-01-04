@@ -1,3 +1,4 @@
+// apps/api/test/report.test.ts
 import { afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -8,15 +9,16 @@ import {
   QueryCommand,
   DeleteCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { AWS_REGION, DDB_TABLE_NAME, DYNAMO_ENDPOINT } from '../src/config/env';
+import { getEnv } from '../src/config/env';
 import { asReception, asAdmin } from './helpers/auth';
 import { deletePatientCompletely } from './helpers/patients';
 
+const env = getEnv();
 const app = createApp();
 
 const ddbClient = new DynamoDBClient({
-  region: AWS_REGION,
-  endpoint: DYNAMO_ENDPOINT,
+  region: env.APP_REGION,
+  endpoint: env.DYNAMO_ENDPOINT,
 });
 
 const docClient = DynamoDBDocumentClient.from(ddbClient, {
@@ -67,9 +69,7 @@ async function createVisit(
     doctorId,
     reason,
   };
-  if (tag) {
-    payload.tag = tag;
-  }
+  if (tag) payload.tag = tag;
 
   const res = await request(app)
     .post('/visits')
@@ -109,7 +109,7 @@ async function setVisitDateAndBilling(
 
   await docClient.send(
     new UpdateCommand({
-      TableName: DDB_TABLE_NAME,
+      TableName: env.DDB_TABLE_NAME,
       Key: { PK: `VISIT#${visitId}`, SK: 'META' },
       UpdateExpression: metaUpdateExpr,
       ExpressionAttributeNames: metaNames,
@@ -133,7 +133,7 @@ async function setVisitDateAndBilling(
 
   await docClient.send(
     new UpdateCommand({
-      TableName: DDB_TABLE_NAME,
+      TableName: env.DDB_TABLE_NAME,
       Key: { PK: `PATIENT#${patientId}`, SK: `VISIT#${visitId}` },
       UpdateExpression: pvUpdateExpr,
       ExpressionAttributeNames: pvNames,
@@ -147,7 +147,7 @@ async function clearVisitsForDate(date: string) {
 
   const queryResult = await docClient.send(
     new QueryCommand({
-      TableName: DDB_TABLE_NAME,
+      TableName: env.DDB_TABLE_NAME,
       IndexName: 'GSI3',
       KeyConditionExpression: 'GSI3PK = :pk AND begins_with(GSI3SK, :skPrefix)',
       ExpressionAttributeValues: {
@@ -167,14 +167,14 @@ async function clearVisitsForDate(date: string) {
 
     await docClient.send(
       new DeleteCommand({
-        TableName: DDB_TABLE_NAME,
+        TableName: env.DDB_TABLE_NAME,
         Key: { PK: `VISIT#${visitId}`, SK: 'META' },
       }),
     );
 
     await docClient.send(
       new DeleteCommand({
-        TableName: DDB_TABLE_NAME,
+        TableName: env.DDB_TABLE_NAME,
         Key: { PK: `PATIENT#${patientId}`, SK: `VISIT#${visitId}` },
       }),
     );

@@ -1,10 +1,13 @@
+// apps/api/test/helpers/patients.ts
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, DeleteCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
-import { AWS_REGION, DDB_TABLE_NAME, DYNAMO_ENDPOINT } from '../../src/config/env';
+import { getEnv } from '../../src/config/env';
+
+const env = getEnv();
 
 const ddbClient = new DynamoDBClient({
-  region: AWS_REGION,
-  endpoint: DYNAMO_ENDPOINT,
+  region: env.APP_REGION,
+  endpoint: env.DYNAMO_ENDPOINT,
 });
 
 const docClient = DynamoDBDocumentClient.from(ddbClient, {
@@ -12,12 +15,12 @@ const docClient = DynamoDBDocumentClient.from(ddbClient, {
 });
 
 export const deletePatientCompletely = async (patientId: string): Promise<void> => {
-  if (!DDB_TABLE_NAME) return;
+  if (!env.DDB_TABLE_NAME) return;
 
   try {
     await docClient.send(
       new DeleteCommand({
-        TableName: DDB_TABLE_NAME,
+        TableName: env.DDB_TABLE_NAME,
         Key: {
           PK: `PATIENT#${patientId}`,
           SK: 'PROFILE',
@@ -25,12 +28,13 @@ export const deletePatientCompletely = async (patientId: string): Promise<void> 
       }),
     );
   } catch {
-    // cleanup in tests - to ignore not-found errors
+    // cleanup in tests - ignore not-found errors
   }
+
   try {
     const scan = await docClient.send(
       new ScanCommand({
-        TableName: DDB_TABLE_NAME,
+        TableName: env.DDB_TABLE_NAME,
         FilterExpression: '#et = :idx AND #pid = :pid',
         ExpressionAttributeNames: {
           '#et': 'entityType',
@@ -50,7 +54,7 @@ export const deletePatientCompletely = async (patientId: string): Promise<void> 
 
       await docClient.send(
         new DeleteCommand({
-          TableName: DDB_TABLE_NAME,
+          TableName: env.DDB_TABLE_NAME,
           Key: { PK, SK },
         }),
       );

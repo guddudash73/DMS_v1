@@ -1,9 +1,33 @@
 'use client';
 
 import * as React from 'react';
-import { useGetDoctorDailyVisitsBreakdownQuery } from '@/src/store/api';
 import { Card } from '@/components/ui/card';
 import { formatClinicDatePretty } from '@/src/lib/clinicTime';
+import { useGetDailyVisitsBreakdownQuery } from '@/src/store/api';
+
+// ✅ If you already have this type in @dms/types, import it and use it.
+// If not, keep the local type below.
+type ClinicDailyVisitsBreakdownItem = {
+  visitId: string;
+  visitDate: string;
+  status: 'QUEUED' | 'IN_PROGRESS' | 'DONE';
+  tag?: 'N' | 'F' | 'Z';
+  reason?: string;
+  billingAmount?: number;
+  createdAt: number;
+  updatedAt: number;
+
+  patientId: string;
+  patientName: string;
+  patientPhone?: string;
+  patientGender?: string;
+};
+
+type ClinicDailyVisitsBreakdownResponse = {
+  date: string;
+  totalVisits: number;
+  items: ClinicDailyVisitsBreakdownItem[];
+};
 
 function statusBadge(status: string) {
   const base =
@@ -39,11 +63,31 @@ type Props = {
   onBack: () => void;
 };
 
-export default function DoctorDailyVisitsBreakdownPanel({ date, onBack }: Props) {
-  const { data, isLoading, isFetching, isError } = useGetDoctorDailyVisitsBreakdownQuery(date);
+/**
+ * ✅ Clinic-wide daily visits breakdown panel (no doctors[])
+ * Uses: GET /reports/daily/visits-breakdown?date=YYYY-MM-DD
+ */
+export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
+  // ✅ explicitly type the hook result to avoid implicit-any in maps/sorts
+  const { data, isLoading, isFetching, isError } = useGetDailyVisitsBreakdownQuery(date) as {
+    data?: ClinicDailyVisitsBreakdownResponse;
+    isLoading: boolean;
+    isFetching: boolean;
+    isError: boolean;
+  };
+
   const loading = isLoading || isFetching;
 
-  const totalVisits = loading ? '…' : (data?.totalVisits ?? 0);
+  const items = React.useMemo<ClinicDailyVisitsBreakdownItem[]>(() => {
+    const list = (data?.items ?? []).slice();
+    list.sort(
+      (a: ClinicDailyVisitsBreakdownItem, b: ClinicDailyVisitsBreakdownItem) =>
+        (b.createdAt ?? 0) - (a.createdAt ?? 0),
+    );
+    return list;
+  }, [data?.items]);
+
+  const totalVisits = loading ? '…' : (data?.totalVisits ?? items.length);
 
   return (
     <Card className="rounded-2xl border-none bg-white shadow-sm">
@@ -55,7 +99,7 @@ export default function DoctorDailyVisitsBreakdownPanel({ date, onBack }: Props)
               {formatClinicDatePretty(date)}
             </div>
             <div className="mt-1 text-xs text-muted-foreground">
-              Visits handled by you on this day.
+              Clinic-wide visits for this day.
             </div>
           </div>
 
@@ -67,26 +111,15 @@ export default function DoctorDailyVisitsBreakdownPanel({ date, onBack }: Props)
           </button>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="rounded-xl bg-slate-50 px-3 py-2">
-            <div className="text-[11px] text-muted-foreground">Doctor</div>
-            <div className="mt-0.5 truncate text-base font-semibold">
-              {loading ? '…' : (data?.doctorName ?? '—')}
-            </div>
+            <div className="text-[11px] text-muted-foreground">Scope</div>
+            <div className="mt-0.5 truncate text-base font-semibold">Clinic</div>
           </div>
 
           <div className="rounded-xl bg-slate-50 px-3 py-2">
             <div className="text-[11px] text-muted-foreground">Total visits</div>
             <div className="mt-0.5 text-base font-semibold">{totalVisits}</div>
-          </div>
-
-          <div className="rounded-xl bg-slate-50 px-3 py-2">
-            <div className="text-[11px] text-muted-foreground">Doctor ID</div>
-            <div className="mt-0.5 truncate font-mono text-[12px] text-slate-700">
-              {loading || !data?.doctorId
-                ? '…'
-                : `${data.doctorId.slice(0, 8)}…${data.doctorId.slice(-6)}`}
-            </div>
           </div>
         </div>
 
@@ -101,7 +134,7 @@ export default function DoctorDailyVisitsBreakdownPanel({ date, onBack }: Props)
               <div className="h-28 w-full animate-pulse rounded-xl bg-slate-100" />
               <div className="h-28 w-full animate-pulse rounded-xl bg-slate-100" />
             </div>
-          ) : !data || data.items.length === 0 ? (
+          ) : items.length === 0 ? (
             <div className="rounded-xl border bg-white px-3 py-3 text-sm text-muted-foreground">
               No visits found for this day.
             </div>
@@ -109,20 +142,20 @@ export default function DoctorDailyVisitsBreakdownPanel({ date, onBack }: Props)
             <div className="rounded-2xl border bg-white">
               <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
                 <div className="min-w-0">
-                  <div className="truncate text-sm font-semibold">{data.doctorName}</div>
+                  <div className="truncate text-sm font-semibold">Clinic</div>
                   <div className="truncate text-[11px] text-muted-foreground">
-                    {data.doctorId.slice(0, 8)}…{data.doctorId.slice(-6)}
+                    {formatClinicDatePretty(date)}
                   </div>
                 </div>
 
                 <div className="rounded-full bg-slate-900 px-2.5 py-1 text-[11px] font-semibold text-white">
-                  {data.totalVisits} visits
+                  {items.length} visits
                 </div>
               </div>
 
               <div className="max-h-[480px] overflow-y-auto">
                 <div className="divide-y">
-                  {data.items.map((v) => (
+                  {items.map((v: ClinicDailyVisitsBreakdownItem) => (
                     <div key={v.visitId} className="px-4 py-3">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">

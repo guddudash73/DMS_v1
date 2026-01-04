@@ -1,3 +1,4 @@
+// apps/api/src/routes/xray.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { VisitId, XrayId, XrayContentType } from '@dms/types';
@@ -7,7 +8,7 @@ import {
   XrayConflictError,
   XrayDeleteConflictError,
 } from '../repositories/xrayRepository';
-import { XRAY_BUCKET_NAME } from '../config/env';
+import { getEnv } from '../config/env';
 import { getPresignedUploadUrl, getPresignedDownloadUrl, s3Client } from '../lib/s3';
 import { DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { patientRepository } from '../repositories/patientRepository';
@@ -85,6 +86,8 @@ const RegisterXrayBody = z.object({
 router.post(
   '/presign',
   asyncHandler(async (req, res) => {
+    const env = getEnv();
+
     const parsed = PresignRequest.safeParse(req.body);
     if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
@@ -115,7 +118,7 @@ router.post(
     try {
       uploadUrl = await withRetry(() =>
         getPresignedUploadUrl({
-          bucket: XRAY_BUCKET_NAME,
+          bucket: env.XRAY_BUCKET_NAME,
           key: contentKey,
           contentType,
           contentLength: size,
@@ -289,6 +292,8 @@ router.get(
 router.get(
   '/:xrayId/url',
   asyncHandler(async (req, res) => {
+    const env = getEnv();
+
     const idResult = XrayId.safeParse(req.params.xrayId);
     if (!idResult.success) return handleValidationError(req, res, idResult.error.issues);
 
@@ -330,7 +335,7 @@ router.get(
     try {
       url = await withRetry(() =>
         getPresignedDownloadUrl({
-          bucket: XRAY_BUCKET_NAME,
+          bucket: env.XRAY_BUCKET_NAME,
           key: keyToUse,
           expiresInSeconds: 90,
         }),
@@ -370,6 +375,8 @@ router.get(
 router.delete(
   '/:xrayId',
   asyncHandler(async (req, res) => {
+    const env = getEnv();
+
     const idResult = XrayId.safeParse(req.params.xrayId);
     if (!idResult.success) return handleValidationError(req, res, idResult.error.issues);
 
@@ -412,7 +419,7 @@ router.delete(
         await withRetry(() =>
           s3Client.send(
             new DeleteObjectsCommand({
-              Bucket: XRAY_BUCKET_NAME,
+              Bucket: env.XRAY_BUCKET_NAME,
               Delete: { Objects: objects, Quiet: true },
             }),
           ),

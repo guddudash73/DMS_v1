@@ -1,7 +1,8 @@
+// apps/api/src/services/xrayThumbnails.ts
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import { s3Client } from '../lib/s3';
-import { XRAY_BUCKET_NAME } from '../config/env';
+import { getEnv } from '../config/env';
 import { logInfo } from '../lib/logger';
 
 type S3Body = AsyncIterable<unknown> & {
@@ -13,11 +14,12 @@ export async function generateXrayThumbnail(params: {
   thumbKey: string;
   contentType: 'image/jpeg' | 'image/png';
 }): Promise<void> {
+  const env = getEnv();
   const { contentKey, thumbKey, contentType } = params;
 
   const getRes = await s3Client.send(
     new GetObjectCommand({
-      Bucket: XRAY_BUCKET_NAME,
+      Bucket: env.XRAY_BUCKET_NAME,
       Key: contentKey,
     }),
   );
@@ -62,7 +64,7 @@ export async function generateXrayThumbnail(params: {
 
   await s3Client.send(
     new PutObjectCommand({
-      Bucket: XRAY_BUCKET_NAME,
+      Bucket: env.XRAY_BUCKET_NAME,
       Key: thumbKey,
       Body: resized,
       ContentType: contentType,

@@ -1,21 +1,11 @@
-import { parseEnv } from '@dms/config';
+// apps/api/src/config/env.ts
+import { parseEnv, type Env } from '@dms/config';
 
-export const env = parseEnv(process.env);
+let cached: Env | undefined;
 
-export const {
-  NODE_ENV,
-  PORT,
-  CORS_ORIGIN,
-  AWS_REGION,
-  DYNAMO_ENDPOINT,
-
-  S3_ENDPOINT,
-  S3_PUBLIC_ENDPOINT,
-
-  ACCESS_TOKEN_TTL_SEC,
-  REFRESH_TOKEN_TTL_SEC,
-  DDB_TABLE_NAME,
-  XRAY_BUCKET_NAME,
-  JWT_ACCESS_SECRET,
-  JWT_REFRESH_SECRET,
-} = env;
+export function getEnv(): Env {
+  if (!cached) {
+    cached = parseEnv(process.env);
+  }
+  return cached;
+}

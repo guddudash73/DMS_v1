@@ -1,11 +1,7 @@
+// apps/api/src/lib/authTokens.ts
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'node:crypto';
-import {
-  ACCESS_TOKEN_TTL_SEC,
-  REFRESH_TOKEN_TTL_SEC,
-  JWT_ACCESS_SECRET,
-  JWT_REFRESH_SECRET,
-} from '../config/env';
+import { z } from 'zod';
 import { JwtClaims, RefreshTokenClaims } from '@dms/types';
 import type { Role } from '@dms/types';
 
@@ -16,7 +12,36 @@ export interface TokenPair {
 
 const CLOCK_TOLERANCE_SEC = 10;
 
+const AuthEnvSchema = z.object({
+  JWT_ACCESS_SECRET: z.string().min(32),
+  JWT_REFRESH_SECRET: z.string().min(32),
+  ACCESS_TOKEN_TTL_SEC: z.coerce.number().int().positive().default(900),
+  REFRESH_TOKEN_TTL_SEC: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(60 * 60 * 24),
+});
+
+type AuthEnv = z.infer<typeof AuthEnvSchema>;
+
+let cached: AuthEnv | undefined;
+function getAuthEnv(): AuthEnv {
+  if (cached) return cached;
+
+  const parsed = AuthEnvSchema.safeParse(process.env);
+  if (!parsed.success) {
+    throw new Error(
+      `[authTokens] Missing/invalid env:\n${JSON.stringify(parsed.error.issues, null, 2)}`,
+    );
+  }
+  cached = parsed.data;
+  return cached;
+}
+
 export const signAccessToken = (userId: string, role: Role): { token: string; exp: number } => {
+  const { ACCESS_TOKEN_TTL_SEC, JWT_ACCESS_SECRET } = getAuthEnv();
+
   const nowSec = Math.floor(Date.now() / 1000);
   const exp = nowSec + ACCESS_TOKEN_TTL_SEC;
 
@@ -36,6 +61,8 @@ export const signRefreshToken = (
   userId: string,
   role: Role,
 ): { token: string; exp: number; jti: string } => {
+  const { REFRESH_TOKEN_TTL_SEC, JWT_REFRESH_SECRET } = getAuthEnv();
+
   const nowSec = Math.floor(Date.now() / 1000);
   const exp = nowSec + REFRESH_TOKEN_TTL_SEC;
   const jti = randomUUID();
@@ -54,6 +81,8 @@ export const signRefreshToken = (
 };
 
 export const verifyAccessToken = (token: string) => {
+  const { JWT_ACCESS_SECRET } = getAuthEnv();
+
   const decoded = jwt.verify(token, JWT_ACCESS_SECRET, {
     algorithms: ['HS256'],
     clockTolerance: CLOCK_TOLERANCE_SEC,
@@ -68,6 +97,8 @@ export const verifyAccessToken = (token: string) => {
 };
 
 export const verifyRefreshToken = (token: string) => {
+  const { JWT_REFRESH_SECRET } = getAuthEnv();
+
   const decoded = jwt.verify(token, JWT_REFRESH_SECRET, {
     algorithms: ['HS256'],
     clockTolerance: CLOCK_TOLERANCE_SEC,

@@ -1,3 +1,4 @@
+// packages/types/src/prescription.ts
 import { z } from 'zod';
 import { VisitId } from './visit';
 
@@ -20,7 +21,9 @@ export type RxId = z.infer<typeof RxId>;
 export const Prescription = z.object({
   rxId: RxId,
   visitId: VisitId,
-  doctorId: z.string().min(1),
+
+  // ❌ removed: doctorId
+
   lines: z.array(RxLine).min(1),
   version: z.number().int().min(1).default(1),
   jsonKey: z.string().min(1),

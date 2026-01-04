@@ -6,7 +6,7 @@ const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']),
   PORT: z.string().optional(),
 
-  AWS_REGION: z.string().min(1),
+  APP_REGION: z.string().min(1),
   DYNAMO_ENDPOINT: z.string().min(1),
 
   S3_ENDPOINT: z.string().min(1),

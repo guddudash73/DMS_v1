@@ -1,3 +1,4 @@
+// apps/web/components/dashboard/DailyVisitsBreakdownPanel.tsx
 'use client';
 
 import * as React from 'react';
@@ -47,6 +48,117 @@ type Props = {
   onBack: () => void;
 };
 
+// ✅ What the UI needs (stable)
+type DoctorGroupItem = {
+  visitId: string;
+  patientName: string;
+  status: string;
+  tag?: string;
+  reason?: string;
+  patientPhone?: string;
+  patientGender?: string;
+  billingAmount?: number;
+  createdAt?: number;
+};
+
+type DoctorGroup = {
+  doctorId: string;
+  doctorName: string;
+  total: number;
+  items: DoctorGroupItem[];
+};
+
+// ✅ Generic “new” payload item
+type ClinicWideItem = DoctorGroupItem & {
+  doctorName?: string;
+  doctorId?: string;
+};
+
+type NewPayload = {
+  date: string;
+  totalVisits: number;
+  items: ClinicWideItem[];
+};
+
+type LegacyPayload = {
+  date: string;
+  totalVisits: number;
+  doctors: DoctorGroup[];
+};
+
+function isNewPayload(x: unknown): x is NewPayload {
+  return !!x && typeof x === 'object' && 'items' in (x as any) && Array.isArray((x as any).items);
+}
+
+function isLegacyPayload(x: unknown): x is LegacyPayload {
+  return (
+    !!x && typeof x === 'object' && 'doctors' in (x as any) && Array.isArray((x as any).doctors)
+  );
+}
+
+// ✅ Normalize backend response into grouped doctors[]
+function normalizeDoctors(data: unknown): DoctorGroup[] {
+  if (!data) return [];
+
+  // legacy (already grouped)
+  if (isLegacyPayload(data)) {
+    return (data.doctors ?? []).map((d) => ({
+      doctorId: d.doctorId,
+      doctorName: d.doctorName,
+      total: d.total ?? d.items?.length ?? 0,
+      items: (d.items ?? []).slice(),
+    }));
+  }
+
+  // new (clinic-wide)
+  if (isNewPayload(data)) {
+    const items = (data.items ?? []).slice();
+
+    // group by doctorId/doctorName if present, else "Clinic"
+    const groups = new Map<string, DoctorGroup>();
+
+    for (const it of items) {
+      const key = (it.doctorId || it.doctorName || 'CLINIC').toString();
+      const name = it.doctorName || (it.doctorId ? `Doctor (${it.doctorId})` : 'Clinic');
+
+      const existing = groups.get(key);
+      if (!existing) {
+        groups.set(key, {
+          doctorId: key,
+          doctorName: name,
+          total: 0,
+          items: [],
+        });
+      }
+
+      const g = groups.get(key)!;
+      g.items.push({
+        visitId: it.visitId,
+        patientName: it.patientName,
+        status: it.status,
+        tag: it.tag,
+        reason: it.reason,
+        patientPhone: it.patientPhone,
+        patientGender: it.patientGender,
+        billingAmount: it.billingAmount,
+        createdAt: it.createdAt,
+      });
+    }
+
+    const out = Array.from(groups.values()).map((g) => ({
+      ...g,
+      total: g.items.length,
+      items: g.items.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)),
+    }));
+
+    // Sort doctors by total desc
+    out.sort((a, b) => (b.total ?? 0) - (a.total ?? 0));
+    return out;
+  }
+
+  return [];
+}
+
 export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
   const { data, isLoading, isFetching, isError } = useGetDailyVisitsBreakdownQuery(date);
   const loading = isLoading || isFetching;
@@ -57,7 +169,7 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
     setSelectedDoctorId('ALL');
   }, [date]);
 
-  const doctors = data?.doctors ?? [];
+  const doctors = React.useMemo(() => normalizeDoctors(data as unknown), [data]);
 
   const filteredDoctors = React.useMemo(() => {
     if (!data) return [];
@@ -65,8 +177,10 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
     return doctors.filter((d) => d.doctorId === selectedDoctorId);
   }, [data, doctors, selectedDoctorId]);
 
-  const totalDoctors = loading ? '…' : (doctors.length ?? 0);
-  const totalVisits = loading ? '…' : (data?.totalVisits ?? 0);
+  const totalDoctors = loading ? '…' : doctors.length;
+  const totalVisits = loading
+    ? '…'
+    : ((data as any)?.totalVisits ?? doctors.reduce((s, d) => s + d.total, 0));
 
   const selectedDoctorName = React.useMemo(() => {
     if (selectedDoctorId === 'ALL') return 'All doctors';
@@ -191,7 +305,7 @@ export default function DailyVisitsBreakdownPanel({ date, onBack }: Props) {
 
                               <div className="mt-1 text-xs text-muted-foreground">
                                 <span className="font-medium text-slate-700">Reason:</span>{' '}
-                                {v.reason}
+                                {v.reason ?? '—'}
                               </div>
 
                               <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">

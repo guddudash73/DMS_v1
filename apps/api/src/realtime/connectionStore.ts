@@ -6,7 +6,7 @@ import {
   ScanCommand,
 } from '@aws-sdk/lib-dynamodb';
 
-const REGION = process.env.AWS_REGION ?? 'us-east-1';
+const REGION = process.env.APP_REGION ?? process.env.AWS_REGION ?? 'us-east-1';
 const CONNECTIONS_TABLE = process.env.DDB_CONNECTIONS_TABLE;
 
 if (!CONNECTIONS_TABLE) {

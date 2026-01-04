@@ -12,18 +12,12 @@ import type {
   DailyReport,
   DailyPatientSummary,
   DailyPatientSummarySeries,
-  UserPreferences,
   AdminDoctorListItem,
   Visit,
   VisitCreate,
   VisitCreateResponse,
-  DoctorPatientsCountSeries,
-  DailyVisitsBreakdownResponse,
-  DoctorDailyVisitsBreakdownResponse,
-  DoctorRecentCompletedResponse,
   Xray,
   XrayContentType,
-  DoctorQueueResponse,
   MedicineTypeaheadItem,
   QuickAddMedicineInput,
   RxLineType,
@@ -50,9 +44,11 @@ import type {
   MedicineCatalogSearchQuery,
   DoctorUpdateMedicineRequest,
   AdminResetUserPasswordRequest,
+  PatientQueueResponse,
+  RecentCompletedResponse,
 } from '@dms/types';
 
-import { createDoctorQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
+import { createClinicQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
 import type { RootState } from './index';
 import { setTokensFromRefresh, setUnauthenticated } from './authSlice';
 import { clinicDateISO } from '../lib/clinicTime';
@@ -90,6 +86,7 @@ export const TAG_TYPES = [
   'DailyReport',
   'DailyVisitsBreakdown',
   'ClinicRealtime',
+  'ClinicQueue',
 
   'AdminMedicines',
   'AdminRxPresets',
@@ -142,9 +139,8 @@ const rawBaseQuery = fetchBaseQuery({
   baseUrl: API_BASE_URL,
   credentials: 'include',
   prepareHeaders: (headers, { getState }) => {
-    const state = getState() as unknown as RootState;
+    const state = getState() as RootState;
     const token = state.auth.accessToken;
-
     if (token) headers.set('authorization', `Bearer ${token}`);
     headers.set('accept', 'application/json');
     return headers;
@@ -153,11 +149,7 @@ const rawBaseQuery = fetchBaseQuery({
 
 function normalizeIsoDate(input: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
-
-  const d = new Date(input);
-  if (!Number.isFinite(d.getTime())) return input;
-
-  return clinicDateISO(d);
+  return clinicDateISO(new Date(input));
 }
 
 const isAuthEndpoint = (args: string | FetchArgs) => {
@@ -179,10 +171,6 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
   api,
   extraOptions,
 ) => {
-  if (isAuthEndpoint(args)) {
-    return rawBaseQuery(args, api, extraOptions);
-  }
-
   let result = await rawBaseQuery(args, api, extraOptions);
   if (result.error?.status !== 401) return result;
 
@@ -193,12 +181,10 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
         api,
         extraOptions,
       );
-
       if (refreshResult.data) {
         api.dispatch(setTokensFromRefresh(refreshResult.data as RefreshResponse));
         return true;
       }
-
       api.dispatch(setUnauthenticated());
       api.dispatch(apiSlice.util.resetApiState());
       return false;
@@ -295,7 +281,7 @@ async function sharedOpenSocketIfNeeded(args: { dispatch: any; getState: () => u
   const token = await ensureFreshAccessTokenForWs(args);
   if (!token) return;
 
-  sharedSocket = createDoctorQueueWebSocket({
+  sharedSocket = createClinicQueueWebSocket({
     token,
     onMessage: (msg) => {
       for (const fn of sharedListeners) {
@@ -415,12 +401,13 @@ export const apiSlice = createApi({
           dispatch,
           getState,
           onMessage: (data) => {
-            if (data.type !== 'DoctorQueueUpdated') return;
+            if (data.type !== 'ClinicQueueUpdated') return;
 
             const date = normalizeIsoDate(data.payload.visitDate);
 
             dispatch(
               apiSlice.util.invalidateTags([
+                { type: 'ClinicQueue' as const, id: date },
                 { type: 'DailyPatientSummary' as const, id: date },
                 { type: 'DailyReport' as const, id: date },
                 { type: 'DailyVisitsBreakdown' as const, id: date },
@@ -496,31 +483,33 @@ export const apiSlice = createApi({
       }),
     }),
 
-    getDailyVisitsBreakdown: builder.query<DailyVisitsBreakdownResponse, string>({
+    getDailyVisitsBreakdown: builder.query<
+      {
+        date: string;
+        totalVisits: number;
+        items: {
+          visitId: string;
+          visitDate: string;
+          status: 'QUEUED' | 'IN_PROGRESS' | 'DONE';
+          tag?: 'N' | 'F' | 'Z';
+          reason?: string;
+          billingAmount?: number;
+          createdAt: number;
+          updatedAt: number;
+
+          patientId: string;
+          patientName: string;
+          patientPhone?: string;
+          patientGender?: string;
+        }[];
+      },
+      string
+    >({
       query: (date) => ({
         url: '/reports/daily/visits-breakdown',
         params: { date },
       }),
       providesTags: (_r, _e, date) => [{ type: 'DailyVisitsBreakdown' as const, id: date }],
-    }),
-
-    getDoctorDailyPatientSummarySeries: builder.query<
-      DailyPatientSummarySeries,
-      { startDate: string; endDate: string }
-    >({
-      query: ({ startDate, endDate }) => ({
-        url: '/reports/daily/doctor/patients/series',
-        params: { startDate, endDate },
-      }),
-      providesTags: () => [{ type: 'Doctors' as const, id: 'ME' }],
-    }),
-
-    getDoctorDailyVisitsBreakdown: builder.query<DoctorDailyVisitsBreakdownResponse, string>({
-      query: (date) => ({
-        url: '/reports/daily/doctor/visits-breakdown',
-        params: { date },
-      }),
-      providesTags: () => [{ type: 'Doctors' as const, id: 'ME' }],
     }),
 
     getDoctors: builder.query<DoctorPublicListItem[], void>({
@@ -537,20 +526,44 @@ export const apiSlice = createApi({
       providesTags: ['Doctors'],
     }),
 
-    getMyPreferences: builder.query<UserPreferences, void>({
-      query: () => ({
-        url: '/me/preferences',
+    getPatientQueue: builder.query<
+      PatientQueueResponse,
+      { date?: string; status?: 'QUEUED' | 'IN_PROGRESS' | 'DONE' }
+    >({
+      query: ({ date, status } = {}) => ({
+        url: '/visits/queue',
+        params: {
+          ...(date ? { date } : {}),
+          ...(status ? { status } : {}),
+        },
       }),
-      providesTags: ['UserPreferences'],
-    }),
 
-    updateMyPreferences: builder.mutation<UserPreferences, UserPreferences>({
-      query: (body) => ({
-        url: '/me/preferences',
-        method: 'PUT',
-        body,
-      }),
-      invalidatesTags: ['UserPreferences'],
+      providesTags: (_r, _e, arg) => [
+        {
+          type: 'ClinicQueue' as const,
+          id: arg.date ?? clinicDateISO(new Date()),
+        },
+      ],
+
+      async onCacheEntryAdded(arg, { cacheDataLoaded, cacheEntryRemoved, dispatch, getState }) {
+        await cacheDataLoaded;
+
+        const unsubscribe = subscribeSharedRealtime({
+          dispatch,
+          getState,
+          onMessage: (data) => {
+            if (data.type !== 'ClinicQueueUpdated') return;
+
+            const msgDate = normalizeIsoDate(data.payload.visitDate);
+            if (arg.date && arg.date !== msgDate) return;
+
+            dispatch(apiSlice.util.invalidateTags([{ type: 'ClinicQueue' as const, id: msgDate }]));
+          },
+        });
+
+        await cacheEntryRemoved;
+        unsubscribe();
+      },
     }),
 
     getPatients: builder.query<PatientsListResponse, Partial<PatientSearchQuery>>({
@@ -594,45 +607,6 @@ export const apiSlice = createApi({
       providesTags: (_result, _error, patientId) => [{ type: 'Patient' as const, id: patientId }],
     }),
 
-    getDoctorQueue: builder.query<
-      DoctorQueueResponse,
-      { doctorId: string; date?: string; status?: 'QUEUED' | 'IN_PROGRESS' | 'DONE' }
-    >({
-      query: ({ doctorId, date, status }) => ({
-        url: '/visits/queue',
-        params: {
-          doctorId,
-          ...(date ? { date } : {}),
-          ...(status ? { status } : {}),
-        },
-      }),
-      providesTags: (_result, _error, args) => [{ type: 'Doctors' as const, id: args.doctorId }],
-
-      async onCacheEntryAdded(arg, { cacheDataLoaded, cacheEntryRemoved, dispatch, getState }) {
-        await cacheDataLoaded;
-
-        const unsubscribe = subscribeSharedRealtime({
-          dispatch,
-          getState,
-          onMessage: (data) => {
-            if (data.type !== 'DoctorQueueUpdated') return;
-            if (data.payload.doctorId !== arg.doctorId) return;
-            if (arg.date && arg.date !== data.payload.visitDate) return;
-
-            dispatch(
-              apiSlice.util.invalidateTags([
-                { type: 'Doctors' as const, id: arg.doctorId },
-                { type: 'Doctors' as const, id: 'ME' },
-              ]),
-            );
-          },
-        });
-
-        await cacheEntryRemoved;
-        unsubscribe();
-      },
-    }),
-
     createVisit: builder.mutation<VisitCreateResponse, VisitCreate>({
       query: (body) => ({
         url: '/visits',
@@ -640,7 +614,7 @@ export const apiSlice = createApi({
         body,
       }),
       invalidatesTags: (_result, _error, arg) => [
-        { type: 'Doctors' as const, id: arg.doctorId },
+        { type: 'ClinicQueue' as const, id: clinicDateISO(new Date()) },
         { type: 'Patients' as const, id: 'LIST' },
         { type: 'Patient' as const, id: arg.patientId },
       ],
@@ -654,7 +628,7 @@ export const apiSlice = createApi({
       }),
       invalidatesTags: (_result, _error, arg) => [
         { type: 'Visit' as const, id: arg.visitId },
-        'Doctors',
+        { type: 'ClinicQueue' as const, id: arg.date ?? clinicDateISO(new Date()) },
       ],
     }),
 
@@ -669,7 +643,7 @@ export const apiSlice = createApi({
       }),
       invalidatesTags: (_result, _error, arg) => [
         { type: 'Visit' as const, id: arg.visitId },
-        'Doctors',
+        { type: 'ClinicQueue' as const, id: arg.date ?? clinicDateISO(new Date()) },
       ],
     }),
 
@@ -759,31 +733,6 @@ export const apiSlice = createApi({
         if (!arg.dateTag) return ['Followups'];
         return arg.status === 'ACTIVE' ? [{ type: 'Followups' as const, id: arg.dateTag }] : [];
       },
-    }),
-
-    getDoctorPatientsCountSeries: builder.query<
-      DoctorPatientsCountSeries,
-      { startDate: string; endDate: string }
-    >({
-      query: ({ startDate, endDate }) => ({
-        url: '/reports/daily/doctor/patients/series',
-        params: { startDate, endDate },
-      }),
-      providesTags: () => [{ type: 'Doctors' as const, id: 'ME' }],
-    }),
-
-    getDoctorRecentCompleted: builder.query<
-      DoctorRecentCompletedResponse,
-      { date?: string; limit?: number }
-    >({
-      query: ({ date, limit } = {}) => ({
-        url: '/reports/daily/doctor/recent-completed',
-        params: {
-          ...(date ? { date } : {}),
-          ...(typeof limit === 'number' ? { limit } : {}),
-        },
-      }),
-      providesTags: () => [{ type: 'Doctors' as const, id: 'ME' }],
     }),
 
     presignXrayUpload: builder.mutation<
@@ -1265,6 +1214,19 @@ export const apiSlice = createApi({
         body,
       }),
     }),
+
+    getRecentCompleted: builder.query<RecentCompletedResponse, { date?: string; limit?: number }>({
+      query: ({ date, limit } = {}) => ({
+        url: '/reports/daily/recent-completed',
+        params: {
+          ...(date ? { date } : {}),
+          ...(typeof limit === 'number' ? { limit } : {}),
+        },
+      }),
+      providesTags: (_r, _e, arg) => [
+        { type: 'DailyReport' as const, id: arg.date ?? clinicDateISO(new Date()) },
+      ],
+    }),
   }),
 });
 
@@ -1285,17 +1247,14 @@ export const {
   useGetDailyPatientSummarySeriesQuery,
   useGetDailyVisitsBreakdownQuery,
 
-  useGetDoctorDailyPatientSummarySeriesQuery,
-  useGetDoctorDailyVisitsBreakdownQuery,
   useGetDoctorsQuery,
   useAdminGetDoctorsQuery,
 
   useGetMeQuery,
   useUpdateMeMutation,
-  useGetMyPreferencesQuery,
-  useUpdateMyPreferencesMutation,
 
-  useGetDoctorQueueQuery,
+  useGetPatientQueueQuery,
+
   useCreateVisitMutation,
   useTakeSeatMutation,
   useUpdateVisitStatusMutation,
@@ -1305,9 +1264,6 @@ export const {
 
   useGetDailyFollowupsQuery,
   useUpdateFollowupStatusMutation,
-
-  useGetDoctorPatientsCountSeriesQuery,
-  useGetDoctorRecentCompletedQuery,
 
   usePresignXrayUploadMutation,
   useRegisterXrayMetadataMutation,
@@ -1358,6 +1314,7 @@ export const {
   useDoctorUpdateMedicineMutation,
   useDoctorDeleteMedicineMutation,
   useAdminResetUserPasswordMutation,
+  useGetRecentCompletedQuery,
 } = apiSlice;
 
 export const api = apiSlice;

@@ -10,11 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/src/hooks/useAuth';
-import {
-  useGetDoctorsQuery,
-  useGetPatientByIdQuery,
-  useCreateVisitMutation,
-} from '@/src/store/api';
+import { useGetPatientByIdQuery, useCreateVisitMutation } from '@/src/store/api';
 import { loadPrintSettings } from '@/src/lib/printing/settings';
 import { buildTokenEscPos } from '@/src/lib/printing/escpos';
 import { printRaw } from '@/src/lib/printing/qz';
@@ -66,10 +62,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
     skip: !patientId || auth.status !== 'authenticated',
   });
 
-  const { data: doctors } = useGetDoctorsQuery(undefined, {
-    skip: auth.status !== 'authenticated',
-  });
-
   const [createVisit, { isLoading }] = useCreateVisitMutation();
 
   const {
@@ -83,7 +75,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
     mode: 'onBlur',
     defaultValues: {
       patientId: patientId as any,
-      doctorId: (doctors?.[0]?.doctorId ?? '') as any,
       reason: '',
       tag: 'N',
     },
@@ -92,12 +83,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
   React.useEffect(() => {
     setValue('patientId', patientId as any);
   }, [patientId, setValue]);
-
-  React.useEffect(() => {
-    if (doctors?.length && !watch('doctorId')) {
-      setValue('doctorId', doctors[0].doctorId as any);
-    }
-  }, [doctors]);
 
   const selectedTag = watch('tag');
 
@@ -180,39 +165,18 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
                 </div>
               </div>
 
-              <div>
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-gray-800">Doctor</label>
-                  <select
-                    className={`h-10 w-full rounded-xl border bg-white px-3 text-sm ${
-                      errors.doctorId
-                        ? 'border-red-500 focus-visible:ring-red-500'
-                        : 'border-gray-200 focus-visible:ring-gray-300'
-                    }`}
-                    {...register('doctorId')}
-                  >
-                    {(doctors ?? []).map((d) => (
-                      <option key={d.doctorId} value={d.doctorId}>
-                        {d.fullName || d.displayName || d.doctorId}
-                      </option>
-                    ))}
-                  </select>
-                  <p className="h-3 text-xs">&nbsp;</p>
-                </div>
-
-                <div className="space-y-1">
-                  <label className="text-sm font-medium text-gray-800">Reason</label>
-                  <Input
-                    placeholder="Enter the reason for this Visit"
-                    className={`h-10 rounded-xl text-sm ${
-                      errors.reason
-                        ? 'border-red-500 focus-visible:ring-red-500'
-                        : 'border-gray-200 focus-visible:ring-gray-300'
-                    }`}
-                    {...register('reason')}
-                  />
-                  <p className="h-3 text-xs">&nbsp;</p>
-                </div>
+              <div className="space-y-1">
+                <label className="text-sm font-medium text-gray-800">Reason</label>
+                <Input
+                  placeholder="Enter the reason for this Visit"
+                  className={`h-10 rounded-xl text-sm ${
+                    errors.reason
+                      ? 'border-red-500 focus-visible:ring-red-500'
+                      : 'border-gray-200 focus-visible:ring-gray-300'
+                  }`}
+                  {...register('reason')}
+                />
+                <p className="h-3 text-xs">&nbsp;</p>
               </div>
 
               <div className="flex items-center justify-end gap-4 pb-2">

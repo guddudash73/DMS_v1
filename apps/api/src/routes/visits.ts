@@ -16,18 +16,11 @@ import {
 } from '@dms/types';
 import { v4 as randomUUID } from 'uuid';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
-import {
-  visitRepository,
-  InvalidStatusTransitionError,
-  DoctorBusyError,
-} from '../repositories/visitRepository';
+
+import { visitRepository, InvalidStatusTransitionError } from '../repositories/visitRepository';
 import { followupRepository, FollowUpRuleViolationError } from '../repositories/followupRepository';
 import { xrayRepository, XrayConflictError } from '../repositories/xrayRepository';
 import { prescriptionRepository } from '../repositories/prescriptionRepository';
-import { buildXrayObjectKey } from './xray';
-import { s3Client } from '../config/aws';
-import { XRAY_BUCKET_NAME } from '../config/env';
-import { requireRole } from '../middlewares/auth';
 import { patientRepository } from '../repositories/patientRepository';
 import {
   billingRepository,
@@ -35,16 +28,20 @@ import {
   DuplicateCheckoutError,
   VisitNotDoneError,
 } from '../repositories/billingRepository';
+
+import { buildXrayObjectKey } from './xray';
+import { s3Client } from '../config/aws';
+import { getEnv } from '../config/env';
+import { requireRole } from '../middlewares/auth';
 import { logAudit, logError } from '../lib/logger';
 import { sendZodValidationError } from '../lib/validation';
 import { generateXrayThumbnail } from '../services/xrayThumbnails';
-import { publishDoctorQueueUpdated } from '../realtime/publisher';
+import { publishClinicQueueUpdated } from '../realtime/publisher';
 
 const router = express.Router();
 
-const handleValidationError = (req: Request, res: Response, issues: z.ZodError['issues']) => {
-  return sendZodValidationError(req, res, issues);
-};
+const handleValidationError = (req: Request, res: Response, issues: z.ZodError['issues']) =>
+  sendZodValidationError(req, res, issues);
 
 const asyncHandler =
   (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
@@ -83,43 +80,38 @@ router.post(
   '/',
   asyncHandler(async (req, res) => {
     const parsed = VisitCreate.safeParse(req.body);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
     const visit = await visitRepository.create(parsed.data);
-
     const patient = await patientRepository.getById(visit.patientId);
 
     const patientVisits = await visitRepository.listByPatientId(visit.patientId);
     const visitNumberForPatient = patientVisits.length;
 
-    const queue = await visitRepository.getDoctorQueue({
-      doctorId: visit.doctorId,
+    const queue = await visitRepository.getPatientQueue({
       date: visit.visitDate,
       status: 'QUEUED',
     });
+
     const idx = queue.findIndex((v) => v.visitId === visit.visitId);
     const tokenNumber = idx >= 0 ? idx + 1 : Math.max(1, queue.length);
 
-    const tokenPrint = {
-      tokenNumber,
-      visitId: visit.visitId,
-      patientName: patient?.name ?? '—',
-      patientPhone: patient?.phone ?? undefined,
-      reason: visit.reason,
-      tag: visit.tag,
-      visitNumberForPatient,
-      createdAt: visit.createdAt,
-      visitDate: visit.visitDate,
-    };
+    void publishClinicQueueUpdated({ visitDate: visit.visitDate });
 
-    void publishDoctorQueueUpdated({
-      doctorId: visit.doctorId,
-      visitDate: visit.visitDate,
+    return res.status(201).json({
+      visit,
+      tokenPrint: {
+        tokenNumber,
+        visitId: visit.visitId,
+        patientName: patient?.name ?? '—',
+        patientPhone: patient?.phone ?? undefined,
+        reason: visit.reason,
+        tag: visit.tag,
+        visitNumberForPatient,
+        createdAt: visit.createdAt,
+        visitDate: visit.visitDate,
+      },
     });
-
-    return res.status(201).json({ visit, tokenPrint });
   }),
 );
 
@@ -127,68 +119,38 @@ router.get(
   '/queue',
   asyncHandler(async (req, res) => {
     const parsed = VisitQueueQuery.safeParse(req.query);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
-    const visits = await visitRepository.getDoctorQueue(parsed.data);
+    const visits = await visitRepository.getPatientQueue(parsed.data);
 
-    const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
-    const patientResults = await Promise.all(
-      uniquePatientIds.map((id) => patientRepository.getById(id)),
-    );
+    const patientIds = Array.from(new Set(visits.map((v) => v.patientId)));
+    const patients = await Promise.all(patientIds.map((id) => patientRepository.getById(id)));
+    const patientNameMap = new Map(patients.filter(Boolean).map((p) => [p!.patientId, p!.name]));
 
-    const patientNameMap = new Map<string, string>();
-    for (const p of patientResults) {
-      if (!p) continue;
-      patientNameMap.set(p.patientId, p.name);
-    }
-
-    const items = visits.map((v) => ({
-      ...v,
-      patientName: patientNameMap.get(v.patientId) ?? undefined,
-    }));
-
-    return res.status(200).json({ items });
+    return res.status(200).json({
+      items: visits.map((v) => ({
+        ...v,
+        patientName: patientNameMap.get(v.patientId),
+      })),
+    });
   }),
 );
-
-const TakeSeatBody = z.object({
-  visitId: VisitId,
-});
 
 router.post(
   '/queue/take-seat',
   asyncHandler(async (req, res) => {
-    const parsed = TakeSeatBody.safeParse(req.body);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    const parsed = z.object({ visitId: VisitId }).safeParse(req.body);
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
     try {
       const updated = await visitRepository.updateStatus(parsed.data.visitId, 'IN_PROGRESS');
-      if (!updated) {
-        return res.status(404).json({
-          error: 'NOT_FOUND',
-          message: 'Visit not found',
-          traceId: req.requestId,
-        });
-      }
+      if (!updated) return res.status(404).json({ error: 'NOT_FOUND' });
+
+      void publishClinicQueueUpdated({ visitDate: updated.visitDate });
       return res.status(200).json(updated);
     } catch (err) {
-      if (err instanceof DoctorBusyError) {
-        return res.status(409).json({
-          error: err.code,
-          message: err.message,
-          traceId: req.requestId,
-        });
-      }
       if (err instanceof InvalidStatusTransitionError) {
-        return res.status(409).json({
-          error: err.code,
-          message: err.message,
-          traceId: req.requestId,
-        });
+        return res.status(409).json({ error: err.code, message: err.message });
       }
       throw err;
     }
@@ -220,45 +182,22 @@ router.patch(
   '/:visitId/status',
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
-    if (!id.success) {
-      return handleValidationError(req, res, id.error.issues);
-    }
-
-    const parsedBody = VisitStatusUpdate.safeParse(req.body);
-    if (!parsedBody.success) {
-      return handleValidationError(req, res, parsedBody.error.issues);
-    }
+    const body = VisitStatusUpdate.safeParse(req.body);
+    if (!id.success || !body.success)
+      return handleValidationError(req, res, [
+        ...(id.error?.issues ?? []),
+        ...(body.error?.issues ?? []),
+      ]);
 
     try {
-      const updated = await visitRepository.updateStatus(id.data, parsedBody.data.status);
-      if (!updated) {
-        return res.status(404).json({
-          error: 'NOT_FOUND',
-          message: 'Visit not found',
-          traceId: req.requestId,
-        });
-      }
+      const updated = await visitRepository.updateStatus(id.data, body.data.status);
+      if (!updated) return res.status(404).json({ error: 'NOT_FOUND' });
 
-      void publishDoctorQueueUpdated({
-        doctorId: updated.doctorId,
-        visitDate: updated.visitDate,
-      });
-
+      void publishClinicQueueUpdated({ visitDate: updated.visitDate });
       return res.status(200).json(updated);
     } catch (err) {
       if (err instanceof InvalidStatusTransitionError) {
-        return res.status(409).json({
-          error: err.code,
-          message: err.message,
-          traceId: req.requestId,
-        });
-      }
-      if (err instanceof DoctorBusyError) {
-        return res.status(409).json({
-          error: err.code,
-          message: err.message,
-          traceId: req.requestId,
-        });
+        return res.status(409).json({ error: err.code, message: err.message });
       }
       throw err;
     }
@@ -272,7 +211,7 @@ router.get(
     if (!id.success) return handleValidationError(req, res, id.error.issues);
 
     try {
-      const items = await followupRepository.listByVisitId(id.data); // ✅ no any
+      const items = await followupRepository.listByVisitId(id.data);
       return res.status(200).json({ items: items ?? [] });
     } catch (err) {
       logError('visit_followups_list_failed', {
@@ -336,7 +275,7 @@ router.patch(
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) return handleValidationError(req, res, id.error.issues);
 
-    const fuId = FollowUpId.safeParse(req.params.followupId); // ✅ use schema
+    const fuId = FollowUpId.safeParse(req.params.followupId);
     if (!fuId.success) return handleValidationError(req, res, fuId.error.issues);
 
     const parsedBody = FollowUpStatusUpdate.safeParse(req.body);
@@ -383,6 +322,8 @@ router.post(
   '/:visitId/rx',
   requireRole('DOCTOR', 'ADMIN'),
   asyncHandler(async (req, res) => {
+    const env = getEnv();
+
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) return handleValidationError(req, res, id.error.issues);
 
@@ -417,9 +358,9 @@ router.post(
     const now = Date.now();
     const jsonKey = `rx/${visit.visitId}/${randomUUID()}.json`;
 
+    // ✅ Remove doctorId from payload (visit no longer has it)
     const jsonPayload = {
       visitId: visit.visitId,
-      doctorId: visit.doctorId,
       lines,
       createdAt: now,
       updatedAt: now,
@@ -429,7 +370,7 @@ router.post(
       await withRetry(() =>
         s3Client.send(
           new PutObjectCommand({
-            Bucket: XRAY_BUCKET_NAME,
+            Bucket: env.XRAY_BUCKET_NAME,
             Key: jsonKey,
             Body: JSON.stringify(jsonPayload),
             ContentType: 'application/json',
@@ -648,8 +589,7 @@ router.post(
 
       const visit = await visitRepository.getById(id.data);
       if (visit) {
-        void publishDoctorQueueUpdated({
-          doctorId: visit.doctorId,
+        void publishClinicQueueUpdated({
           visitDate: visit.visitDate,
         });
       }
@@ -764,6 +704,8 @@ router.post(
   '/:visitId/rx/revisions',
   requireRole('DOCTOR', 'ADMIN'),
   asyncHandler(async (req, res) => {
+    const env = getEnv();
+
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) return handleValidationError(req, res, id.error.issues);
 
@@ -794,9 +736,9 @@ router.post(
     const now = Date.now();
     const jsonKey = `rx/${visit.visitId}/${randomUUID()}.json`;
 
+    // ✅ Remove doctorId from payload
     const jsonPayload = {
       visitId: visit.visitId,
-      doctorId: visit.doctorId,
       lines: current.lines,
       createdAt: now,
       updatedAt: now,
@@ -806,7 +748,7 @@ router.post(
       await withRetry(() =>
         s3Client.send(
           new PutObjectCommand({
-            Bucket: XRAY_BUCKET_NAME,
+            Bucket: env.XRAY_BUCKET_NAME,
             Key: jsonKey,
             Body: JSON.stringify(jsonPayload),
             ContentType: 'application/json',

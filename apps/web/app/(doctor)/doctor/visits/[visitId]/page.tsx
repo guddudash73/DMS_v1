@@ -1,3 +1,4 @@
+// apps/web/app/(doctor)/doctor/visits/[visitId]/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -98,24 +99,22 @@ export default function DoctorVisitPage() {
     refetchOnMountOrArgChange: true,
   });
 
+  // ✅ In doctor area, doctor is the logged-in doctor (not visit.doctorId).
   const doctorFromList = React.useMemo(() => {
     const list = doctorsQuery.data ?? [];
-    const id = visit?.doctorId ?? doctorId;
-    if (!id) return null;
-    return (list as any[]).find((d) => d.doctorId === id) ?? null;
-  }, [doctorsQuery.data, visit?.doctorId, doctorId]);
+    if (!doctorId) return null;
+    return (list as any[]).find((d) => d.doctorId === doctorId) ?? null;
+  }, [doctorsQuery.data, doctorId]);
 
   const doctorLabel = React.useMemo(() => {
-    const id = visit?.doctorId ?? doctorId;
-
     const name =
       (doctorFromList as any)?.fullName ??
       (doctorFromList as any)?.displayName ??
       (doctorFromList as any)?.name ??
       undefined;
 
-    return name ?? (id ? `Doctor (${id})` : 'Doctor');
-  }, [doctorFromList, visit?.doctorId, doctorId]);
+    return name ?? (doctorId ? `Doctor (${doctorId})` : 'Doctor');
+  }, [doctorFromList, doctorId]);
 
   const doctorRegdLabel = React.useMemo(() => {
     const reg = (doctorFromList as any)?.registrationNumber ?? undefined;
@@ -178,6 +177,9 @@ export default function DoctorVisitPage() {
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
+      {/* ✅ rest of your JSX remains same; only doctor label resolution was fixed */}
+      {/* (Kept your original render blocks intact below) */}
+
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
           <div className="text-lg font-semibold text-gray-900">Visit</div>
@@ -230,6 +232,7 @@ export default function DoctorVisitPage() {
         </div>
       </div>
 
+      {/* unchanged blocks */}
       {hasError ? (
         <Card className="rounded-2xl border bg-white p-6">
           <div className="text-sm text-red-600">Failed to load visit/patient.</div>
@@ -350,6 +353,7 @@ export default function DoctorVisitPage() {
 
           {/* Prescription-style panel + CTA */}
           <Card className="lg:col-span-7 rounded-2xl border bg-white p-6">
+            {/* unchanged */}
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-gray-900">Prescription</div>

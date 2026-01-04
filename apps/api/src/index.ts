@@ -1,9 +1,12 @@
+// apps/api/src/index.ts
 import 'dotenv/config';
 import { createApp } from './server';
-import { env, NODE_ENV, PORT, DYNAMO_ENDPOINT } from './config/env';
+import { getEnv } from './config/env';
 import { ensureDynamoTable } from './dev/ensureDynamoTable';
 
-const port = Number(PORT ?? '4000');
+const env = getEnv();
+
+const port = Number(env.PORT ?? '4000');
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -83,13 +86,16 @@ function getErrorCodeAndMessage(err: unknown): { code: string; message: string }
 }
 
 async function main() {
-  const isLocalDynamo =
-    !!DYNAMO_ENDPOINT &&
-    (DYNAMO_ENDPOINT.includes('localhost') ||
-      DYNAMO_ENDPOINT.includes('127.0.0.1') ||
-      DYNAMO_ENDPOINT.includes('dynamodb-local'));
+  // validate env once at startup (production-grade fail fast)
+  const env = getEnv();
 
-  if (NODE_ENV !== 'production' && isLocalDynamo) {
+  const isLocalDynamo =
+    !!env.DYNAMO_ENDPOINT &&
+    (env.DYNAMO_ENDPOINT.includes('localhost') ||
+      env.DYNAMO_ENDPOINT.includes('127.0.0.1') ||
+      env.DYNAMO_ENDPOINT.includes('dynamodb-local'));
+
+  if (env.NODE_ENV !== 'production' && isLocalDynamo) {
     await ensureDynamoWithRetry();
   }
 
@@ -100,7 +106,7 @@ async function main() {
       JSON.stringify({
         msg: 'api:listening',
         port,
-        env: NODE_ENV,
+        env: env.NODE_ENV,
         table: env.DDB_TABLE_NAME,
       }),
     );

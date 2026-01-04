@@ -1,3 +1,4 @@
+// apps/web/app/(clinic)/patients/[id]/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -59,9 +60,7 @@ const asErrorResponse = (data: unknown): ErrorResponse | null => {
   return null;
 };
 
-const formatVisitDate = (dateStr: string) => {
-  return formatClinicDateShort(dateStr);
-};
+const formatVisitDate = (dateStr: string) => formatClinicDateShort(dateStr);
 
 const toISODate = (d: Date) => {
   const y = d.getFullYear();
@@ -151,6 +150,18 @@ function stageBadgeClass(status?: Visit['status']) {
   if (status === 'IN_PROGRESS') return 'bg-yellow-100 text-yellow-800 border-yellow-200';
   if (status === 'DONE') return 'bg-green-100 text-green-700 border-green-200';
   return 'bg-gray-100 text-gray-700 border-gray-200';
+}
+
+// ✅ Backend no longer guarantees Visit.doctorId.
+// Keep legacy support via safe accessor.
+function legacyDoctorIdFromVisit(v: Visit): string | undefined {
+  const anyV = v as any;
+  const raw =
+    (typeof anyV?.doctorId === 'string' && anyV.doctorId) ||
+    (typeof anyV?.providerId === 'string' && anyV.providerId) ||
+    (typeof anyV?.assignedDoctorId === 'string' && anyV.assignedDoctorId) ||
+    undefined;
+  return raw || undefined;
 }
 
 export default function PatientDetailPage() {
@@ -485,7 +496,10 @@ export default function PatientDetailPage() {
                   </TableRow>
                 ) : (
                   pageItems.map((visit) => {
-                    const doctorName = doctorNameById.get(visit.doctorId) ?? visit.doctorId ?? '—';
+                    const legacyDoctorId = legacyDoctorIdFromVisit(visit);
+                    const diagnosisBy = legacyDoctorId
+                      ? (doctorNameById.get(legacyDoctorId) ?? legacyDoctorId)
+                      : '—';
 
                     return (
                       <TableRow key={visit.visitId} className="hover:bg-gray-50/60">
@@ -498,7 +512,7 @@ export default function PatientDetailPage() {
                         </TableCell>
 
                         <TableCell className="px-6 py-4 text-sm text-gray-800">
-                          {doctorName}
+                          {diagnosisBy}
                         </TableCell>
 
                         <TableCell className="px-6 py-4">

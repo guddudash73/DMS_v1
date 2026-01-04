@@ -1,14 +1,17 @@
+// apps/api/src/dev/ensureDynamoTable.ts
 import {
   DynamoDBClient,
   ListTablesCommand,
   CreateTableCommand,
   ResourceInUseException,
 } from '@aws-sdk/client-dynamodb';
-import { AWS_REGION, DDB_TABLE_NAME, DYNAMO_ENDPOINT } from '../config/env';
+import { getEnv } from '../config/env';
+
+const env = getEnv();
 
 const client = new DynamoDBClient({
-  region: AWS_REGION,
-  endpoint: DYNAMO_ENDPOINT,
+  region: env.APP_REGION,
+  endpoint: env.DYNAMO_ENDPOINT,
 });
 
 function isLocalEndpoint(endpoint: string | undefined): boolean {
@@ -21,29 +24,29 @@ function isLocalEndpoint(endpoint: string | undefined): boolean {
 }
 
 export async function ensureDynamoTable() {
-  if (!DDB_TABLE_NAME) {
+  if (!env.DDB_TABLE_NAME) {
     throw new Error('DDB_TABLE_NAME env var is required');
   }
 
-  if (!isLocalEndpoint(DYNAMO_ENDPOINT)) {
+  if (!isLocalEndpoint(env.DYNAMO_ENDPOINT)) {
     console.log(
-      `ensureDynamoTable: skipping because DYNAMO_ENDPOINT is not local (${DYNAMO_ENDPOINT ?? 'undefined'})`,
+      `ensureDynamoTable: skipping because DYNAMO_ENDPOINT is not local (${env.DYNAMO_ENDPOINT ?? 'undefined'})`,
     );
     return;
   }
 
   const tables = await client.send(new ListTablesCommand({}));
 
-  if (tables.TableNames?.includes(DDB_TABLE_NAME)) {
+  if (tables.TableNames?.includes(env.DDB_TABLE_NAME)) {
     return;
   }
 
-  console.log(`DynamoDB table "${DDB_TABLE_NAME}" not found - creating in Local instance`);
+  console.log(`DynamoDB table "${env.DDB_TABLE_NAME}" not found - creating in Local instance`);
 
   try {
     await client.send(
       new CreateTableCommand({
-        TableName: DDB_TABLE_NAME,
+        TableName: env.DDB_TABLE_NAME,
         AttributeDefinitions: [
           { AttributeName: 'PK', AttributeType: 'S' },
           { AttributeName: 'SK', AttributeType: 'S' },
@@ -88,13 +91,13 @@ export async function ensureDynamoTable() {
       }),
     );
 
-    console.log(`DynamoDB table "${DDB_TABLE_NAME}" created.`);
+    console.log(`DynamoDB table "${env.DDB_TABLE_NAME}" created.`);
   } catch (err) {
     const name = getErrorName(err);
 
     if (err instanceof ResourceInUseException || name === 'ResourceInUseException') {
       console.log(
-        `DynamoDB table "${DDB_TABLE_NAME}" is already being created or exists (ResourceInUseException).`,
+        `DynamoDB table "${env.DDB_TABLE_NAME}" is already being created or exists (ResourceInUseException).`,
       );
       return;
     }

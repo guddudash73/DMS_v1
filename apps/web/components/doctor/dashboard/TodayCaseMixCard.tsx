@@ -3,7 +3,7 @@
 import { useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/src/hooks/useAuth';
-import { useGetDoctorDailyVisitsBreakdownQuery } from '@/src/store/api';
+import { useGetDailyVisitsBreakdownQuery } from '@/src/store/api';
 import { clinicDateISO } from '@/src/lib/clinicTime';
 
 function getTodayIso(): string {
@@ -32,18 +32,46 @@ function Row({
   );
 }
 
+type ClinicDailyVisitsBreakdownItem = {
+  visitId: string;
+  visitDate: string;
+  status: 'QUEUED' | 'IN_PROGRESS' | 'DONE';
+  tag?: 'N' | 'F' | 'Z';
+  reason?: string;
+  billingAmount?: number;
+  createdAt: number;
+  updatedAt: number;
+
+  patientId: string;
+  patientName: string;
+  patientPhone?: string;
+  patientGender?: string;
+};
+
+type ClinicDailyVisitsBreakdownResponse = {
+  date: string;
+  totalVisits: number;
+  items: ClinicDailyVisitsBreakdownItem[];
+};
+
 export default function TodayCaseMixCard() {
   const auth = useAuth();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
   const todayIso = getTodayIso();
 
-  const { data, isLoading, isFetching, isError } = useGetDoctorDailyVisitsBreakdownQuery(todayIso, {
+  // ✅ clinic-wide endpoint now
+  const { data, isLoading, isFetching, isError } = useGetDailyVisitsBreakdownQuery(todayIso, {
     skip: !canUseApi,
-  });
+  }) as {
+    data?: ClinicDailyVisitsBreakdownResponse;
+    isLoading: boolean;
+    isFetching: boolean;
+    isError: boolean;
+  };
 
   const { n, f, z } = useMemo(() => {
-    const items = data?.items ?? [];
+    const items: ClinicDailyVisitsBreakdownItem[] = data?.items ?? [];
     let newCount = 0;
     let followupCount = 0;
     let zeroCount = 0;
@@ -55,7 +83,7 @@ export default function TodayCaseMixCard() {
     }
 
     return { n: newCount, f: followupCount, z: zeroCount };
-  }, [data]);
+  }, [data?.items]);
 
   const showDots = isLoading || isFetching;
 

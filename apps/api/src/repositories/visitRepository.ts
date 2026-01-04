@@ -1,8 +1,5 @@
+// apps/api/src/repositories/visitRepository.ts
 import { randomUUID } from 'node:crypto';
-import {
-  ConditionalCheckFailedException,
-  TransactionCanceledException,
-} from '@aws-sdk/client-dynamodb';
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -24,16 +21,6 @@ export class InvalidStatusTransitionError extends Error {
   }
 }
 
-export class DoctorBusyError extends Error {
-  readonly code = 'DOCTOR_BUSY' as const;
-  readonly statusCode = 409 as const;
-
-  constructor(message = 'Doctor already has an in-progress visit for this date') {
-    super(message);
-    this.name = 'DoctorBusyError';
-  }
-}
-
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: {
     removeUndefinedValues: true,
@@ -50,17 +37,7 @@ const buildVisitMetaKeys = (visitId: string) => ({
   SK: 'META',
 });
 
-const buildDoctorDayLockKey = (doctorId: string, visitDate: string) => ({
-  PK: `DOCTOR_DAY#${doctorId}#${visitDate}`,
-  SK: 'IN_PROGRESS_LOCK',
-});
-
 const clinicDateKeyFromMs = (timestampMs: number): string => clinicDateISOFromMs(timestampMs);
-
-const buildGsi2keys = (doctorId: string, date: string, status: VisitStatus, ts: number) => ({
-  GSI2PK: `DOCTOR#${doctorId}#DATE#${date}`,
-  GSI2SK: `STATUS#${status}#TS#${ts}`,
-});
 
 const buildGsi3Keys = (date: string, visitId: string) => ({
   GSI3PK: `DATE#${date}`,
@@ -126,7 +103,12 @@ export interface VisitRepository {
   getById(visitId: string): Promise<Visit | null>;
   listByPatientId(patientId: string): Promise<Visit[]>;
   updateStatus(visitId: string, nextStatus: VisitStatus): Promise<Visit | null>;
-  getDoctorQueue(params: VisitQueueQuery): Promise<Visit[]>;
+
+  /**
+   * ✅ Clinic-wide queue (no doctorId)
+   */
+  getPatientQueue(params: VisitQueueQuery): Promise<Visit[]>;
+
   listByDate(date: string): Promise<Visit[]>;
 
   setCurrentRxPointer(params: {
@@ -147,7 +129,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
   async create(input: VisitCreate): Promise<Visit> {
     const now = Date.now();
     const visitId = randomUUID();
-
     const visitDate = clinicDateKeyFromMs(now);
 
     const status: VisitStatus = 'QUEUED';
@@ -161,7 +142,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
     const base: Visit = {
       visitId,
       patientId: input.patientId,
-      doctorId: input.doctorId,
       reason: input.reason,
       status,
       visitDate,
@@ -181,7 +161,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
       ...buildVisitMetaKeys(visitId),
       entityType: 'VISIT',
       ...base,
-      ...buildGsi2keys(input.doctorId, visitDate, status, now),
       ...buildGsi3Keys(visitDate, visitId),
     };
 
@@ -250,173 +229,28 @@ export class DynamoDBVisitRepository implements VisitRepository {
     }
 
     const now = Date.now();
-    const visitDate = current.visitDate;
-    const doctorId = current.doctorId;
-
     const metaKey = buildVisitMetaKeys(visitId);
-    const newQueueKeys = buildGsi2keys(doctorId, visitDate, nextStatus, now);
 
-    const enteringInProgress = nextStatus === 'IN_PROGRESS';
-    const leavingInProgress = current.status === 'IN_PROGRESS' && nextStatus !== 'IN_PROGRESS';
-    const canLock = Boolean(doctorId && visitDate);
+    const { Attributes } = await docClient.send(
+      new UpdateCommand({
+        TableName: TABLE_NAME,
+        Key: metaKey,
+        UpdateExpression: 'SET #status = :status, #updatedAt = :updatedAt',
+        ExpressionAttributeNames: {
+          '#status': 'status',
+          '#updatedAt': 'updatedAt',
+        },
+        ExpressionAttributeValues: {
+          ':status': nextStatus,
+          ':updatedAt': now,
+          ':expectedStatus': current.status,
+        },
+        ConditionExpression: 'attribute_exists(PK) AND #status = :expectedStatus',
+        ReturnValues: 'ALL_NEW',
+      }),
+    );
 
-    if (!canLock || (!enteringInProgress && !leavingInProgress)) {
-      const { Attributes } = await docClient.send(
-        new UpdateCommand({
-          TableName: TABLE_NAME,
-          Key: metaKey,
-          UpdateExpression:
-            'SET #status = :status, #updatedAt = :updatedAt, #GSI2PK = :gsi2pk, #GSI2SK = :gsi2sk',
-          ExpressionAttributeNames: {
-            '#status': 'status',
-            '#updatedAt': 'updatedAt',
-            '#GSI2PK': 'GSI2PK',
-            '#GSI2SK': 'GSI2SK',
-          },
-          ExpressionAttributeValues: {
-            ':status': nextStatus,
-            ':updatedAt': now,
-            ':gsi2pk': newQueueKeys.GSI2PK,
-            ':gsi2sk': newQueueKeys.GSI2SK,
-            ':expectedStatus': current.status,
-          },
-          ConditionExpression: 'attribute_exists(PK) AND #status = :expectedStatus',
-          ReturnValues: 'ALL_NEW',
-        }),
-      );
-
-      if (!Attributes) return null;
-
-      await docClient.send(
-        new UpdateCommand({
-          TableName: TABLE_NAME,
-          Key: buildPatientVisitKeys(current.patientId, visitId),
-          UpdateExpression: 'SET #status = :status, #updatedAt = :updatedAt',
-          ExpressionAttributeNames: {
-            '#status': 'status',
-            '#updatedAt': 'updatedAt',
-          },
-          ExpressionAttributeValues: {
-            ':status': nextStatus,
-            ':updatedAt': now,
-          },
-          ConditionExpression: 'attribute_exists(PK)',
-        }),
-      );
-
-      return Attributes as Visit;
-    }
-
-    const lockKey = buildDoctorDayLockKey(doctorId, visitDate);
-
-    if (enteringInProgress) {
-      try {
-        await docClient.send(
-          new TransactWriteCommand({
-            TransactItems: [
-              {
-                Update: {
-                  TableName: TABLE_NAME,
-                  Key: metaKey,
-                  UpdateExpression:
-                    'SET #status = :status, #updatedAt = :updatedAt, #GSI2PK = :gsi2pk, #GSI2SK = :gsi2sk',
-                  ExpressionAttributeNames: {
-                    '#status': 'status',
-                    '#updatedAt': 'updatedAt',
-                    '#GSI2PK': 'GSI2PK',
-                    '#GSI2SK': 'GSI2SK',
-                  },
-                  ExpressionAttributeValues: {
-                    ':status': 'IN_PROGRESS',
-                    ':expectedStatus': 'QUEUED',
-                    ':updatedAt': now,
-                    ':gsi2pk': newQueueKeys.GSI2PK,
-                    ':gsi2sk': newQueueKeys.GSI2SK,
-                  },
-                  ConditionExpression: 'attribute_exists(PK) AND #status = :expectedStatus',
-                },
-              },
-              {
-                Put: {
-                  TableName: TABLE_NAME,
-                  Item: {
-                    ...lockKey,
-                    entityType: 'DOCTOR_DAY_LOCK',
-                    doctorId,
-                    visitDate,
-                    visitId,
-                    createdAt: now,
-                  },
-                  ConditionExpression: 'attribute_not_exists(PK)',
-                },
-              },
-            ],
-          }),
-        );
-      } catch (err) {
-        if (
-          err instanceof TransactionCanceledException ||
-          err instanceof ConditionalCheckFailedException
-        ) {
-          throw new DoctorBusyError();
-        }
-        throw err;
-      }
-    } else if (leavingInProgress) {
-      try {
-        await docClient.send(
-          new TransactWriteCommand({
-            TransactItems: [
-              {
-                Update: {
-                  TableName: TABLE_NAME,
-                  Key: metaKey,
-                  UpdateExpression:
-                    'SET #status = :status, #updatedAt = :updatedAt, #GSI2PK = :gsi2pk, #GSI2SK = :gsi2sk',
-                  ExpressionAttributeNames: {
-                    '#status': 'status',
-                    '#updatedAt': 'updatedAt',
-                    '#GSI2PK': 'GSI2PK',
-                    '#GSI2SK': 'GSI2SK',
-                  },
-                  ExpressionAttributeValues: {
-                    ':status': nextStatus,
-                    ':expectedStatus': 'IN_PROGRESS',
-                    ':updatedAt': now,
-                    ':gsi2pk': newQueueKeys.GSI2PK,
-                    ':gsi2sk': newQueueKeys.GSI2SK,
-                  },
-                  ConditionExpression: 'attribute_exists(PK) AND #status = :expectedStatus',
-                },
-              },
-              {
-                Delete: {
-                  TableName: TABLE_NAME,
-                  Key: lockKey,
-                  ConditionExpression: '#visitId = :visitId',
-                  ExpressionAttributeNames: {
-                    '#visitId': 'visitId',
-                  },
-                  ExpressionAttributeValues: {
-                    ':visitId': visitId,
-                  },
-                },
-              },
-            ],
-          }),
-        );
-      } catch (err) {
-        if (
-          err instanceof TransactionCanceledException ||
-          err instanceof ConditionalCheckFailedException
-        ) {
-          throw new InvalidStatusTransitionError(
-            `Invalid status transition ${current.status} -> ${nextStatus}`,
-          );
-        }
-        throw err;
-      }
-    }
+    if (!Attributes) return null;
 
     await docClient.send(
       new UpdateCommand({
@@ -435,37 +269,37 @@ export class DynamoDBVisitRepository implements VisitRepository {
       }),
     );
 
-    return await this.getById(visitId);
+    return Attributes as Visit;
   }
 
-  async getDoctorQueue(params: VisitQueueQuery): Promise<Visit[]> {
-    const { doctorId, date, status } = params;
+  /**
+   * ✅ Clinic-wide queue query by date (+ optional status)
+   * Uses GSI3 partitioned by DATE; status filter in-memory.
+   */
+  async getPatientQueue(params: VisitQueueQuery): Promise<Visit[]> {
+    const { date, status } = params;
 
     const todayClinic = clinicDateKeyFromMs(Date.now());
     const queryDate = date ?? todayClinic;
 
-    let keyCondition = 'GSI2PK = :pk';
-    const exprValues: Record<string, unknown> = {
-      ':pk': `DOCTOR#${doctorId}#DATE#${queryDate}`,
-    };
-
-    if (status) {
-      keyCondition += ' AND begins_with(GSI2SK, :skPrefix)';
-      exprValues[':skPrefix'] = `STATUS#${status}`;
-    }
-
     const { Items } = await docClient.send(
       new QueryCommand({
         TableName: TABLE_NAME,
-        IndexName: 'GSI2',
-        KeyConditionExpression: keyCondition,
-        ExpressionAttributeValues: exprValues,
+        IndexName: 'GSI3',
+        KeyConditionExpression: 'GSI3PK = :pk AND begins_with(GSI3SK, :skPrefix)',
+        ExpressionAttributeValues: {
+          ':pk': `DATE#${queryDate}`,
+          ':skPrefix': 'TYPE#VISIT#ID#',
+        },
         ScanIndexForward: true,
       }),
     );
 
-    if (!Items || Items.length === 0) return [];
-    return Items as Visit[];
+    const visits = (Items ?? []) as Visit[];
+    const filtered = status ? visits.filter((v) => v.status === status) : visits;
+
+    filtered.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+    return filtered;
   }
 
   async listByDate(date: string): Promise<Visit[]> {
@@ -491,7 +325,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
     patientId: string;
     rxId: string;
     version: number;
-  }): Promise<void> {
+  }) {
     const now = Date.now();
 
     const metaKey = buildVisitMetaKeys(params.visitId);
@@ -542,14 +376,8 @@ export class DynamoDBVisitRepository implements VisitRepository {
           ],
         }),
       );
-    } catch (err) {
-      if (
-        err instanceof TransactionCanceledException ||
-        err instanceof ConditionalCheckFailedException
-      ) {
-        return;
-      }
-      throw err;
+    } catch {
+      return;
     }
   }
 }

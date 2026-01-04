@@ -6,8 +6,9 @@ import { useRouter } from 'next/navigation';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import type { Visit } from '@dms/types';
+
 import { useAuth } from '@/src/hooks/useAuth';
-import { useGetDoctorQueueQuery, useGetMeQuery } from '@/src/store/api';
+import { useGetPatientQueueQuery } from '@/src/store/api';
 import { clinicDateISO } from '@/src/lib/clinicTime';
 
 type VisitStatus = Visit['status'];
@@ -25,23 +26,6 @@ function getVisitLabel(visit: QueueVisit): string {
 
 function getTodayIso(): string {
   return clinicDateISO(new Date());
-}
-
-function toDoctorFirstNameLabel(rawName: string | undefined | null): string {
-  const name = (rawName ?? '').trim();
-  if (!name) return 'Doctor';
-  const first = name.split(/\s+/)[0];
-  return first ? `Dr. ${first}` : 'Doctor';
-}
-
-function getDoctorNameTextClass(label: string): string {
-  const len = label.trim().length;
-
-  if (len <= 10) return 'text-3xl';
-  if (len <= 14) return 'text-2xl';
-  if (len <= 18) return 'text-xl';
-  if (len <= 24) return 'text-lg';
-  return 'text-base';
 }
 
 function QueuePill({
@@ -98,31 +82,20 @@ function QueuePill({
   );
 }
 
-type DoctorQueueCardProps = {
+type ClinicQueueCardProps = {
   onViewAll?: () => void;
 };
 
-export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
+export default function ClinicQueueCard({ onViewAll }: ClinicQueueCardProps) {
   const router = useRouter();
   const auth = useAuth();
+
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
-  const doctorId = auth.userId;
-
-  const { data: me } = useGetMeQuery(undefined, { skip: !canUseApi });
-
-  const doctorName = React.useMemo(() => {
-    const fullName = me?.doctorProfile?.fullName;
-    const fallback = me?.displayName;
-    return toDoctorFirstNameLabel(fullName || fallback || 'Doctor');
-  }, [me]);
-
-  const doctorNameTextClass = React.useMemo(() => getDoctorNameTextClass(doctorName), [doctorName]);
-
   const todayIso = React.useMemo(() => getTodayIso(), []);
 
-  const { data, isLoading, isFetching, isError } = useGetDoctorQueueQuery(
-    { doctorId: doctorId ?? '', date: todayIso },
-    { skip: !canUseApi || !doctorId },
+  const { data, isLoading, isFetching, isError } = useGetPatientQueueQuery(
+    { date: todayIso },
+    { skip: !canUseApi },
   );
 
   const visits: QueueVisit[] = (data?.items ?? []) as QueueVisit[];
@@ -131,24 +104,22 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
     () => [...visits].reverse().find((v) => v.status === 'DONE'),
     [visits],
   );
+
   const inProgressVisit = React.useMemo(
     () => visits.find((v) => v.status === 'IN_PROGRESS'),
     [visits],
   );
+
   const queuedVisits = React.useMemo(() => visits.filter((v) => v.status === 'QUEUED'), [visits]);
 
   const showLoading = canUseApi && (isLoading || isFetching);
 
   const waitingSlots = 5;
 
-  const donePlaceholder = 'No visits done yet.';
-  const inProgressPlaceholder = 'No on-going visits.';
-  const waitingPlaceholder = 'No waiting visits.';
-
   const goToVisit = React.useCallback(
     (visitId: string | undefined) => {
       if (!visitId) return;
-      router.push(`/doctor/visits/${visitId}`);
+      router.push(`/reception/visits/${visitId}`);
     },
     [router],
   );
@@ -157,18 +128,8 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
     <Card className="w-full rounded-2xl border-none bg-white px-6 py-2 shadow-sm">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <h2
-            className={[
-              doctorNameTextClass,
-              'font-semibold text-gray-900',
-              'whitespace-nowrap truncate',
-              'max-w-[16rem] sm:max-w-[20rem] md:max-w-[24rem]',
-            ].join(' ')}
-            title={doctorName}
-          >
-            {doctorName}
-          </h2>
-          <p className="text-2xl text-gray-400">Queue</p>
+          <h2 className="text-3xl font-semibold text-gray-900">Clinic Queue</h2>
+          <p className="text-2xl text-gray-400">Today</p>
         </div>
 
         <Button
@@ -192,13 +153,9 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
 
         {showLoading && (
           <>
-            <QueuePill label="Loading…" muted />
-            <QueuePill label="Loading…" muted />
-            <QueuePill label="Loading…" muted />
-            <QueuePill label="Loading…" muted />
-            <QueuePill label="Loading…" muted />
-            <QueuePill label="Loading…" muted />
-            <QueuePill label="Loading…" muted />
+            {Array.from({ length: 7 }).map((_, i) => (
+              <QueuePill key={i} label="Loading…" muted />
+            ))}
           </>
         )}
 
@@ -218,7 +175,7 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
                 onClick={() => goToVisit(doneVisit.visitId)}
               />
             ) : (
-              <QueuePill label={donePlaceholder} muted />
+              <QueuePill label="No visits done yet." muted />
             )}
 
             {inProgressVisit ? (
@@ -228,7 +185,7 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
                 onClick={() => goToVisit(inProgressVisit.visitId)}
               />
             ) : (
-              <QueuePill label={inProgressPlaceholder} muted />
+              <QueuePill label="No on-going visits." muted />
             )}
 
             {Array.from({ length: waitingSlots }).map((_, i) => {
@@ -241,7 +198,7 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
                   onClick={() => goToVisit(v.visitId)}
                 />
               ) : (
-                <QueuePill key={`waiting-${i}`} label={waitingPlaceholder} muted />
+                <QueuePill key={`waiting-${i}`} label="No waiting visits." muted />
               );
             })}
           </>

@@ -1,3 +1,4 @@
+// apps/api/src/routes/auth.ts
 import { Router, type Response } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';
@@ -5,7 +6,7 @@ import type { LoginResponse, RefreshResponse, RefreshTokenClaims } from '@dms/ty
 import { LoginRequest, RefreshRequest } from '@dms/types';
 import { userRepository } from '../repositories/userRepository';
 import { refreshTokenRepository } from '../repositories/refreshTokenRepository';
-import { ACCESS_TOKEN_TTL_SEC, REFRESH_TOKEN_TTL_SEC, NODE_ENV } from '../config/env';
+import { getEnv } from '../config/env';
 import { buildTokenPair, verifyRefreshToken } from '../lib/authTokens';
 import { AuthError } from '../middlewares/auth';
 import { logInfo, logAudit } from '../lib/logger';
@@ -19,28 +20,32 @@ const LOCK_WINDOW_MS = 15 * 60 * 1000;
 const COOKIE_NAME = 'refreshToken';
 
 const setRefreshCookie = (res: Response, refreshToken: string) => {
+  const env = getEnv();
+
   res.cookie(COOKIE_NAME, refreshToken, {
     httpOnly: true,
-    secure: NODE_ENV === 'production',
+    secure: env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: REFRESH_TOKEN_TTL_SEC * 1000,
+    maxAge: env.REFRESH_TOKEN_TTL_SEC * 1000,
     path: '/',
   });
 
   res.cookie(COOKIE_NAME, refreshToken, {
     httpOnly: true,
-    secure: NODE_ENV === 'production',
+    secure: env.NODE_ENV === 'production',
     sameSite: 'lax',
-    maxAge: REFRESH_TOKEN_TTL_SEC * 1000,
+    maxAge: env.REFRESH_TOKEN_TTL_SEC * 1000,
     path: '/auth',
   });
 };
 
 const clearRefreshCookie = (res: Response) => {
+  const env = getEnv();
+
   for (const path of ['/', '/auth']) {
     res.cookie(COOKIE_NAME, '', {
       httpOnly: true,
-      secure: NODE_ENV === 'production',
+      secure: env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 0,
       path,
@@ -50,6 +55,7 @@ const clearRefreshCookie = (res: Response) => {
 
 r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next) => {
   try {
+    const env = getEnv();
     const { email, password } = req.body as LoginRequest;
 
     const user = await userRepository.getByEmail(email);
@@ -113,7 +119,7 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
       role: user.role,
       tokens: {
         accessToken: pair.access.token,
-        expiresInSec: ACCESS_TOKEN_TTL_SEC,
+        expiresInSec: env.ACCESS_TOKEN_TTL_SEC,
       },
     };
 
@@ -132,6 +138,8 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
 
 r.post('/refresh', async (req, res, next) => {
   try {
+    const env = getEnv();
+
     const body = RefreshRequest.safeParse(req.body);
     const bodyToken = body.success ? body.data.refreshToken : undefined;
 
@@ -183,7 +191,7 @@ r.post('/refresh', async (req, res, next) => {
       role: user.role,
       tokens: {
         accessToken: pair.access.token,
-        expiresInSec: ACCESS_TOKEN_TTL_SEC,
+        expiresInSec: env.ACCESS_TOKEN_TTL_SEC,
       },
     };
 

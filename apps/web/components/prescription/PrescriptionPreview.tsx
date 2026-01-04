@@ -105,7 +105,7 @@ export function PrescriptionPreview({
 
   // ✅ clinic day key used for Regd. Date (kept)
   const visitISO = useMemo(
-    () => extractIsoFromVisitLabel(visitDateLabel) ?? clinicDateISO(),
+    () => extractIsoFromVisitLabel(visitDateLabel) ?? clinicDateISO(new Date()),
     [visitDateLabel],
   );
 
@@ -135,7 +135,6 @@ export function PrescriptionPreview({
 
   return (
     <div ref={wrapRef} className="w-full">
-      {/* This sets the visible height so scaled content doesn't overflow/collapse */}
       <div
         className="relative w-full"
         style={{
@@ -196,7 +195,7 @@ export function PrescriptionPreview({
                 <div className="mt-1 h-px w-full bg-emerald-600/60" />
               </div>
 
-              {/* Doctor row (✅ Date removed entirely from right side) */}
+              {/* Doctor row */}
               <div className="shrink-0 px-6 pt-3">
                 <div className="flex items-start justify-between gap-6">
                   <div className="min-w-0 flex flex-col">

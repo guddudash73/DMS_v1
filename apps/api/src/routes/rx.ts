@@ -1,8 +1,9 @@
+// apps/api/src/routes/rx.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { RxId } from '@dms/types';
 import { prescriptionRepository } from '../repositories/prescriptionRepository';
-import { XRAY_BUCKET_NAME } from '../config/env';
+import { getEnv } from '../config/env';
 import { getPresignedDownloadUrl } from '../lib/s3';
 import { visitRepository } from '../repositories/visitRepository';
 import { patientRepository } from '../repositories/patientRepository';
@@ -48,6 +49,8 @@ const RxUpdateBody = z.object({
 router.get(
   '/:rxId/json-url',
   asyncHandler(async (req, res) => {
+    const env = getEnv();
+
     const parsedId = RxIdParam.safeParse(req.params);
     if (!parsedId.success) {
       return handleValidationError(req, res, parsedId.error.issues);
@@ -87,7 +90,7 @@ router.get(
       url = await withRetry(
         () =>
           getPresignedDownloadUrl({
-            bucket: XRAY_BUCKET_NAME,
+            bucket: env.XRAY_BUCKET_NAME,
             key: meta.jsonKey,
             expiresInSeconds: 90,
           }),
@@ -124,12 +127,7 @@ router.get(
 
 router.get(
   '/:rxId/pdf-url',
-  asyncHandler(async (req, res) => {
-    const parsedId = RxIdParam.safeParse(req.params);
-    if (!parsedId.success) {
-      return handleValidationError(req, res, parsedId.error.issues);
-    }
-
+  asyncHandler(async (_req, res) => {
     return res.status(200).json({
       status: 'NOT_IMPLEMENTED',
       message: 'PDF generation for prescriptions is not implemented yet.',
