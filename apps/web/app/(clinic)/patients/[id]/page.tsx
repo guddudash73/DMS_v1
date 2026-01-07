@@ -152,16 +152,32 @@ function stageBadgeClass(status?: Visit['status']) {
   return 'bg-gray-100 text-gray-700 border-gray-200';
 }
 
-// ✅ Backend no longer guarantees Visit.doctorId.
-// Keep legacy support via safe accessor.
-function legacyDoctorIdFromVisit(v: Visit): string | undefined {
+// ✅ Backend may evolve — keep safe accessors
+function anchorIdFromVisit(v: Visit): string | undefined {
   const anyV = v as any;
   const raw =
-    (typeof anyV?.doctorId === 'string' && anyV.doctorId) ||
-    (typeof anyV?.providerId === 'string' && anyV.providerId) ||
-    (typeof anyV?.assignedDoctorId === 'string' && anyV.assignedDoctorId) ||
+    (typeof anyV?.anchorVisitId === 'string' && anyV.anchorVisitId) ||
+    (typeof anyV?.anchorId === 'string' && anyV.anchorId) ||
     undefined;
   return raw || undefined;
+}
+
+function isZeroBilledVisit(v: Visit): boolean {
+  const anyV = v as any;
+  return Boolean(anyV?.zeroBilled);
+}
+
+function isFollowupVisit(v: Visit): boolean {
+  return Boolean(anchorIdFromVisit(v));
+}
+
+function typeBadgeClass(kind: 'NEW' | 'FOLLOWUP') {
+  if (kind === 'NEW') return 'bg-sky-100 text-sky-700 border-sky-200';
+  return 'bg-violet-100 text-violet-700 border-violet-200';
+}
+
+function zeroBilledBadgeClass() {
+  return 'bg-rose-100 text-rose-700 border-rose-200';
 }
 
 export default function PatientDetailPage() {
@@ -198,7 +214,8 @@ export default function PatientDetailPage() {
 
   const { data: summary } = useGetPatientSummaryQuery(patientId);
 
-  const { data: doctors } = useGetDoctorsQuery();
+  // still used for printing (me)
+  useGetDoctorsQuery();
 
   const meQuery = useGetMeQuery();
   const me = meQuery.data ?? null;
@@ -230,39 +247,80 @@ export default function PatientDetailPage() {
 
   const visits: Visit[] = visitsData?.items ?? [];
 
+  // Sort newest first
   const sortedVisits = React.useMemo(() => {
     const items = [...visits];
     items.sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0));
     return items;
   }, [visits]);
 
+  // If date filter set, only keep visits on that date for *rows*,
+  // but we still keep a map of all visits to resolve anchor info.
   const filteredVisits = React.useMemo(() => {
     if (!selectedDate) return sortedVisits;
     return sortedVisits.filter((v) => v.visitDate === selectedDate);
   }, [sortedVisits, selectedDate]);
 
-  const doctorNameById = React.useMemo(() => {
-    const map = new Map<string, string>();
-    doctors?.forEach((d) => {
-      map.set(d.doctorId, d.fullName || d.displayName || d.doctorId);
-    });
+  // For anchor lookups (reason/date)
+  const visitById = React.useMemo(() => {
+    const map = new Map<string, Visit>();
+    for (const v of sortedVisits) map.set(v.visitId, v);
     return map;
-  }, [doctors]);
+  }, [sortedVisits]);
 
-  const PAGE_SIZE = 4;
-  const [page, setPage] = React.useState<number>(1);
+  // Grouping:
+  // - Anchors are visits with no anchorVisitId
+  // - Followups attach to their anchorVisitId
+  const groups = React.useMemo(() => {
+    type Group = {
+      anchor: Visit;
+      followups: Visit[];
+    };
 
-  React.useEffect(() => {
-    setPage(1);
-  }, [selectedDate, visitsData?.items]);
+    const anchorMap = new Map<string, Group>();
+    const orphanFollowups: Visit[] = [];
 
-  const totalPages = Math.max(1, Math.ceil(filteredVisits.length / PAGE_SIZE));
-  const pageSafe = Math.min(page, totalPages);
+    // First pass: anchors from filtered set (so pagination feels right with date filter)
+    for (const v of filteredVisits) {
+      const anchorId = anchorIdFromVisit(v);
+      if (!anchorId) {
+        anchorMap.set(v.visitId, { anchor: v, followups: [] });
+      }
+    }
 
-  const pageItems = React.useMemo(() => {
-    const start = (pageSafe - 1) * PAGE_SIZE;
-    return filteredVisits.slice(start, start + PAGE_SIZE);
-  }, [filteredVisits, pageSafe]);
+    // Second pass: attach followups (from filtered set)
+    for (const v of filteredVisits) {
+      const anchorId = anchorIdFromVisit(v);
+      if (!anchorId) continue;
+
+      const g = anchorMap.get(anchorId);
+      if (g) {
+        g.followups.push(v);
+      } else {
+        orphanFollowups.push(v);
+      }
+    }
+
+    // Sort followups oldest -> newest within each anchor (looks nicer under parent)
+    for (const g of anchorMap.values()) {
+      g.followups.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+    }
+
+    // Order anchors newest -> oldest (already implied by filteredVisits sort)
+    const anchorsOrdered: Group[] = Array.from(anchorMap.values()).sort(
+      (a, b) =>
+        (b.anchor.updatedAt ?? b.anchor.createdAt ?? 0) -
+        (a.anchor.updatedAt ?? a.anchor.createdAt ?? 0),
+    );
+
+    // If we have orphan followups (anchor not in filtered set), keep them as mini-groups
+    // but still show anchor context text using visitById when possible.
+    const orphanGroups: Array<{ followup: Visit }> = orphanFollowups
+      .sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0))
+      .map((f) => ({ followup: f }));
+
+    return { anchorsOrdered, orphanGroups };
+  }, [filteredVisits, visitById]);
 
   const followupLabel = summary?.nextFollowUpDate ?? 'No Follow Up Scheduled';
 
@@ -295,6 +353,71 @@ export default function PatientDetailPage() {
       requestAnimationFrame(() => window.print());
     });
   };
+
+  // Pagination: paginate by anchor visits (not total rows)
+  const PAGE_SIZE = 4;
+  const [page, setPage] = React.useState<number>(1);
+
+  React.useEffect(() => {
+    setPage(1);
+  }, [selectedDate, visitsData?.items]);
+
+  const totalAnchorPages = Math.max(1, Math.ceil(groups.anchorsOrdered.length / PAGE_SIZE));
+  const pageSafe = Math.min(page, totalAnchorPages);
+
+  const pageAnchors = React.useMemo(() => {
+    const start = (pageSafe - 1) * PAGE_SIZE;
+    return groups.anchorsOrdered.slice(start, start + PAGE_SIZE);
+  }, [groups.anchorsOrdered, pageSafe]);
+
+  const renderReasonCell = (visit: Visit, opts: { kind: 'NEW' | 'FOLLOWUP'; anchor?: Visit }) => {
+    const anchor = opts.anchor;
+
+    // ✅ For NEW/anchor: show follow-up count (from FULL dataset, not only filtered)
+    // so the anchor row always shows true count.
+    let followupCount = 0;
+    if (opts.kind === 'NEW') {
+      const anchorId = visit.visitId;
+      for (const v of sortedVisits) {
+        if (anchorIdFromVisit(v) === anchorId) followupCount += 1;
+      }
+    }
+
+    // ✅ For FOLLOWUP: show "Follow-up of: {anchor reason} • {anchor date}"
+    const followupOfText =
+      opts.kind === 'FOLLOWUP'
+        ? (() => {
+            const a =
+              anchor ??
+              (anchorIdFromVisit(visit) ? visitById.get(anchorIdFromVisit(visit)!) : undefined);
+            const aReason = (a?.reason || '—').toString();
+            const aDate = a?.visitDate ? formatVisitDate(a.visitDate) : '—';
+            return `Follow-up of: ${aReason} • ${aDate}`;
+          })()
+        : null;
+
+    return (
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold text-gray-900">
+          {visit.reason?.trim() ? visit.reason : '—'}
+        </div>
+
+        <div className="mt-0.5 text-[11px] text-gray-500">
+          {opts.kind === 'NEW' ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="rounded-md bg-gray-50 px-2 py-0.5 text-gray-600 shadow-[0_0_0_1px_rgba(0,0,0,0.04)]">
+                {followupCount} follow-up{followupCount === 1 ? '' : 's'}
+              </span>
+            </span>
+          ) : (
+            <span className="truncate">{followupOfText}</span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const hasRows = pageAnchors.length > 0 || groups.orphanGroups.length > 0;
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
@@ -460,15 +583,19 @@ export default function PatientDetailPage() {
                   <TableHead className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Visit Date
                   </TableHead>
+
                   <TableHead className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Reason
                   </TableHead>
+
                   <TableHead className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Diagnosis By
+                    Type
                   </TableHead>
+
                   <TableHead className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Stage
                   </TableHead>
+
                   <TableHead className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Action
                   </TableHead>
@@ -488,64 +615,225 @@ export default function PatientDetailPage() {
                       {visitsErrorMessage}
                     </TableCell>
                   </TableRow>
-                ) : pageItems.length === 0 ? (
+                ) : !hasRows ? (
                   <TableRow>
                     <TableCell colSpan={5} className="px-6 py-10 text-center text-sm text-gray-500">
                       No visits found{selectedDate ? ` for ${selectedDate}` : ''}.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  pageItems.map((visit) => {
-                    const legacyDoctorId = legacyDoctorIdFromVisit(visit);
-                    const diagnosisBy = legacyDoctorId
-                      ? (doctorNameById.get(legacyDoctorId) ?? legacyDoctorId)
-                      : '—';
+                  <>
+                    {/* Anchor groups (paginated) */}
+                    {pageAnchors.map((g) => {
+                      const anchor = g.anchor;
+                      const followups = g.followups;
 
-                    return (
-                      <TableRow key={visit.visitId} className="hover:bg-gray-50/60">
-                        <TableCell className="px-6 py-4 text-sm font-medium text-gray-900">
-                          {formatVisitDate(visit.visitDate)}
-                        </TableCell>
+                      return (
+                        <React.Fragment key={anchor.visitId}>
+                          {/* Anchor row */}
+                          <TableRow className="hover:bg-gray-50/60">
+                            <TableCell className="px-6 py-4 align-top text-sm font-medium text-gray-900">
+                              {formatVisitDate(anchor.visitDate)}
+                            </TableCell>
 
-                        <TableCell className="px-6 py-4 text-sm text-gray-800">
-                          {visit.reason || '—'}
-                        </TableCell>
+                            <TableCell className="px-6 py-4 align-top">
+                              {renderReasonCell(anchor, { kind: 'NEW' })}
+                            </TableCell>
 
-                        <TableCell className="px-6 py-4 text-sm text-gray-800">
-                          {diagnosisBy}
-                        </TableCell>
+                            <TableCell className="px-6 py-4 align-top">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge
+                                  variant="outline"
+                                  className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
+                                    'NEW',
+                                  )}`}
+                                >
+                                  NEW
+                                </Badge>
 
-                        <TableCell className="px-6 py-4">
-                          <Badge
-                            variant="outline"
-                            className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
-                              visit.status,
-                            )}`}
-                          >
-                            {stageLabel(visit.status)}
-                          </Badge>
-                        </TableCell>
+                                {isZeroBilledVisit(anchor) ? (
+                                  <Badge
+                                    variant="outline"
+                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
+                                  >
+                                    ZERO BILLED
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            </TableCell>
 
-                        <TableCell className="px-6 py-4 text-right">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="h-9 rounded-xl px-3 text-xs"
-                            onClick={() => router.push(`/visits/${visit.visitId}`)}
-                          >
-                            View <ArrowRight className="ml-1 h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
+                            <TableCell className="px-6 py-4 align-top">
+                              <Badge
+                                variant="outline"
+                                className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
+                                  anchor.status,
+                                )}`}
+                              >
+                                {stageLabel(anchor.status)}
+                              </Badge>
+                            </TableCell>
+
+                            <TableCell className="px-6 py-4 align-top text-right">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                className="h-9 rounded-xl px-3 text-xs"
+                                onClick={() => router.push(`/visits/${anchor.visitId}`)}
+                              >
+                                View <ArrowRight className="ml-1 h-4 w-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+
+                          {/* Followups rows */}
+                          {followups.map((f) => {
+                            const a = visitById.get(anchor.visitId) ?? anchor;
+
+                            return (
+                              <TableRow key={f.visitId} className="hover:bg-gray-50/60">
+                                <TableCell className="px-6 py-4 align-top">
+                                  <div className="flex items-center gap-3">
+                                    <div className="ml-1 h-8 w-[2px] rounded-full bg-gray-200" />
+                                    <div className="text-sm text-gray-900">
+                                      {formatVisitDate(f.visitDate)}
+                                    </div>
+                                  </div>
+                                </TableCell>
+
+                                <TableCell className="px-6 py-4 align-top">
+                                  <div className="flex items-start gap-3">
+                                    <div className="ml-1 h-8 w-[2px] rounded-full bg-gray-200" />
+                                    <div className="min-w-0 flex-1">
+                                      {renderReasonCell(f, { kind: 'FOLLOWUP', anchor: a })}
+                                    </div>
+                                  </div>
+                                </TableCell>
+
+                                <TableCell className="px-6 py-4 align-top">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <Badge
+                                      variant="outline"
+                                      className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
+                                        'FOLLOWUP',
+                                      )}`}
+                                    >
+                                      FOLLOW UP
+                                    </Badge>
+
+                                    {isZeroBilledVisit(f) ? (
+                                      <Badge
+                                        variant="outline"
+                                        className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
+                                      >
+                                        ZERO BILLED
+                                      </Badge>
+                                    ) : null}
+                                  </div>
+                                </TableCell>
+
+                                <TableCell className="px-6 py-4 align-top">
+                                  <Badge
+                                    variant="outline"
+                                    className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
+                                      f.status,
+                                    )}`}
+                                  >
+                                    {stageLabel(f.status)}
+                                  </Badge>
+                                </TableCell>
+
+                                <TableCell className="px-6 py-4 align-top text-right">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-9 rounded-xl px-3 text-xs"
+                                    onClick={() => router.push(`/visits/${f.visitId}`)}
+                                  >
+                                    View <ArrowRight className="ml-1 h-4 w-4" />
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </React.Fragment>
+                      );
+                    })}
+
+                    {/* Orphan followups (anchor not present in filtered set) */}
+                    {groups.orphanGroups.length
+                      ? groups.orphanGroups.map(({ followup }) => {
+                          const aId = anchorIdFromVisit(followup);
+                          const a = aId ? visitById.get(aId) : undefined;
+
+                          return (
+                            <TableRow key={followup.visitId} className="hover:bg-gray-50/60">
+                              <TableCell className="px-6 py-4 align-top text-sm text-gray-900">
+                                {formatVisitDate(followup.visitDate)}
+                              </TableCell>
+
+                              <TableCell className="px-6 py-4 align-top">
+                                {renderReasonCell(followup, { kind: 'FOLLOWUP', anchor: a })}
+                              </TableCell>
+
+                              <TableCell className="px-6 py-4 align-top">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge
+                                    variant="outline"
+                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
+                                      'FOLLOWUP',
+                                    )}`}
+                                  >
+                                    FOLLOW UP
+                                  </Badge>
+
+                                  {isZeroBilledVisit(followup) ? (
+                                    <Badge
+                                      variant="outline"
+                                      className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
+                                    >
+                                      ZERO BILLED
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="px-6 py-4 align-top">
+                                <Badge
+                                  variant="outline"
+                                  className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
+                                    followup.status,
+                                  )}`}
+                                >
+                                  {stageLabel(followup.status)}
+                                </Badge>
+                              </TableCell>
+
+                              <TableCell className="px-6 py-4 align-top text-right">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-9 rounded-xl px-3 text-xs"
+                                  onClick={() => router.push(`/visits/${followup.visitId}`)}
+                                >
+                                  View <ArrowRight className="ml-1 h-4 w-4" />
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      : null}
+                  </>
                 )}
               </TableBody>
             </Table>
 
-            {filteredVisits.length > PAGE_SIZE ? (
+            {groups.anchorsOrdered.length > PAGE_SIZE ? (
               <div className="border-t bg-white px-4 py-3">
-                <SimplePagination page={pageSafe} totalPages={totalPages} onPageChange={setPage} />
+                <SimplePagination
+                  page={pageSafe}
+                  totalPages={totalAnchorPages}
+                  onPageChange={setPage}
+                />
               </div>
             ) : null}
           </Card>

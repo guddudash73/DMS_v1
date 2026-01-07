@@ -1,3 +1,4 @@
+// apps/web/components/layout/DoctorShell.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
@@ -17,8 +18,6 @@ import {
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 
 import type { Patient, Visit } from '@dms/types';
 import { useAuth } from '@/src/hooks/useAuth';
@@ -26,6 +25,7 @@ import {
   useGetPatientsQuery,
   useGetPatientQueueQuery,
   useGetMeQuery,
+  useClinicRealtimeQuery, // ✅ add
   type ErrorResponse,
 } from '@/src/store/api';
 import LogoutButton from '@/components/auth/LogoutButton';
@@ -94,11 +94,11 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
 
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
+  // ✅ IMPORTANT: doctor panel now subscribes to WS invalidation too
+  useClinicRealtimeQuery(undefined, { skip: !canUseApi });
+
   const { data: me } = useGetMeQuery(undefined, { skip: !canUseApi });
 
-  /**
-   * ✅ CLINIC-WIDE QUEUE (NOT DOCTOR-SPECIFIC)
-   */
   const {
     data: queueData,
     isLoading: queueLoading,
@@ -121,9 +121,7 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
     };
   }, [auth.userId, me?.doctorProfile?.fullName, me?.displayName]);
 
-  /**
-   * 🔍 PATIENT SEARCH (UNCHANGED)
-   */
+  // 🔍 search unchanged
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -229,10 +227,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
       nav={{ title: 'Manage', items: doctorNav }}
       header={{
         title: "Doctor's Panel",
-
-        /**
-         * ✅ SEARCH RESTORED
-         */
         centerSlot: (
           <form
             className="relative flex w-full max-w-2xl items-center gap-2 rounded-full border bg-white py-1 pl-2 pr-1"
@@ -286,10 +280,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
             )}
           </form>
         ),
-
-        /**
-         * ✅ CLINIC-WIDE QUEUE COUNT
-         */
         rightSlot: (
           <div className="flex h-12 items-center gap-3 rounded-xl bg-gray-50 px-4">
             <Users className="h-5 w-5 text-gray-700" />

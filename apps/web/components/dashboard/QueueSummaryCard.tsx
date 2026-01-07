@@ -1,10 +1,13 @@
+// apps/web/components/dashboard/QueueSummaryCard.tsx
 'use client';
 
-import { useMemo } from 'react';
+import * as React from 'react';
 import { Card } from '@/components/ui/card';
-import { useGetDailyReportQuery } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
 import { clinicDateISO } from '@/src/lib/clinicTime';
+import { useGetPatientQueueQuery } from '@/src/store/api';
+
+import type { PatientQueueItem } from '@dms/types';
 
 function getTodayIso(): string {
   return clinicDateISO(new Date());
@@ -17,26 +20,26 @@ type QueueSummaryCardProps = {
 export default function QueueSummaryCard({ date }: QueueSummaryCardProps) {
   const auth = useAuth();
   const effectiveDate = date ?? getTodayIso();
-
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
-  const {
-    data: report,
-    isLoading,
-    isFetching,
-    isError,
-  } = useGetDailyReportQuery(effectiveDate, {
-    skip: !canUseApi,
-  });
+  // ✅ same cache as DoctorQueueCard (and dashboard patients list, if you switch it too)
+  const { data, isLoading, isFetching, isError } = useGetPatientQueueQuery(
+    { date: effectiveDate },
+    { skip: !canUseApi },
+  );
 
-  const { completed, onChair, waiting, total } = useMemo(() => {
-    if (!report) {
-      return { completed: 0, onChair: 0, waiting: 0, total: 0 };
+  const items = (data?.items ?? []) as PatientQueueItem[];
+
+  const { completed, onChair, waiting, total } = React.useMemo(() => {
+    let queued = 0;
+    let inProgress = 0;
+    let done = 0;
+
+    for (const v of items) {
+      if (v.status === 'QUEUED') queued += 1;
+      else if (v.status === 'IN_PROGRESS') inProgress += 1;
+      else if (v.status === 'DONE') done += 1;
     }
-
-    const queued = report.visitCountsByStatus.QUEUED ?? 0;
-    const inProgress = report.visitCountsByStatus.IN_PROGRESS ?? 0;
-    const done = report.visitCountsByStatus.DONE ?? 0;
 
     return {
       completed: done,
@@ -44,7 +47,7 @@ export default function QueueSummaryCard({ date }: QueueSummaryCardProps) {
       waiting: queued,
       total: queued + inProgress + done,
     };
-  }, [report]);
+  }, [items]);
 
   const showDots = isLoading || isFetching;
   const display = (value: number) => (showDots ? '…' : value);

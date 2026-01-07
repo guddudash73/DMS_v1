@@ -1,9 +1,11 @@
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import React from 'react';
 import type { RxLineType, Visit } from '@dms/types';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { PrescriptionPreview } from './PrescriptionPreview';
 import { PrescriptionPrintSheet } from './PrescriptionPrintSheet';
 import { MedicinesEditor } from './MedicinesEditor';
@@ -41,8 +43,7 @@ import { PaginationControl } from '@/components/ui/pagination-control';
 import { Calendar as CalendarIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
-import { motion } from 'framer-motion';
-import { clinicDateISO, clinicDateISOFromMs } from '@/src/lib/clinicTime';
+import { clinicDateISO, clinicDateISOFromMs, formatClinicDateShort } from '@/src/lib/clinicTime';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
@@ -63,24 +64,47 @@ type Props = {
   onRevisionModeChange?: (enabled: boolean) => void;
 };
 
+const DASHBOARD_PATH = '/doctor';
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
 
-function getString(obj: unknown, key: string): string | undefined {
-  if (!isRecord(obj)) return undefined;
-  const v = obj[key];
-  return typeof v === 'string' ? v : undefined;
+function safeParseDate(input: unknown): Date | null {
+  if (!input) return null;
+  if (input instanceof Date) return Number.isFinite(input.getTime()) ? input : null;
+
+  if (typeof input === 'number') {
+    const d = new Date(input);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+
+  if (typeof input === 'string') {
+    const s = input.trim();
+    if (!s) return null;
+    const d = new Date(s);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+
+  return null;
 }
 
-function getNumber(obj: unknown, key: string): number | undefined {
-  if (!isRecord(obj)) return undefined;
-  const v = obj[key];
-  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+function calcAgeYears(dob: Date, at: Date): number {
+  let age = at.getFullYear() - dob.getFullYear();
+  const m = at.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && at.getDate() < dob.getDate())) age -= 1;
+  return age < 0 ? 0 : age;
 }
 
-function toISODate(d: Date): string {
-  return clinicDateISO(d);
+function looksLikeDoctorIdLabel(name?: string) {
+  if (!name) return true;
+  const s = name.trim();
+  if (!s) return true;
+
+  if (/^Doctor\s*\(.+\)$/i.test(s)) return true;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
+
+  return false;
 }
 
 function lineToText(line: RxLineType): string {
@@ -119,7 +143,6 @@ function MedicinesReadOnly({ lines }: { lines: RxLineType[] }) {
         <TableBody>
           {lines.map((l, idx) => {
             const rec: Record<string, unknown> = isRecord(l) ? l : {};
-
             const idVal = rec['id'];
             const rxLineIdVal = rec['rxLineId'];
 
@@ -143,46 +166,6 @@ function MedicinesReadOnly({ lines }: { lines: RxLineType[] }) {
   );
 }
 
-function safeParseDate(input: unknown): Date | null {
-  if (!input) return null;
-  if (input instanceof Date) return Number.isFinite(input.getTime()) ? input : null;
-
-  if (typeof input === 'number') {
-    const d = new Date(input);
-    return Number.isFinite(d.getTime()) ? d : null;
-  }
-
-  if (typeof input === 'string') {
-    const s = input.trim();
-    if (!s) return null;
-    const d = new Date(s);
-    return Number.isFinite(d.getTime()) ? d : null;
-  }
-
-  return null;
-}
-
-function calcAgeYears(dob: Date, at: Date): number {
-  let age = at.getFullYear() - dob.getFullYear();
-  const m = at.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && at.getDate() < dob.getDate())) age -= 1;
-  return age < 0 ? 0 : age;
-}
-
-/** If doctorName looks like "Doctor (uuid)" or raw uuid, treat it as not-a-name. */
-function looksLikeDoctorIdLabel(name?: string) {
-  if (!name) return true;
-  const s = name.trim();
-  if (!s) return true;
-
-  if (/^Doctor\s*\(.+\)$/i.test(s)) return true;
-
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
-
-  return false;
-}
-
-/** ✅ Quick-look dialog for prescription */
 function VisitPrescriptionQuickLookDialog(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -218,7 +201,7 @@ function VisitPrescriptionQuickLookDialog(props: {
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !open || !patientId });
 
   const visitCreatedAtDate = useMemo(() => {
-    const createdAt = isRecord(visitQuery.data) ? visitQuery.data.createdAt : undefined;
+    const createdAt = isRecord(visitQuery.data) ? (visitQuery.data as any).createdAt : undefined;
     return safeParseDate(createdAt);
   }, [visitQuery.data]);
 
@@ -281,7 +264,6 @@ function VisitPrescriptionQuickLookDialog(props: {
   );
 }
 
-/** ✅ Quick-look dialog for X-rays */
 function VisitXrayQuickLookDialog(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -302,6 +284,44 @@ function VisitXrayQuickLookDialog(props: {
   );
 }
 
+// Grouping helpers
+function anchorIdFromVisit(v: Visit): string | undefined {
+  const anyV = v as any;
+  const raw =
+    (typeof anyV?.anchorVisitId === 'string' && anyV.anchorVisitId) ||
+    (typeof anyV?.anchorId === 'string' && anyV.anchorId) ||
+    undefined;
+  return raw || undefined;
+}
+
+function isZeroBilledVisit(v: Visit): boolean {
+  const anyV = v as any;
+  return Boolean(anyV?.zeroBilled);
+}
+
+function typeBadgeClass(kind: 'NEW' | 'FOLLOWUP') {
+  if (kind === 'NEW') return 'bg-sky-100 text-sky-700 border-sky-200';
+  return 'bg-violet-100 text-violet-700 border-violet-200';
+}
+
+function zeroBilledBadgeClass() {
+  return 'bg-rose-100 text-rose-700 border-rose-200';
+}
+
+function stageLabel(status?: Visit['status']) {
+  if (status === 'QUEUED') return 'Waiting';
+  if (status === 'IN_PROGRESS') return 'In Progress';
+  if (status === 'DONE') return 'Done';
+  return '—';
+}
+
+function stageBadgeClass(status?: Visit['status']) {
+  if (status === 'QUEUED') return 'bg-pink-100 text-pink-700 border-pink-200';
+  if (status === 'IN_PROGRESS') return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+  if (status === 'DONE') return 'bg-green-100 text-green-700 border-green-200';
+  return 'bg-gray-100 text-gray-700 border-gray-200';
+}
+
 export function PrescriptionWorkspace(props: Props) {
   const {
     visitId,
@@ -318,7 +338,7 @@ export function PrescriptionWorkspace(props: Props) {
 
   const router = useRouter();
 
-  // ✅ /me: doctor details
+  // /me: doctor details
   const meQuery = useGetMeQuery();
 
   const doctorNameFromMe =
@@ -326,30 +346,28 @@ export function PrescriptionWorkspace(props: Props) {
 
   const doctorRegdNoFromMe = meQuery.data?.doctorProfile?.registrationNumber;
 
-  // ✅ Doctor name with loading placeholder behavior
   const resolvedDoctorName = useMemo(() => {
     if (doctorName && !looksLikeDoctorIdLabel(doctorName)) return doctorName;
     if (doctorNameFromMe && !looksLikeDoctorIdLabel(doctorNameFromMe)) return doctorNameFromMe;
     return undefined;
   }, [doctorName, doctorNameFromMe]);
 
-  // ✅ Doctor reg label with loading placeholder behavior
   const resolvedDoctorRegdLabel = useMemo(() => {
     if (doctorRegdNoFromMe) return `B.D.S Regd. - ${doctorRegdNoFromMe}`;
     return undefined;
   }, [doctorRegdNoFromMe]);
 
-  // ✅ Fetch visit + patient for createdAt + dob/sex
+  // Fetch visit + patient for createdAt + dob/sex
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
   const visitCreatedAtDate = useMemo(() => {
-    const createdAt = isRecord(visitQuery.data) ? visitQuery.data.createdAt : undefined;
+    const createdAt = isRecord(visitQuery.data) ? (visitQuery.data as any).createdAt : undefined;
     return safeParseDate(createdAt);
   }, [visitQuery.data]);
 
   const computedVisitDateLabel = useMemo(() => {
-    if (visitCreatedAtDate) return `Visit: ${toISODate(visitCreatedAtDate)}`;
+    if (visitCreatedAtDate) return `Visit: ${clinicDateISO(visitCreatedAtDate)}`;
     return visitDateLabelFromParent ?? '';
   }, [visitCreatedAtDate, visitDateLabelFromParent]);
 
@@ -375,9 +393,7 @@ export function PrescriptionWorkspace(props: Props) {
     return calcAgeYears(dob, at);
   }, [patientQuery.data, visitCreatedAtDate]);
 
-  // ---------------------------
   // Prescription editor state
-  // ---------------------------
   const [lines, setLines] = useState<RxLineType[]>([]);
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
@@ -392,7 +408,6 @@ export function PrescriptionWorkspace(props: Props) {
   const [startRevision, startRevisionState] = useStartVisitRxRevisionMutation();
   const [updateRxById] = useUpdateRxByIdMutation();
 
-  // Revision mode
   const [isRevisionMode, setIsRevisionMode] = useState(false);
   const isDone = visitStatus === 'DONE';
   const canEdit = !isDone || isRevisionMode;
@@ -402,9 +417,7 @@ export function PrescriptionWorkspace(props: Props) {
     onRevisionModeChange?.(enabled);
   };
 
-  // ---------------------------
   // Rx Preset Import
-  // ---------------------------
   const [importOpen, setImportOpen] = useState(false);
 
   const handleImportPreset = (presetLines: RxLineType[]) => {
@@ -494,17 +507,37 @@ export function PrescriptionWorkspace(props: Props) {
     document.body.classList.add('print-rx');
 
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        window.print();
-      });
+      requestAnimationFrame(() => window.print());
     });
   };
 
-  // ---------------------------
-  // Visits section
-  // ---------------------------
+  const canManualSave = canEdit && hydratedRef.current && lines.length > 0;
+
+  const saveAndExit = async () => {
+    if (!canManualSave) return;
+
+    setState('saving');
+    try {
+      if (visitStatus === 'DONE') {
+        if (!activeRxId) throw new Error('Missing rxId');
+        await updateRxById({ rxId: activeRxId, lines }).unwrap();
+      } else {
+        const res = await upsert({ visitId, lines }).unwrap();
+        setActiveRxId(res.rxId);
+      }
+
+      lastHash.current = JSON.stringify(lines);
+      setState('saved');
+
+      router.push(DASHBOARD_PATH);
+    } catch {
+      setState('error');
+    }
+  };
+
+  // Visits (bottom)
   const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', { skip: !patientId });
-  const allVisitsRaw = visitsQuery.data?.items ?? [];
+  const allVisitsRaw = (visitsQuery.data?.items ?? []) as Visit[];
 
   const allVisits = useMemo(() => {
     return [...allVisitsRaw]
@@ -525,16 +558,60 @@ export function PrescriptionWorkspace(props: Props) {
     return allVisits.filter((v) => v.visitDate === selectedDateStr);
   }, [allVisits, selectedDateStr]);
 
+  const visitById = useMemo(() => {
+    const map = new Map<string, Visit>();
+    for (const v of allVisits) map.set(v.visitId, v);
+    return map;
+  }, [allVisits]);
+
+  const groups = useMemo(() => {
+    type Group = { anchor: Visit; followups: Visit[] };
+
+    const anchorMap = new Map<string, Group>();
+    const orphanFollowups: Visit[] = [];
+
+    for (const v of filteredVisits) {
+      const aId = anchorIdFromVisit(v);
+      if (!aId) anchorMap.set(v.visitId, { anchor: v, followups: [] });
+    }
+
+    for (const v of filteredVisits) {
+      const aId = anchorIdFromVisit(v);
+      if (!aId) continue;
+
+      const g = anchorMap.get(aId);
+      if (g) g.followups.push(v);
+      else orphanFollowups.push(v);
+    }
+
+    for (const g of anchorMap.values()) {
+      g.followups.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
+    }
+
+    const anchorsOrdered = Array.from(anchorMap.values()).sort(
+      (a, b) =>
+        (b.anchor.updatedAt ?? b.anchor.createdAt ?? 0) -
+        (a.anchor.updatedAt ?? a.anchor.createdAt ?? 0),
+    );
+
+    const orphanGroups = orphanFollowups
+      .sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0))
+      .map((followup) => ({ followup }));
+
+    return { anchorsOrdered, orphanGroups };
+  }, [filteredVisits]);
+
   const PAGE_SIZE = 2;
   const [page, setPage] = useState(1);
-  useEffect(() => setPage(1), [selectedDateStr]);
+  useEffect(() => setPage(1), [selectedDateStr, allVisitsRaw]);
 
-  const pageItems = useMemo(() => {
-    const start = (page - 1) * PAGE_SIZE;
-    return filteredVisits.slice(start, start + PAGE_SIZE);
-  }, [filteredVisits, page]);
+  const totalAnchorPages = Math.max(1, Math.ceil(groups.anchorsOrdered.length / PAGE_SIZE));
+  const pageSafe = Math.min(page, totalAnchorPages);
 
-  const [visitsExpanded, setVisitsExpanded] = useState(false);
+  const pageAnchors = useMemo(() => {
+    const start = (pageSafe - 1) * PAGE_SIZE;
+    return groups.anchorsOrdered.slice(start, start + PAGE_SIZE);
+  }, [groups.anchorsOrdered, pageSafe]);
 
   const dateLabel = selectedDateStr ?? 'Pick a date';
 
@@ -542,7 +619,6 @@ export function PrescriptionWorkspace(props: Props) {
     router.push(`/doctor/visits/${v.visitId}`);
   };
 
-  // Quick look (modal) state
   const [rxQuickOpen, setRxQuickOpen] = useState(false);
   const [xrayQuickOpen, setXrayQuickOpen] = useState(false);
   const [quickVisitId, setQuickVisitId] = useState<string | null>(null);
@@ -557,22 +633,59 @@ export function PrescriptionWorkspace(props: Props) {
     setXrayQuickOpen(true);
   };
 
+  const renderReasonCell = (visit: Visit, opts: { kind: 'NEW' | 'FOLLOWUP'; anchor?: Visit }) => {
+    let followupCount = 0;
+    if (opts.kind === 'NEW') {
+      const anchorId = visit.visitId;
+      for (const v of allVisits) {
+        if (anchorIdFromVisit(v) === anchorId) followupCount += 1;
+      }
+    }
+
+    const followupOfText =
+      opts.kind === 'FOLLOWUP'
+        ? (() => {
+            const a =
+              opts.anchor ??
+              (anchorIdFromVisit(visit) ? visitById.get(anchorIdFromVisit(visit)!) : undefined);
+
+            const aReason = (a?.reason || '—').toString();
+            const aDate = a?.visitDate ? formatClinicDateShort(a.visitDate) : '—';
+            return `Follow-up of: ${aReason} • ${aDate}`;
+          })()
+        : null;
+
+    return (
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold text-gray-900">
+          {visit.reason?.trim() ? visit.reason : '—'}
+        </div>
+
+        <div className="mt-0.5 text-[11px] text-gray-500">
+          {opts.kind === 'NEW' ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="rounded-md bg-gray-50 px-2 py-0.5 text-gray-600 shadow-[0_0_0_1px_rgba(0,0,0,0.04)]">
+                {followupCount} follow-up{followupCount === 1 ? '' : 's'}
+              </span>
+            </span>
+          ) : (
+            <span className="truncate">{followupOfText}</span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const hasRows = pageAnchors.length > 0 || groups.orphanGroups.length > 0;
+
   return (
     <div className="relative w-full min-w-0">
-      <motion.div
-        className="grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-10"
-        animate={
-          visitsExpanded
-            ? { opacity: 0.25, y: -6, filter: 'blur(1px)' }
-            : { opacity: 1, y: 0, filter: 'blur(0px)' }
-        }
-        transition={{ duration: 0.25, ease: 'easeOut' }}
-        style={{ pointerEvents: visitsExpanded ? 'none' : 'auto' }}
-      >
+      <div className="grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-10">
         {/* Prescription */}
         <div className="min-w-0 rounded-2xl bg-white p-4 lg:col-span-4">
           <div className="flex items-center justify-between">
             <div className="text-lg font-semibold text-gray-900">Prescription</div>
+
             <div className="flex items-center gap-2">
               <div className="text-[11px] text-gray-500">{statusText}</div>
 
@@ -595,6 +708,16 @@ export function PrescriptionWorkspace(props: Props) {
                   Start Revision
                 </Button>
               ) : null}
+
+              <Button
+                variant="outline"
+                className="rounded-xl"
+                onClick={saveAndExit}
+                disabled={!canManualSave || state === 'saving'}
+                title={!canManualSave ? 'Add medicines to save' : 'Save prescription and return'}
+              >
+                Save
+              </Button>
 
               <Button
                 variant="default"
@@ -674,7 +797,7 @@ export function PrescriptionWorkspace(props: Props) {
           </div>
         </Card>
 
-        {/* Bottom Visits section */}
+        {/* Bottom Visits section (NO View All button anymore) */}
         <Card className="w-full rounded-2xl border bg-white p-4 lg:col-span-10">
           <div className="flex items-center justify-between gap-3">
             <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
@@ -717,16 +840,6 @@ export function PrescriptionWorkspace(props: Props) {
                 ) : null}
               </PopoverContent>
             </Popover>
-
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-xl"
-              onClick={() => setVisitsExpanded(true)}
-              disabled={!patientId}
-            >
-              View All
-            </Button>
           </div>
 
           <div className="mt-4 overflow-hidden rounded-2xl border">
@@ -735,7 +848,8 @@ export function PrescriptionWorkspace(props: Props) {
                 <TableRow className="bg-gray-50">
                   <TableHead className="font-semibold text-gray-600">Visit Date</TableHead>
                   <TableHead className="font-semibold text-gray-600">Reason</TableHead>
-                  <TableHead className="font-semibold text-gray-600">Status</TableHead>
+                  <TableHead className="font-semibold text-gray-600">Type</TableHead>
+                  <TableHead className="font-semibold text-gray-600">Stage</TableHead>
                   <TableHead className="text-right font-semibold text-gray-600">Actions</TableHead>
                 </TableRow>
               </TableHeader>
@@ -743,77 +857,288 @@ export function PrescriptionWorkspace(props: Props) {
               <TableBody>
                 {!patientId ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-10 text-center text-sm text-gray-500">
+                    <TableCell colSpan={5} className="py-10 text-center text-sm text-gray-500">
                       Loading patient context…
                     </TableCell>
                   </TableRow>
                 ) : visitsQuery.isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-10 text-center text-sm text-gray-500">
+                    <TableCell colSpan={5} className="py-10 text-center text-sm text-gray-500">
                       Loading visits…
                     </TableCell>
                   </TableRow>
-                ) : pageItems.length === 0 ? (
+                ) : !hasRows ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="py-10 text-center text-sm text-gray-500">
+                    <TableCell colSpan={5} className="py-10 text-center text-sm text-gray-500">
                       No visits found{selectedDateStr ? ` for ${selectedDateStr}` : ''}.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  pageItems.map((v) => (
-                    <TableRow key={v.visitId} className="hover:bg-gray-50/60">
-                      <TableCell className="font-medium">{v.visitDate}</TableCell>
-                      <TableCell className="text-gray-800">{v.reason ?? '—'}</TableCell>
-                      <TableCell className="text-gray-800">{v.status ?? '—'}</TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex justify-end gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="h-8 rounded-xl px-3 text-xs"
-                            onClick={() => openRxQuick(v.visitId)}
-                          >
-                            View Prescription
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="h-8 rounded-xl px-3 text-xs"
-                            onClick={() => openXrayQuick(v.visitId)}
-                          >
-                            View X-rays
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="h-8 rounded-xl px-3 text-xs"
-                            onClick={() => openVisit(v)}
-                          >
-                            View
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  <>
+                    {pageAnchors.map((g) => {
+                      const anchor = g.anchor;
+                      const followups = g.followups;
+
+                      return (
+                        <React.Fragment key={anchor.visitId}>
+                          <TableRow className="hover:bg-gray-50/60">
+                            <TableCell className="px-6 py-4 align-top text-sm font-medium text-gray-900">
+                              {formatClinicDateShort(anchor.visitDate)}
+                            </TableCell>
+
+                            <TableCell className="px-6 py-4 align-top">
+                              {renderReasonCell(anchor, { kind: 'NEW' })}
+                            </TableCell>
+
+                            <TableCell className="px-6 py-4 align-top">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge
+                                  variant="outline"
+                                  className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
+                                    'NEW',
+                                  )}`}
+                                >
+                                  NEW
+                                </Badge>
+
+                                {isZeroBilledVisit(anchor) ? (
+                                  <Badge
+                                    variant="outline"
+                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
+                                  >
+                                    ZERO BILLED
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            </TableCell>
+
+                            <TableCell className="px-6 py-4 align-top">
+                              <Badge
+                                variant="outline"
+                                className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
+                                  anchor.status,
+                                )}`}
+                              >
+                                {stageLabel(anchor.status)}
+                              </Badge>
+                            </TableCell>
+
+                            <TableCell className="px-6 py-4 align-top text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-8 rounded-xl px-3 text-xs"
+                                  onClick={() => openRxQuick(anchor.visitId)}
+                                >
+                                  View Rx
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-8 rounded-xl px-3 text-xs"
+                                  onClick={() => openXrayQuick(anchor.visitId)}
+                                >
+                                  X-rays
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-8 rounded-xl px-3 text-xs"
+                                  onClick={() => openVisit(anchor)}
+                                >
+                                  View
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+
+                          {followups.map((f) => (
+                            <TableRow key={f.visitId} className="hover:bg-gray-50/60">
+                              <TableCell className="px-6 py-2 align-top">
+                                <div className="flex items-center gap-3">
+                                  <div className="ml-1 h-7 w-[2px] rounded-full bg-gray-200" />
+                                  <div className="text-sm text-gray-900">
+                                    {formatClinicDateShort(f.visitDate)}
+                                  </div>
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="px-6 py-2 align-top">
+                                <div className="flex items-start gap-3">
+                                  <div className="ml-1 h-7 w-[2px] rounded-full bg-gray-200" />
+                                  <div className="min-w-0 flex-1">
+                                    {renderReasonCell(f, { kind: 'FOLLOWUP', anchor })}
+                                  </div>
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="px-6 py-2 align-top">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge
+                                    variant="outline"
+                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
+                                      'FOLLOWUP',
+                                    )}`}
+                                  >
+                                    FOLLOW UP
+                                  </Badge>
+
+                                  {isZeroBilledVisit(f) ? (
+                                    <Badge
+                                      variant="outline"
+                                      className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
+                                    >
+                                      ZERO BILLED
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="px-6 py-2 align-top">
+                                <Badge
+                                  variant="outline"
+                                  className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
+                                    f.status,
+                                  )}`}
+                                >
+                                  {stageLabel(f.status)}
+                                </Badge>
+                              </TableCell>
+
+                              <TableCell className="px-6 py-2 align-top text-right">
+                                <div className="flex justify-end gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-8 rounded-xl px-3 text-xs"
+                                    onClick={() => openRxQuick(f.visitId)}
+                                  >
+                                    View Rx
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-8 rounded-xl px-3 text-xs"
+                                    onClick={() => openXrayQuick(f.visitId)}
+                                  >
+                                    X-rays
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-8 rounded-xl px-3 text-xs"
+                                    onClick={() => openVisit(f)}
+                                  >
+                                    View
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </React.Fragment>
+                      );
+                    })}
+
+                    {groups.orphanGroups.length
+                      ? groups.orphanGroups.map(({ followup }) => {
+                          const aId = anchorIdFromVisit(followup);
+                          const a = aId ? visitById.get(aId) : undefined;
+
+                          return (
+                            <TableRow key={followup.visitId} className="hover:bg-gray-50/60">
+                              <TableCell className="px-6 py-3 align-top text-sm text-gray-900">
+                                {formatClinicDateShort(followup.visitDate)}
+                              </TableCell>
+
+                              <TableCell className="px-6 py-3 align-top">
+                                {renderReasonCell(followup, { kind: 'FOLLOWUP', anchor: a })}
+                              </TableCell>
+
+                              <TableCell className="px-6 py-3 align-top">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <Badge
+                                    variant="outline"
+                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
+                                      'FOLLOWUP',
+                                    )}`}
+                                  >
+                                    FOLLOW UP
+                                  </Badge>
+
+                                  {isZeroBilledVisit(followup) ? (
+                                    <Badge
+                                      variant="outline"
+                                      className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
+                                    >
+                                      ZERO BILLED
+                                    </Badge>
+                                  ) : null}
+                                </div>
+                              </TableCell>
+
+                              <TableCell className="px-6 py-3 align-top">
+                                <Badge
+                                  variant="outline"
+                                  className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
+                                    followup.status,
+                                  )}`}
+                                >
+                                  {stageLabel(followup.status)}
+                                </Badge>
+                              </TableCell>
+
+                              <TableCell className="px-6 py-3 align-top text-right">
+                                <div className="flex justify-end gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-8 rounded-xl px-3 text-xs"
+                                    onClick={() => openRxQuick(followup.visitId)}
+                                  >
+                                    View Rx
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-8 rounded-xl px-3 text-xs"
+                                    onClick={() => openXrayQuick(followup.visitId)}
+                                  >
+                                    X-rays
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    className="h-8 rounded-xl px-3 text-xs"
+                                    onClick={() => openVisit(followup)}
+                                  >
+                                    View
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      : null}
+                  </>
                 )}
               </TableBody>
             </Table>
 
-            {filteredVisits.length > PAGE_SIZE ? (
+            {groups.anchorsOrdered.length > PAGE_SIZE ? (
               <div className="border-t bg-white px-3 py-2">
                 <PaginationControl
-                  page={page}
+                  page={pageSafe}
                   pageSize={PAGE_SIZE}
-                  totalItems={filteredVisits.length}
+                  totalItems={groups.anchorsOrdered.length}
                   onPageChange={setPage}
                 />
               </div>
             ) : null}
           </div>
         </Card>
-      </motion.div>
+      </div>
 
-      {/* ✅ Rx Preset Import Dialog */}
       <RxPresetImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
@@ -823,7 +1148,6 @@ export function PrescriptionWorkspace(props: Props) {
         onImport={(importedLines) => handleImportPreset(importedLines)}
       />
 
-      {/* Quick look dialogs */}
       <VisitPrescriptionQuickLookDialog
         open={rxQuickOpen}
         onOpenChange={(o) => setRxQuickOpen(o)}
@@ -842,30 +1166,6 @@ export function PrescriptionWorkspace(props: Props) {
         onOpenChange={(o) => setXrayQuickOpen(o)}
         visitId={quickVisitId}
       />
-
-      {/* NOTE: visitsExpanded is currently only used to visually blur/disable the main layout.
-         If you intend to show a full “View All Visits” overlay, render it here and call
-         setVisitsExpanded(false) to close it. */}
-      {visitsExpanded ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-3xl rounded-2xl bg-white p-4 shadow-xl">
-            <div className="flex items-center justify-between">
-              <div className="text-lg font-semibold">All Visits</div>
-              <Button
-                variant="outline"
-                className="rounded-xl"
-                onClick={() => setVisitsExpanded(false)}
-              >
-                Close
-              </Button>
-            </div>
-            <div className="mt-3 text-sm text-gray-600">
-              This overlay is a placeholder. If you already have a “View All” UI elsewhere, you can
-              remove this block.
-            </div>
-          </div>
-        </div>
-      ) : null}
     </div>
   );
 }

@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/visits/day/[date]/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -17,13 +16,17 @@ import { useAuth } from '@/src/hooks/useAuth';
 import { formatClinicTimeFromMs } from '@/src/lib/clinicTime';
 
 type VisitStatus = 'QUEUED' | 'IN_PROGRESS' | 'DONE';
-type PatientTag = 'N' | 'F' | 'Z' | 'O';
+type PatientTag = 'N' | 'F' | 'O';
 
 const TAG_META: Record<PatientTag, { label: string; className: string }> = {
   N: { label: 'N', className: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' },
   F: { label: 'F', className: 'bg-pink-50 text-pink-700 ring-1 ring-pink-200' },
-  Z: { label: 'Z', className: 'bg-amber-50 text-amber-800 ring-1 ring-amber-200' },
   O: { label: 'O', className: 'bg-slate-50 text-slate-700 ring-1 ring-slate-200' },
+};
+
+const ZERO_BILLED_META = {
+  label: 'Z',
+  className: 'bg-amber-50 text-amber-800 ring-1 ring-amber-200',
 };
 
 const STATUS_LABEL: Record<VisitStatus, string> = {
@@ -49,12 +52,22 @@ function formatTime(ms?: number) {
   return formatClinicTimeFromMs(ms);
 }
 
+function normalizeTag(raw: unknown): PatientTag {
+  const s = String(raw ?? '')
+    .trim()
+    .toUpperCase();
+  if (s === 'N') return 'N';
+  if (s === 'F') return 'F';
+  return 'O';
+}
+
 type Row = {
   visitId: string;
   patientName: string;
   doctorName: string;
   status: VisitStatus;
   tag: PatientTag;
+  zeroBilled?: boolean;
   createdAt?: number;
   billingAmount?: number;
 };
@@ -65,6 +78,7 @@ type BreakdownItem = {
   patientName: string;
   status: string;
   tag?: string;
+  zeroBilled?: boolean;
   createdAt?: number;
   billingAmount?: number;
   doctorName?: string;
@@ -134,7 +148,8 @@ export default function VisitsByDayPage() {
       patientName: it.patientName ?? '—',
       doctorName: it.doctorName ?? 'Clinic',
       status: (it.status as VisitStatus) ?? 'QUEUED',
-      tag: ((it.tag ?? 'O') as PatientTag) ?? 'O',
+      tag: normalizeTag(it.tag),
+      zeroBilled: it.zeroBilled === true ? true : undefined,
       createdAt: it.createdAt,
       billingAmount: it.billingAmount,
     }));
@@ -302,6 +317,7 @@ export default function VisitsByDayPage() {
                                       <div className="truncate text-[14px] font-semibold text-gray-900">
                                         {r.patientName}
                                       </div>
+
                                       <Badge
                                         variant="secondary"
                                         className={cn(
@@ -311,6 +327,18 @@ export default function VisitsByDayPage() {
                                       >
                                         {tagMeta.label}
                                       </Badge>
+
+                                      {r.zeroBilled ? (
+                                        <Badge
+                                          variant="secondary"
+                                          className={cn(
+                                            'h-5 rounded-full px-2 text-[10px] font-semibold',
+                                            ZERO_BILLED_META.className,
+                                          )}
+                                        >
+                                          {ZERO_BILLED_META.label}
+                                        </Badge>
+                                      ) : null}
                                     </div>
 
                                     <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-gray-500">

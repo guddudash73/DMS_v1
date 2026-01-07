@@ -1,3 +1,4 @@
+// apps/api/src/repositories/billingRepository.ts
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import type { Billing, BillingCheckoutInput, Visit, VisitId } from '@dms/types';
 import { visitRepository } from './visitRepository';
@@ -159,8 +160,20 @@ export class DynamoDBBillingRepository implements BillingRepository {
       throw new DuplicateCheckoutError('Billing already exists for this visit');
     }
 
+    // ✅ Z rule: billing is disabled unless explicitly enabled
+    if (visit.zeroBilled === true && input.allowZeroBilled !== true) {
+      throw new BillingRuleViolationError(
+        'Billing is disabled for zero-billed (Z) visits. Enable billing to proceed.',
+      );
+    }
+
     const { billing, total } = computeTotals(visitId, input);
     const now = billing.createdAt;
+
+    // ✅ Hard enforcement: for all zero-billed visits, total must be 0 (<= 0)
+    if (visit.zeroBilled === true && total > 0) {
+      throw new BillingRuleViolationError('Zero-billed (Z) visits must have total = 0.');
+    }
 
     let followUpItem: TransactItem | undefined;
 

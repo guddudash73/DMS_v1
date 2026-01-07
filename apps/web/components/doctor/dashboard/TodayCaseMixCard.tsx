@@ -1,3 +1,4 @@
+// apps/web/components/dashboard/TodayCaseMixCard.tsx
 'use client';
 
 import { useMemo } from 'react';
@@ -18,16 +19,19 @@ function Row({
 }: {
   label: string;
   value: number;
-  dotClass: string;
+  dotClass?: string;
   showDots: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-4">
-        <span className={`h-4 w-4 rounded-full ${dotClass}`} />
-        <span className="text-base font-medium text-gray-900">{label}</span>
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex items-center gap-3 min-w-0">
+        {dotClass ? <span className={`h-3 w-3 rounded-lg ${dotClass}`} /> : null}
+        <span className="truncate text-sm font-medium text-gray-900">{label}</span>
       </div>
-      <span className="text-base font-semibold text-gray-900">{showDots ? '…' : value}</span>
+
+      <span className="shrink-0 text-sm font-semibold text-gray-900 tabular-nums">
+        {showDots ? '…' : value}
+      </span>
     </div>
   );
 }
@@ -36,7 +40,13 @@ type ClinicDailyVisitsBreakdownItem = {
   visitId: string;
   visitDate: string;
   status: 'QUEUED' | 'IN_PROGRESS' | 'DONE';
-  tag?: 'N' | 'F' | 'Z';
+
+  // ✅ tags are only N/F now
+  tag?: 'N' | 'F';
+
+  // ✅ zero-billed flag
+  zeroBilled?: boolean;
+
   reason?: string;
   billingAmount?: number;
   createdAt: number;
@@ -60,7 +70,6 @@ export default function TodayCaseMixCard() {
 
   const todayIso = getTodayIso();
 
-  // ✅ clinic-wide endpoint now
   const { data, isLoading, isFetching, isError } = useGetDailyVisitsBreakdownQuery(todayIso, {
     skip: !canUseApi,
   }) as {
@@ -70,38 +79,67 @@ export default function TodayCaseMixCard() {
     isError: boolean;
   };
 
-  const { n, f, z } = useMemo(() => {
+  const showDots = isLoading || isFetching;
+
+  const stats = useMemo(() => {
     const items: ClinicDailyVisitsBreakdownItem[] = data?.items ?? [];
+
     let newCount = 0;
     let followupCount = 0;
-    let zeroCount = 0;
+
+    // billing split is independent of N/F count
+    let zeroBilledCount = 0;
+    let billedCount = 0;
 
     for (const v of items) {
       if (v.tag === 'N') newCount += 1;
       else if (v.tag === 'F') followupCount += 1;
-      else if (v.tag === 'Z') zeroCount += 1;
+
+      if (v.zeroBilled === true) {
+        zeroBilledCount += 1;
+      } else {
+        // Count as "Billed" only if it has a positive billing amount.
+        const amt = typeof v.billingAmount === 'number' ? v.billingAmount : 0;
+        if (amt > 0) billedCount += 1;
+      }
     }
 
-    return { n: newCount, f: followupCount, z: zeroCount };
+    const visitorsTotal = newCount + followupCount;
+
+    // Safety clamp (should never go negative)
+    billedCount = Math.max(0, billedCount);
+
+    return {
+      n: newCount,
+      f: followupCount,
+      visitorsTotal,
+      billed: billedCount,
+      zeroBilled: zeroBilledCount,
+    };
   }, [data?.items]);
 
-  const showDots = isLoading || isFetching;
-
   return (
-    <Card className="w-full rounded-2xl border-none bg-white px-6 py-4 shadow-sm gap-2">
+    <Card className="w-full rounded-2xl border-none bg-white px-6 py-4 shadow-sm h-full flex justify-center">
       <h3 className="text-xl font-semibold tracking-wide text-gray-900">Today&apos;s Case Mix</h3>
       <p className="mt-1 text-xs text-gray-400">Counts are visits (not unique patients).</p>
 
-      <div className="mt-5 space-y-6">
-        <Row label="New" value={n} dotClass="bg-[#22c55e]" showDots={showDots} />
-        <Row label="Follow-up" value={f} dotClass="bg-[#60a5fa]" showDots={showDots} />
-        <Row label="Zero billed" value={z} dotClass="bg-[#cbd5e1]" showDots={showDots} />
+      {/* Keep the overall height/feel similar, but show the richer breakdown */}
+      <div className="mt-4 space-y-2.5">
+        <Row label="New (N)" value={stats.n} dotClass="bg-[#22c55e]" showDots={showDots} />
+        <Row label="Followup (F)" value={stats.f} dotClass="bg-[#60a5fa]" showDots={showDots} />
+
+        <div className="my-2 h-px w-full bg-gray-900/10" />
+
+        <Row label="Visitors total (N+F)" value={stats.visitorsTotal} showDots={showDots} />
+        <Row label="Billed" value={stats.billed} showDots={showDots} />
+        <Row label="Zero billed (Z)" value={stats.zeroBilled} showDots={showDots} />
       </div>
 
-      {!canUseApi && (
-        <p className="mt-4 text-xs text-gray-400">Please log in to view today&apos;s case mix.</p>
-      )}
-      {isError && <p className="mt-4 text-xs text-red-500">Couldn&apos;t load case mix.</p>}
+      {!canUseApi ? (
+        <p className="mt-3 text-xs text-gray-400">Please log in to view today&apos;s case mix.</p>
+      ) : null}
+
+      {isError ? <p className="mt-3 text-xs text-red-500">Couldn&apos;t load case mix.</p> : null}
     </Card>
   );
 }

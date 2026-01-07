@@ -1,4 +1,3 @@
-// packages/types/src/report.ts
 import { z } from 'zod';
 import { VisitStatus, VisitTag } from './visit';
 
@@ -42,9 +41,6 @@ export const DailyPatientSummarySeries = z.object({
 });
 export type DailyPatientSummarySeries = z.infer<typeof DailyPatientSummarySeries>;
 
-/**
- * ✅ Clinic-wide breakdown
- */
 export const DailyVisitsBreakdownQuery = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 });
@@ -55,6 +51,10 @@ export const ClinicVisitBreakdownItem = z.object({
   visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   status: VisitStatus,
   tag: VisitTag.optional(),
+
+  // ✅ new
+  zeroBilled: z.boolean().optional(),
+
   reason: z.string().optional(),
   billingAmount: z.number().nonnegative().optional(),
   createdAt: z.number().int().nonnegative(),

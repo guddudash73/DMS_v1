@@ -3,7 +3,8 @@ import {
   DynamoDBDocumentClient,
   PutCommand,
   DeleteCommand,
-  ScanCommand,
+  QueryCommand,
+  UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 
 const REGION = process.env.APP_REGION ?? process.env.AWS_REGION ?? 'us-east-1';
@@ -13,10 +14,11 @@ if (!CONNECTIONS_TABLE) {
   console.warn('[realtime] DDB_CONNECTIONS_TABLE not set');
 }
 
-const awsDynamoClient = new DynamoDBClient({
-  region: REGION,
-});
+// GSI for listing all WS connections efficiently
+const CONN_GSI_NAME = 'EntityTypeIndex';
+const CONN_ENTITY = 'WS_CONNECTION';
 
+const awsDynamoClient = new DynamoDBClient({ region: REGION });
 const docClient = DynamoDBDocumentClient.from(awsDynamoClient, {
   marshallOptions: { removeUndefinedValues: true },
 });
@@ -25,6 +27,11 @@ export interface ConnectionRecord {
   connectionId: string;
   userId?: string;
   createdAt: number;
+}
+
+const TTL_SECONDS = 3 * 60 * 60; // keep a bit > 2h max ws duration
+function ttlEpochSeconds() {
+  return Math.floor(Date.now() / 1000) + TTL_SECONDS;
 }
 
 export async function addConnection(record: ConnectionRecord): Promise<void> {
@@ -37,7 +44,15 @@ export async function addConnection(record: ConnectionRecord): Promise<void> {
         Item: {
           PK: `CONN#${record.connectionId}`,
           SK: 'META',
-          entityType: 'WS_CONNECTION',
+          entityType: CONN_ENTITY,
+
+          // GSI keys
+          GSI1PK: CONN_ENTITY,
+          GSI1SK: record.connectionId,
+
+          // TTL attribute (enable TTL on table to auto-expire)
+          ttl: ttlEpochSeconds(),
+
           ...record,
         },
       }),
@@ -70,16 +85,40 @@ export async function removeConnection(connectionId: string): Promise<void> {
   }
 }
 
+export async function touchConnectionTtl(connectionId: string): Promise<void> {
+  if (!CONNECTIONS_TABLE) return;
+
+  try {
+    await docClient.send(
+      new UpdateCommand({
+        TableName: CONNECTIONS_TABLE,
+        Key: {
+          PK: `CONN#${connectionId}`,
+          SK: 'META',
+        },
+        UpdateExpression: 'SET ttl = :ttl',
+        ExpressionAttributeValues: {
+          ':ttl': ttlEpochSeconds(),
+        },
+      }),
+    );
+  } catch (err) {
+    if (err instanceof ResourceNotFoundException) return;
+    throw err;
+  }
+}
+
 export async function listConnections(): Promise<ConnectionRecord[]> {
   if (!CONNECTIONS_TABLE) return [];
 
   try {
     const { Items } = await docClient.send(
-      new ScanCommand({
+      new QueryCommand({
         TableName: CONNECTIONS_TABLE,
-        FilterExpression: 'entityType = :t',
+        IndexName: CONN_GSI_NAME,
+        KeyConditionExpression: 'GSI1PK = :pk',
         ExpressionAttributeValues: {
-          ':t': 'WS_CONNECTION',
+          ':pk': CONN_ENTITY,
         },
       }),
     );

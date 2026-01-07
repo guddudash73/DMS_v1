@@ -18,6 +18,7 @@ type Props = {
   sdId?: string;
   opdNo?: string;
 
+  // kept for compatibility, but intentionally not used anymore
   doctorName?: string;
   doctorRegdLabel?: string;
 
@@ -94,8 +95,6 @@ export function PrescriptionPreview({
   patientSex,
   sdId,
   opdNo,
-  doctorName,
-  doctorRegdLabel,
   visitDateLabel,
   lines,
   receptionNotes,
@@ -198,13 +197,23 @@ export function PrescriptionPreview({
               {/* Doctor row */}
               <div className="shrink-0 px-6 pt-3">
                 <div className="flex items-start justify-between gap-6">
+                  {/* ✅ Left doctor (hard-coded) */}
                   <div className="min-w-0 flex flex-col">
                     <div className="text-[0.8rem] font-bold text-gray-900">
-                      {doctorName?.trim() ? doctorName : '—'}
+                      Dr. Soumendra Sarangi
                     </div>
+                    <div className="mt-0 text-[0.7rem] font-light text-gray-700">
+                      B.D.S. Regd. - 68
+                    </div>
+                  </div>
 
-                    <div className="mt-0 text-[0.7rem] font-semibold text-gray-700">
-                      {doctorRegdLabel?.trim() ? doctorRegdLabel : '—'}
+                  {/* ✅ Right doctor (replaces date area) */}
+                  <div className="min-w-0 flex flex-col items-end text-right">
+                    <div className="text-[0.8rem] font-bold text-gray-900">
+                      Dr. Vaishnovee Sarangi
+                    </div>
+                    <div className="mt-0 text-[0.7rem] font-light text-gray-700">
+                      B.D.S. Redg. - 3057
                     </div>
                   </div>
                 </div>

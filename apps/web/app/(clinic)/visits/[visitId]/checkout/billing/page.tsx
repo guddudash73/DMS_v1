@@ -1,3 +1,4 @@
+// apps/web/app/(clinic)/visits/[visitId]/checkout/billing/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -81,7 +82,16 @@ export default function VisitCheckoutBillingPage() {
     }
   }, [bill, isAdmin, visitId, router, billQuery.isLoading, billQuery.isFetching]);
 
-  const isZeroBilled = (visit?.tag ?? undefined) === 'Z';
+  // ✅ zero-billed is boolean now
+  const isZeroBilled = visit?.zeroBilled === true;
+
+  // ✅ Default: zero-billed visits have billing muted unless user enables
+  const [billingEnabledForZero, setBillingEnabledForZero] = React.useState(false);
+
+  React.useEffect(() => {
+    setBillingEnabledForZero(false);
+  }, [visitId]);
+
   const canCheckout = !!visitId && !!visit && visit.status === 'DONE';
 
   const [checkoutVisit, checkoutState] = useCheckoutVisitMutation();
@@ -113,8 +123,10 @@ export default function VisitCheckoutBillingPage() {
     setTaxAmount(bill.taxAmount ?? 0);
   }, [bill]);
 
+  const billingMuted = isZeroBilled && !billingEnabledForZero;
+
   const computed = React.useMemo(() => {
-    if (isZeroBilled) {
+    if (billingMuted) {
       return { subtotal: 0, discount: 0, tax: 0, total: 0, safeLines: [] as LineDraft[] };
     }
 
@@ -131,12 +143,11 @@ export default function VisitCheckoutBillingPage() {
     const total = Math.max(0, subtotal - Math.min(discount, subtotal) + tax);
 
     return { subtotal, discount, tax, total, safeLines };
-  }, [lines, discountAmount, taxAmount, isZeroBilled]);
+  }, [lines, discountAmount, taxAmount, billingMuted]);
 
   const patientName = patientQuery.data?.name;
   const patientPhone = patientQuery.data?.phone;
 
-  // ✅ Visit no longer guarantees doctorId. Keep legacy support.
   const legacyDoctorId =
     (visit as any)?.doctorId ??
     (visit as any)?.providerId ??
@@ -145,8 +156,6 @@ export default function VisitCheckoutBillingPage() {
 
   const doctorLabel = legacyDoctorId ? `Doctor (${legacyDoctorId})` : 'Doctor';
   const visitDateLabel = visit?.visitDate ? visit.visitDate : '—';
-
-  const billingMuted = isZeroBilled;
 
   const serviceRef = React.useRef<HTMLInputElement | null>(null);
   const amountRef = React.useRef<HTMLInputElement | null>(null);
@@ -219,6 +228,12 @@ export default function VisitCheckoutBillingPage() {
     requestAnimationFrame(() => serviceRef.current?.focus());
   };
 
+  const onEnableBilling = () => {
+    setBillingEnabledForZero(true);
+    toast.info('Billing enabled for this zero-billed visit.');
+    requestAnimationFrame(() => serviceRef.current?.focus());
+  };
+
   const onSave = async () => {
     if (!visit) return;
 
@@ -227,17 +242,27 @@ export default function VisitCheckoutBillingPage() {
       return;
     }
 
-    const payload: BillingCheckoutInput = {
-      items: computed.safeLines.length
-        ? computed.safeLines.map((l) => ({
-            description: l.description,
-            quantity: 1,
-            unitAmount: l.unitAmount,
-          }))
-        : [{ description: 'Consultation', quantity: 1, unitAmount: 0 }],
-      discountAmount: isZeroBilled ? 0 : computed.discount,
-      taxAmount: isZeroBilled ? 0 : computed.tax,
-    };
+    // ✅ If visit is zero-billed and billing is NOT enabled,
+    // Save should still work and create a 0 bill, then proceed to printing.
+    const payload: BillingCheckoutInput = billingMuted
+      ? {
+          items: [{ description: 'Zero billed', quantity: 1, unitAmount: 0 }],
+          discountAmount: 0,
+          taxAmount: 0,
+          allowZeroBilled: true,
+        }
+      : {
+          items: computed.safeLines.length
+            ? computed.safeLines.map((l) => ({
+                description: l.description,
+                quantity: 1,
+                unitAmount: l.unitAmount,
+              }))
+            : [{ description: 'Consultation', quantity: 1, unitAmount: 0 }],
+          discountAmount: computed.discount,
+          taxAmount: computed.tax,
+          ...(isZeroBilled ? { allowZeroBilled: true } : {}),
+        };
 
     try {
       await checkoutVisit({ visitId, input: payload }).unwrap();
@@ -254,18 +279,19 @@ export default function VisitCheckoutBillingPage() {
 
   if (bill && !isAdmin) return <div className="p-6 text-sm text-gray-600">Redirecting…</div>;
 
+  // ✅ Save should be enabled even when zero-billed & muted (it will create 0 bill)
+  const saveDisabled = !canCheckout || checkoutState.isLoading;
+
   return (
     <section className="p-4 2xl:p-8">
-      {/* ...rest unchanged... */}
-      {/* (Your existing JSX below is unchanged; only doctorLabel logic was fixed.) */}
-
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="text-lg font-semibold text-gray-900">
             {bill ? 'Edit Bill' : 'Billing'}
           </div>
           <div className="text-xs text-gray-500">
-            Visit ID: {visitId} · Tag: {visit?.tag ?? '—'} · Status: {visit?.status ?? '—'}
+            Visit ID: {visitId} · Tag: {visit?.tag ?? '—'} · Zero billed:{' '}
+            {isZeroBilled ? 'Yes' : 'No'} · Status: {visit?.status ?? '—'}
           </div>
         </div>
 
@@ -284,12 +310,39 @@ export default function VisitCheckoutBillingPage() {
             variant="default"
             className="rounded-xl bg-black text-white hover:bg-black/90"
             onClick={() => void onSave()}
-            disabled={!canCheckout || checkoutState.isLoading}
+            disabled={saveDisabled}
           >
             {checkoutState.isLoading ? 'Saving…' : bill ? 'Save changes' : 'Save'}
           </Button>
         </div>
       </div>
+
+      {isZeroBilled ? (
+        <Card className="mb-4 rounded-2xl border bg-white p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm text-gray-700">
+              <div className="font-semibold text-gray-900">Zero-billed (Z) visit</div>
+              <div className="mt-1 text-xs text-gray-600">
+                Billing is <span className="font-semibold">disabled by default</span>. Click “Save”
+                to continue with a ₹0 bill (normal flow). If you really want to add charges, click
+                “Enable billing”.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={onEnableBilling}
+                disabled={billingEnabledForZero}
+              >
+                {billingEnabledForZero ? 'Billing enabled' : 'Enable billing'}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
 
       <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-3">
         <Card className="rounded-2xl border bg-white p-4">
@@ -321,12 +374,6 @@ export default function VisitCheckoutBillingPage() {
               </span>
             ) : null}
           </div>
-
-          {isZeroBilled ? (
-            <div className="mt-2 text-xs text-gray-500">
-              Tag <span className="font-semibold">Z</span> → zero-billed visit. Billing is muted.
-            </div>
-          ) : null}
         </Card>
       </div>
 

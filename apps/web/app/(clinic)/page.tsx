@@ -1,3 +1,4 @@
+// apps/web/app/(clinic)/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -8,45 +9,36 @@ import PatientsPanel from '@/components/dashboard/PatientsPanel';
 import QueueSummaryCard from '@/components/dashboard/QueueSummaryCard';
 import DailyVisitsBreakdownPanel from '@/components/dashboard/DailyVisitsBreakdownPanel';
 
-import { useGetDailyVisitsBreakdownQuery } from '@/src/store/api';
+import { useGetPatientQueueQuery } from '@/src/store/api';
+import type { PatientQueueItem } from '@dms/types';
+import type { PatientsPanelItem } from '@/components/dashboard/PatientsPanel';
+
 import { useAuth } from '@/src/hooks/useAuth';
 import { clinicDateISO } from '@/src/lib/clinicTime';
 
-type LegacyBreakdownDoctorItem = {
-  doctorId: string;
-  doctorName: string;
-  total: number;
-  items: {
-    visitId: string;
-    patientName: string;
-    doctorName?: string;
-    tag?: 'N' | 'F' | 'Z';
-    status: 'QUEUED' | 'IN_PROGRESS' | 'DONE';
-    billingAmount?: number;
-    createdAt: number;
-  }[];
-};
+function mapQueueItemToPatientsPanelItem(it: PatientQueueItem): PatientsPanelItem {
+  const patientName =
+    typeof it.patientName === 'string' && it.patientName.trim().length > 0
+      ? it.patientName.trim()
+      : `Patient: ${it.patientId}`;
 
-type LegacyBreakdownResponse = {
-  date: string;
-  doctors: LegacyBreakdownDoctorItem[];
-  totalVisits: number;
-};
+  const billingAmount = typeof it.billingAmount === 'number' ? it.billingAmount : undefined;
 
-type ClinicWideBreakdownItem = {
-  visitId: string;
-  patientName: string;
-  tag?: 'N' | 'F' | 'Z';
-  status: 'QUEUED' | 'IN_PROGRESS' | 'DONE';
-  billingAmount?: number;
-  createdAt: number;
-};
+  const zeroBilledFromApi = Boolean(it.zeroBilled);
+  const zeroBilledFromBilling =
+    typeof billingAmount === 'number' && !Number.isNaN(billingAmount) ? billingAmount <= 0 : false;
 
-type ClinicWideBreakdownResponse = {
-  date: string;
-  items: ClinicWideBreakdownItem[];
-  totalVisits: number;
-};
+  return {
+    visitId: it.visitId,
+    patientName, // ✅ always string (fixes your TS error)
+    doctorName: 'Clinic', // queue payload doesn’t include doctor name
+    tag: it.tag === 'F' ? 'F' : 'N', // ✅ default to N if missing
+    status: it.status,
+    billingAmount,
+    createdAt: typeof it.createdAt === 'number' ? it.createdAt : 0,
+    zeroBilled: zeroBilledFromApi || zeroBilledFromBilling,
+  };
+}
 
 export default function DashboardPage() {
   const [selectedDate, setSelectedDate] = React.useState<string | null>(null);
@@ -57,48 +49,19 @@ export default function DashboardPage() {
   const todayIso = React.useMemo(() => clinicDateISO(new Date()), []);
   const dateForPatients = selectedDate ?? todayIso;
 
-  const breakdownQuery = useGetDailyVisitsBreakdownQuery(dateForPatients, {
-    skip: !canUseApi,
-  });
+  // ✅ Single “lightweight” fetch for reception-side list UI
+  const queueQuery = useGetPatientQueueQuery({ date: dateForPatients }, { skip: !canUseApi });
 
-  const patients = React.useMemo(() => {
-    const data = breakdownQuery.data as unknown;
+  const patients: PatientsPanelItem[] = React.useMemo(() => {
+    const items = (queueQuery.data?.items ?? []) as PatientQueueItem[];
 
-    // ✅ Supports BOTH:
-    // - old grouped-by-doctor payload: { doctors: [...] }
-    // - new clinic-wide payload: { items: [...] }
-    const items: ClinicWideBreakdownItem[] = (() => {
-      if (data && typeof data === 'object' && 'items' in (data as any)) {
-        return ((data as ClinicWideBreakdownResponse).items ?? []).slice();
-      }
+    const mapped = items
+      .map(mapQueueItemToPatientsPanelItem)
+      .filter((x) => typeof x.visitId === 'string' && x.visitId.length > 0);
 
-      const doctors = (data as LegacyBreakdownResponse | undefined)?.doctors ?? [];
-      return doctors.flatMap((d) =>
-        (d.items ?? []).map((it) => ({
-          visitId: it.visitId,
-          patientName: it.patientName,
-          tag: it.tag,
-          status: it.status,
-          billingAmount: it.billingAmount,
-          createdAt: it.createdAt,
-        })),
-      );
-    })();
-
-    const flat = items.map((it) => ({
-      visitId: it.visitId,
-      patientName: it.patientName,
-      // ✅ clinic-wide now; keep PatientsPanel prop stable
-      doctorName: 'Clinic',
-      tag: (it.tag ?? 'O') as 'N' | 'F' | 'Z' | 'O',
-      status: it.status,
-      billingAmount: it.billingAmount,
-      createdAt: it.createdAt,
-    }));
-
-    flat.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
-    return flat;
-  }, [breakdownQuery.data, breakdownQuery.isLoading, breakdownQuery.isFetching]);
+    mapped.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+    return mapped;
+  }, [queueQuery.data]);
 
   if (selectedDate) {
     return (
@@ -116,7 +79,6 @@ export default function DashboardPage() {
       <div className="grid h-full grid-cols-1 gap-6 2xl:gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
         <div className="flex h-full flex-col gap-6">
           <div className="grid w-full grid-cols-1 gap-6 2xl:gap-10 lg:grid-cols-[minmax(0,2fr)]">
-            {/* ✅ This card should already be updated to clinic-wide internally */}
             <DoctorQueueCard />
             <VisitorsRatioChart onDateSelect={(dateIso) => setSelectedDate(dateIso)} />
           </div>
@@ -128,11 +90,12 @@ export default function DashboardPage() {
             dateLabel={todayIso === dateForPatients ? 'Today' : dateForPatients}
             dateIso={dateForPatients}
             patients={patients}
-            loading={breakdownQuery.isLoading || breakdownQuery.isFetching}
+            loading={queueQuery.isLoading || queueQuery.isFetching}
             canUseApi={canUseApi}
           />
-          {/* ✅ Summary should also be clinic-wide internally */}
-          <QueueSummaryCard />
+
+          {/* ✅ keep summary aligned to the same date */}
+          <QueueSummaryCard date={dateForPatients} />
         </div>
       </div>
     </section>

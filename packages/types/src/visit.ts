@@ -1,4 +1,3 @@
-// packages/types/src/visit.ts
 import { z } from 'zod';
 import { PatientId } from './patient';
 
@@ -8,7 +7,11 @@ export type VisitId = z.infer<typeof VisitId>;
 export const VisitStatus = z.enum(['QUEUED', 'IN_PROGRESS', 'DONE']);
 export type VisitStatus = z.infer<typeof VisitStatus>;
 
-export const VisitTag = z.enum(['N', 'F', 'Z']);
+/**
+ * ✅ Only N/F are tags now.
+ * Z is now represented by zeroBilled: boolean
+ */
+export const VisitTag = z.enum(['N', 'F']);
 export type VisitTag = z.infer<typeof VisitTag>;
 
 export const Visit = z.object({
@@ -23,8 +26,18 @@ export const Visit = z.object({
 
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
+
   billingAmount: z.number().nonnegative().optional(),
+
+  // ✅ N/F only
   tag: VisitTag.optional(),
+
+  // ✅ Z is a boolean flag now
+  zeroBilled: z.boolean().optional(),
+
+  // ✅ For F visits, points to an N visitId
+  anchorVisitId: VisitId.optional(),
+
   currentRxId: z.string().min(1).optional(),
   currentRxVersion: z.number().int().min(1).optional(),
 });
@@ -40,11 +53,31 @@ export const PatientQueueResponse = z.object({
 });
 export type PatientQueueResponse = z.infer<typeof PatientQueueResponse>;
 
-export const VisitCreate = z.object({
-  patientId: PatientId,
-  reason: z.string().min(1).max(500),
-  tag: VisitTag.optional(),
-});
+export const VisitCreate = z
+  .object({
+    patientId: PatientId,
+    reason: z.string().min(1).max(500),
+
+    // ✅ N/F only
+    tag: VisitTag.optional(),
+
+    // ✅ checkbox flag
+    zeroBilled: z.boolean().optional(),
+
+    // ✅ required when tag === 'F'
+    anchorVisitId: VisitId.optional(),
+  })
+  .superRefine((val, ctx) => {
+    if (val.tag === 'F') {
+      if (!val.anchorVisitId) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['anchorVisitId'],
+          message: 'anchorVisitId is required when tag is F',
+        });
+      }
+    }
+  });
 export type VisitCreate = z.infer<typeof VisitCreate>;
 
 export const VisitStatusUpdate = z.object({

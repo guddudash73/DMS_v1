@@ -10,7 +10,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { useAuth } from '@/src/hooks/useAuth';
-import { useGetPatientByIdQuery, useCreateVisitMutation } from '@/src/store/api';
+import {
+  useGetPatientByIdQuery,
+  useGetPatientVisitsQuery,
+  useCreateVisitMutation,
+} from '@/src/store/api';
 import { loadPrintSettings } from '@/src/lib/printing/settings';
 import { buildTokenEscPos } from '@/src/lib/printing/escpos';
 import { printRaw } from '@/src/lib/printing/qz';
@@ -33,6 +37,21 @@ const formatClinicDateFromAny = (input: unknown) => {
   }).format(d);
 };
 
+type VisitSummaryItem = {
+  visitId: string;
+  visitDate?: string;
+  createdAt?: number;
+  opdNo?: string;
+  tag?: string;
+};
+
+function safeVisitLabel(v: VisitSummaryItem) {
+  const date = v.visitDate ? String(v.visitDate) : '—';
+  const idShort = v.visitId ? `#${String(v.visitId).slice(0, 8)}` : '';
+  const opd = v.opdNo ? String(v.opdNo) : idShort;
+  return `${date} • ${opd}`;
+}
+
 export default function RegisterVisitModal({ patientId, onClose }: Props) {
   const auth = useAuth();
 
@@ -50,6 +69,7 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleClose = () => {
@@ -58,8 +78,14 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
     window.setTimeout(() => onClose(), 180);
   };
 
+  const canUseApi = auth.status === 'authenticated';
+
   const { data: patient } = useGetPatientByIdQuery(patientId as any, {
-    skip: !patientId || auth.status !== 'authenticated',
+    skip: !patientId || !canUseApi,
+  });
+
+  const visitsQuery = useGetPatientVisitsQuery(patientId as any, {
+    skip: !patientId || !canUseApi,
   });
 
   const [createVisit, { isLoading }] = useCreateVisitMutation();
@@ -77,16 +103,61 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
       patientId: patientId as any,
       reason: '',
       tag: 'N',
+      zeroBilled: false,
+      anchorVisitId: undefined,
     },
   });
 
   React.useEffect(() => {
-    setValue('patientId', patientId as any);
+    // keep patientId synced if modal reused
+    setValue('patientId', patientId as any, { shouldDirty: false, shouldValidate: false });
   }, [patientId, setValue]);
 
   const selectedTag = watch('tag');
+  const zeroBilled = watch('zeroBilled');
+
+  const anchorCandidates = React.useMemo(() => {
+    const items = (visitsQuery.data as any)?.items as VisitSummaryItem[] | undefined;
+    const list = Array.isArray(items) ? items : [];
+
+    // NOTE: If you have older data where "new visit" had no tag,
+    // you can expand this filter to (v.tag === 'N' || v.tag == null).
+    return list
+      .filter((v) => v && v.visitId && v.tag === 'N')
+      .slice()
+      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  }, [visitsQuery.data]);
+
+  // Keep anchorVisitId consistent with tag:
+  // - clear when not F (prevents dirty payloads)
+  // - when switching to F, default to latest N visit
+  React.useEffect(() => {
+    if (selectedTag !== 'F') {
+      setValue('anchorVisitId', undefined, { shouldDirty: true, shouldValidate: true });
+      return;
+    }
+
+    const current = watch('anchorVisitId');
+    if (current) return;
+
+    const latest = anchorCandidates[0]?.visitId;
+    if (latest) {
+      setValue('anchorVisitId', latest as any, { shouldDirty: true, shouldValidate: true });
+    }
+  }, [selectedTag, anchorCandidates, setValue, watch]);
 
   const onSubmit = async (values: VisitCreate) => {
+    if (!canUseApi) {
+      toast.error('Please login to create a visit.');
+      return;
+    }
+
+    // Defensive UX (schema also enforces this)
+    if (values.tag === 'F' && !values.anchorVisitId) {
+      toast.error('Please select the New (N) visit this follow-up refers to.');
+      return;
+    }
+
     try {
       const resp = await createVisit(values).unwrap();
 
@@ -105,7 +176,8 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
       }
 
       handleClose();
-    } catch {
+    } catch (e) {
+      console.error(e);
       toast.error('Unable to create visit. Please try again.');
     }
   };
@@ -116,6 +188,8 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
       .filter((m): m is string => Boolean(m));
     toast.error(messages.length ? messages.join('\n') : 'Please check the fields.');
   };
+
+  const TagType = ['N', 'F'] as const satisfies readonly VisitTag[];
 
   return (
     <div
@@ -179,19 +253,75 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
                 <p className="h-3 text-xs">&nbsp;</p>
               </div>
 
-              <div className="flex items-center justify-end gap-4 pb-2">
-                {(['N', 'F', 'Z'] as VisitTag[]).map((t) => (
-                  <label key={t} className="flex items-center gap-2 text-sm text-gray-700">
-                    <input
-                      type="radio"
-                      value={t}
-                      checked={selectedTag === t}
-                      onChange={() => setValue('tag', t)}
-                    />
-                    {t}
-                  </label>
-                ))}
+              <div className="flex items-center justify-between gap-4 pb-2">
+                <div className="flex items-center gap-4">
+                  {TagType.map((t) => (
+                    <label key={t} className="flex items-center gap-2 text-sm text-gray-700">
+                      <input
+                        type="radio"
+                        value={t}
+                        checked={selectedTag === t}
+                        onChange={() =>
+                          setValue('tag', t, { shouldDirty: true, shouldValidate: true })
+                        }
+                      />
+                      {t}
+                    </label>
+                  ))}
+                </div>
+
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={!!zeroBilled}
+                    onChange={(e) =>
+                      setValue('zeroBilled', e.target.checked, {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      })
+                    }
+                  />
+                  Zero billed (Z)
+                </label>
               </div>
+
+              {selectedTag === 'F' ? (
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-gray-800">
+                    Follow-up for New (N) Visit
+                  </label>
+
+                  <select
+                    className={`h-10 w-full rounded-xl border bg-white px-3 text-sm ${
+                      errors.anchorVisitId
+                        ? 'border-red-500 focus-visible:ring-red-500'
+                        : 'border-gray-200 focus-visible:ring-gray-300'
+                    }`}
+                    {...register('anchorVisitId')}
+                  >
+                    {anchorCandidates.length === 0 ? (
+                      <option value="">No prior N visits found</option>
+                    ) : (
+                      <>
+                        <option value="">Select an N visit…</option>
+                        {anchorCandidates.map((v) => (
+                          <option key={v.visitId} value={v.visitId}>
+                            {safeVisitLabel(v)}
+                          </option>
+                        ))}
+                      </>
+                    )}
+                  </select>
+
+                  <p className="h-3 text-xs text-red-600">
+                    {errors.anchorVisitId?.message
+                      ? String(errors.anchorVisitId.message)
+                      : '\u00A0'}
+                  </p>
+                </div>
+              ) : (
+                <p className="h-3 text-xs">&nbsp;</p>
+              )}
 
               <div className="mt-2 flex justify-end gap-2">
                 <Button
@@ -204,8 +334,9 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
                 </Button>
                 <Button
                   type="submit"
-                  disabled={isSubmitting || isLoading}
+                  disabled={!canUseApi || isSubmitting || isLoading}
                   className="h-10 rounded-xl bg-black px-6 text-sm font-medium text-white hover:bg-black/90"
+                  title={!canUseApi ? 'Please login to create a visit' : undefined}
                 >
                   {isSubmitting || isLoading ? 'Creating…' : 'Create Visit'}
                 </Button>

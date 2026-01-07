@@ -78,7 +78,6 @@ async function nextCounter(key: { PK: string; SK: string }): Promise<number> {
 
 function tagLabel(tag: VisitTag | undefined): string {
   if (tag === 'F') return 'SDFOLLOWUP';
-  if (tag === 'Z') return 'SDZEROBILLED';
   return 'SDNEW';
 }
 
@@ -134,7 +133,30 @@ export class DynamoDBVisitRepository implements VisitRepository {
     const status: VisitStatus = 'QUEUED';
     const tag: VisitTag | undefined = input.tag;
 
+    // ✅ Validate follow-up anchor (no assumptions; strictly enforced)
+    if (tag === 'F') {
+      const anchorId = input.anchorVisitId;
+      if (!anchorId) {
+        throw new Error('anchorVisitId is required when tag is F');
+      }
+
+      const anchor = await this.getById(anchorId);
+      if (!anchor) {
+        throw new Error('anchorVisitId does not exist');
+      }
+
+      if (anchor.patientId !== input.patientId) {
+        throw new Error('anchorVisitId must belong to the same patient');
+      }
+
+      if (anchor.tag !== 'N') {
+        throw new Error('anchorVisitId must point to an N (new) visit');
+      }
+    }
+
     const dailySeq = await nextCounter(buildOpdDailyCounterKey(visitDate));
+
+    // ✅ Tag counter uses only N/F now
     const tagForCounter: VisitTag = tag ?? 'N';
     const tagSeq = await nextCounter(buildOpdTagCounterKey(visitDate, tagForCounter));
     const opdNo = formatOpdNo(visitDate, dailySeq, tagForCounter, tagSeq);
@@ -148,7 +170,10 @@ export class DynamoDBVisitRepository implements VisitRepository {
       opdNo,
       createdAt: now,
       updatedAt: now,
+
       ...(tag ? { tag } : {}),
+      ...(typeof input.zeroBilled === 'boolean' ? { zeroBilled: input.zeroBilled } : {}),
+      ...(input.anchorVisitId ? { anchorVisitId: input.anchorVisitId } : {}),
     };
 
     const patientItem = {

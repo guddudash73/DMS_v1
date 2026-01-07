@@ -1,3 +1,4 @@
+// apps\web\components\dashboard\VisitorsRatioChart.tsx
 'use client';
 
 import * as React from 'react';
@@ -22,7 +23,7 @@ import {
 import { useAuth } from '@/src/hooks/useAuth';
 import { useGetDailyPatientSummarySeriesQuery } from '@/src/store/api';
 import { cn } from '@/lib/utils';
-import { clinicDateISO } from '@/src/lib/clinicTime';
+import { CLINIC_TZ, clinicDateISO } from '@/src/lib/clinicTime';
 
 type TimeRange = '90d' | '30d' | '7d';
 
@@ -38,13 +39,9 @@ const chartConfig = {
     label: 'Followup',
     color: '#8abab3',
   },
-  zeroBilledVisits: {
-    label: 'Zero billed',
-    color: '#b7cfc9',
-  },
 } satisfies ChartConfig;
 
-function getDateRange(range: TimeRange) {
+function getDateRange(range: TimeRange): { startDate: string; endDate: string } {
   const end = new Date();
 
   let days = 90;
@@ -61,9 +58,17 @@ function getDateRange(range: TimeRange) {
 }
 
 function formatShortDate(value: unknown) {
-  const d = new Date(String(value));
-  if (Number.isNaN(d.getTime())) return String(value ?? '');
-  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  const dateIso = String(value ?? '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateIso)) return dateIso;
+
+  const dt = new Date(`${dateIso}T00:00:00Z`);
+  if (Number.isNaN(dt.getTime())) return dateIso;
+
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: CLINIC_TZ,
+    month: 'short',
+    day: 'numeric',
+  }).format(dt);
 }
 
 type TooltipProps = {
@@ -72,38 +77,42 @@ type TooltipProps = {
   label?: unknown;
 };
 
-function ClinicVisitorsTooltip({ active, payload, label }: TooltipProps) {
+function VisitorsTooltip({ active, payload, label }: TooltipProps) {
   if (!active || !payload?.length) return null;
 
   const row = payload?.[0]?.payload ?? {};
-  const total =
-    typeof row.totalPatients === 'number'
-      ? row.totalPatients
-      : (row.newPatients ?? 0) + (row.followupPatients ?? 0) + (row.zeroBilledVisits ?? 0);
+
+  const newCount = Number(row.newPatients ?? 0);
+  const followupCount = Number(row.followupPatients ?? 0);
+
+  // ✅ Visitors total is ONLY N + F
+  const totalVisitors = newCount + followupCount;
+
+  // ✅ Z is a subset of N/F visits (NOT an extra category)
+  // Clamp to prevent negative billed even if backend sends inconsistent counts.
+  const zeroBilledRaw = Number(row.zeroBilledVisits ?? 0);
+  const zeroBilled = Math.max(0, Math.min(zeroBilledRaw, totalVisitors));
+
+  // ✅ Billed = Visitors(N+F) - ZeroBilled(Z subset)
+  const billed = Math.max(0, totalVisitors - zeroBilled);
 
   const items = [
     {
       key: 'newPatients',
-      label: 'New',
-      value: row.newPatients ?? 0,
+      label: 'New (N)',
+      value: newCount,
       color: payload.find((p) => p.dataKey === 'newPatients')?.color,
     },
     {
       key: 'followupPatients',
-      label: 'Followup',
-      value: row.followupPatients ?? 0,
+      label: 'Followup (F)',
+      value: followupCount,
       color: payload.find((p) => p.dataKey === 'followupPatients')?.color,
-    },
-    {
-      key: 'zeroBilledVisits',
-      label: 'Zero billed',
-      value: row.zeroBilledVisits ?? 0,
-      color: payload.find((p) => p.dataKey === 'zeroBilledVisits')?.color,
     },
   ];
 
   return (
-    <div className="grid min-w-44 gap-2 rounded-lg border border-border/50 bg-background px-3 py-2 text-xs shadow-xl">
+    <div className="grid min-w-48 gap-2 rounded-lg border border-border/50 bg-background px-3 py-2 text-xs shadow-xl">
       <div className="font-medium">{formatShortDate(label)}</div>
 
       <div className="grid gap-1.5">
@@ -126,10 +135,25 @@ function ClinicVisitorsTooltip({ active, payload, label }: TooltipProps) {
       <div className="h-px w-full bg-border/60" />
 
       <div className="flex items-center justify-between">
-        <span className="text-muted-foreground">Total</span>
+        <span className="text-muted-foreground">Visitors total (N+F)</span>
         <span className="font-mono font-semibold tabular-nums text-foreground">
-          {Number(total).toLocaleString()}
+          {Number(totalVisitors).toLocaleString()}
         </span>
+      </div>
+
+      <div className="mt-1 grid gap-1.5">
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Billed</span>
+          <span className="font-mono font-medium tabular-nums text-foreground">
+            {Number(billed).toLocaleString()}
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-muted-foreground">Zero billed (Z)</span>
+          <span className="font-mono font-medium tabular-nums text-foreground">
+            {Number(zeroBilled).toLocaleString()}
+          </span>
+        </div>
       </div>
 
       <div className="pt-1 text-[11px] text-muted-foreground">Click to view daily breakdown →</div>
@@ -137,11 +161,15 @@ function ClinicVisitorsTooltip({ active, payload, label }: TooltipProps) {
   );
 }
 
-export type ClinicPatientsChartProps = {
+export type VisitorsRatioChartProps = {
   onDateSelect?: (dateIso: string) => void;
+  title?: string;
 };
 
-export default function ClinicPatientsChart({ onDateSelect }: ClinicPatientsChartProps) {
+export default function VisitorsRatioChart({
+  onDateSelect,
+  title = 'Visitors - Ratio',
+}: VisitorsRatioChartProps) {
   const auth = useAuth();
   const [timeRange, setTimeRange] = React.useState<TimeRange>('90d');
 
@@ -163,8 +191,8 @@ export default function ClinicPatientsChart({ onDateSelect }: ClinicPatientsChar
         date: p.date,
         newPatients: p.newPatients,
         followupPatients: p.followupPatients,
+        // ✅ keep for tooltip breakdown only (Z is subset)
         zeroBilledVisits: p.zeroBilledVisits,
-        totalPatients: p.totalPatients,
       })) ?? [],
     [series],
   );
@@ -186,7 +214,7 @@ export default function ClinicPatientsChart({ onDateSelect }: ClinicPatientsChar
     <Card className="border-none bg-white/80 shadow-sm">
       <CardHeader className="flex items-center gap-1 space-y-0 sm:flex-row">
         <div className="grid flex-1 gap-1">
-          <CardTitle className="text-base sm:text-lg">Visitors - Ratio</CardTitle>
+          <CardTitle className="text-base sm:text-lg">{title}</CardTitle>
           <CardDescription>{description}</CardDescription>
         </div>
 
@@ -247,15 +275,9 @@ export default function ClinicPatientsChart({ onDateSelect }: ClinicPatientsChar
                   <stop offset="5%" stopColor="var(--color-followupPatients)" stopOpacity={0.9} />
                   <stop offset="95%" stopColor="var(--color-followupPatients)" stopOpacity={0.2} />
                 </linearGradient>
-
-                <linearGradient id="fillZeroBilled" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor="var(--color-zeroBilledVisits)" stopOpacity={0.9} />
-                  <stop offset="95%" stopColor="var(--color-zeroBilledVisits)" stopOpacity={0.22} />
-                </linearGradient>
               </defs>
 
               <CartesianGrid vertical={false} strokeDasharray="3 3" />
-
               <XAxis
                 dataKey="date"
                 tickLine={false}
@@ -265,8 +287,9 @@ export default function ClinicPatientsChart({ onDateSelect }: ClinicPatientsChar
                 tickFormatter={(value) => formatShortDate(value)}
               />
 
-              <ChartTooltip cursor={false} content={<ClinicVisitorsTooltip />} />
+              <ChartTooltip cursor={false} content={<VisitorsTooltip />} />
 
+              {/* ✅ Only N/F in the chart */}
               <Area
                 dataKey="newPatients"
                 type="natural"
@@ -279,13 +302,6 @@ export default function ClinicPatientsChart({ onDateSelect }: ClinicPatientsChar
                 type="natural"
                 fill="url(#fillFollowupPatients)"
                 stroke="var(--color-followupPatients)"
-                stackId="visitors"
-              />
-              <Area
-                dataKey="zeroBilledVisits"
-                type="natural"
-                fill="url(#fillZeroBilled)"
-                stroke="var(--color-zeroBilledVisits)"
                 stackId="visitors"
               />
 

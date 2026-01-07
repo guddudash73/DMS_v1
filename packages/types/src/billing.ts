@@ -1,3 +1,4 @@
+// packages/types/src/billing.ts
 import { z } from 'zod';
 import { FollowUpContactMethod, VisitId } from './visit';
 
@@ -23,6 +24,12 @@ export const BillingCheckoutInput = z.object({
   discountAmount: z.number().nonnegative().default(0),
   taxAmount: z.number().nonnegative().default(0),
   followUp: CheckoutFollowUpInput.optional(),
+
+  /**
+   * ✅ By default, billing is blocked for visits with zeroBilled=true.
+   * To override, the client must explicitly set allowZeroBilled=true.
+   */
+  allowZeroBilled: z.boolean().optional(),
 });
 
 export type BillingCheckoutInput = z.infer<typeof BillingCheckoutInput>;

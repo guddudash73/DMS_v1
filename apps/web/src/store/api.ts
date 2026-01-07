@@ -93,6 +93,7 @@ export const TAG_TYPES = [
   'AdminUsers',
   'RxPresets',
   'MedicinesCatalog',
+  'RecentCompleted',
 ] as const;
 
 export type AdminMedicinesStatus = 'PENDING' | 'VERIFIED';
@@ -152,18 +153,6 @@ function normalizeIsoDate(input: string): string {
   return clinicDateISO(new Date(input));
 }
 
-const isAuthEndpoint = (args: string | FetchArgs) => {
-  const url = typeof args === 'string' ? args : args.url;
-  return (
-    url === '/auth/login' ||
-    url === '/auth/refresh' ||
-    url === '/auth/logout' ||
-    url.startsWith('/auth/login?') ||
-    url.startsWith('/auth/refresh?') ||
-    url.startsWith('/auth/logout?')
-  );
-};
-
 let refreshInFlight: Promise<boolean> | null = null;
 
 const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = async (
@@ -172,8 +161,11 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
   extraOptions,
 ) => {
   let result = await rawBaseQuery(args, api, extraOptions);
+
+  // Only handle 401 here
   if (result.error?.status !== 401) return result;
 
+  // Single refresh mutex shared across all requests
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
       const refreshResult = await rawBaseQuery(
@@ -181,12 +173,20 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
         api,
         extraOptions,
       );
+
       if (refreshResult.data) {
         api.dispatch(setTokensFromRefresh(refreshResult.data as RefreshResponse));
         return true;
       }
-      api.dispatch(setUnauthenticated());
-      api.dispatch(apiSlice.util.resetApiState());
+
+      // ✅ Only logout if refresh is definitively invalid
+      const status = (refreshResult.error as any)?.status;
+      if (status === 401 || status === 403) {
+        api.dispatch(setUnauthenticated());
+        api.dispatch(apiSlice.util.resetApiState());
+      }
+
+      // ✅ 500 / network error / timeout: DO NOT logout
       return false;
     })().finally(() => {
       refreshInFlight = null;
@@ -196,8 +196,10 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
   const ok = await refreshInFlight;
   if (!ok) return result;
 
+  // retry original request after refresh
   result = await rawBaseQuery(args, api, extraOptions);
 
+  // if still 401 after refresh, then logout (token truly bad)
   if (result.error?.status === 401) {
     api.dispatch(setUnauthenticated());
     api.dispatch(apiSlice.util.resetApiState());
@@ -215,15 +217,101 @@ let sharedRefCount = 0;
 let sharedHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let sharedIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
-const HEARTBEAT_MS = 5 * 60 * 1000;
+function isSocketUsable(sock: WebSocket | null) {
+  if (!sock) return false;
+  return sock.readyState === WebSocket.OPEN || sock.readyState === WebSocket.CONNECTING;
+}
+
+// ✅ simple reconnect backoff
+let sharedEverOpened = false;
+let reconnectAttempt = 0;
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearReconnectTimer() {
+  if (reconnectTimer) clearTimeout(reconnectTimer);
+  reconnectTimer = null;
+}
+
+function scheduleReconnect(args: { dispatch: any; getState: () => unknown }) {
+  if (typeof window === 'undefined') return;
+  if (document.visibilityState !== 'visible') return;
+  if (sharedRefCount <= 0) return;
+
+  const base = Math.min(30_000, 500 * Math.pow(2, reconnectAttempt)); // cap 30s
+  const jitter = Math.floor(Math.random() * 250);
+  const delay = base + jitter;
+  reconnectAttempt += 1;
+
+  clearReconnectTimer();
+  reconnectTimer = setTimeout(() => {
+    void sharedOpenSocketIfNeeded(args, { force: true });
+  }, delay);
+}
+
+const HEARTBEAT_MS = 4 * 60 * 1000;
+
+// your design choice: close after inactivity
 const IDLE_CLOSE_MS = 10 * 60 * 1000;
+
+// avoid 2 hour hard disconnect surprises
+const MAX_CONN_AGE_MS = 110 * 60 * 1000;
+
 const EXPIRY_SKEW_MS = 30_000;
+
+let recycleTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearRecycleTimer() {
+  if (recycleTimer) clearTimeout(recycleTimer);
+  recycleTimer = null;
+}
+
+function getTodayIsoSafe() {
+  return clinicDateISO(new Date());
+}
+
+// ✅ On reconnect, refetch caches immediately (otherwise UI can stay stale until next event)
+function invalidateQueueOnly(dispatch: any, dateIso: string) {
+  dispatch(apiSlice.util.invalidateTags([{ type: 'ClinicQueue' as const, id: dateIso }]));
+}
+
+const heavyInvalidateTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleHeavyInvalidate(dispatch: any, dateIso: string) {
+  const existing = heavyInvalidateTimers.get(dateIso);
+  if (existing) clearTimeout(existing);
+
+  heavyInvalidateTimers.set(
+    dateIso,
+    setTimeout(() => {
+      heavyInvalidateTimers.delete(dateIso);
+
+      dispatch(
+        apiSlice.util.invalidateTags([
+          { type: 'DailyReport' as const, id: dateIso },
+          { type: 'DailyPatientSummary' as const, id: dateIso },
+          { type: 'DailyVisitsBreakdown' as const, id: dateIso },
+          { type: 'RecentCompleted' as const, id: dateIso },
+          { type: 'DailyPatientSummary' as const, id: 'SERIES' },
+        ]),
+      );
+    }, 1500),
+  );
+}
+
+// ✅ On reconnect, refetch caches immediately (otherwise UI can stay stale until next event)
+function invalidateRealtimeDrivenCaches(args: { dispatch: any }) {
+  const today = getTodayIsoSafe();
+  invalidateQueueOnly(args.dispatch, today);
+  // scheduleHeavyInvalidate(args.dispatch, today);
+}
 
 function sharedStopTimers() {
   if (sharedHeartbeatTimer) clearInterval(sharedHeartbeatTimer);
   if (sharedIdleTimer) clearTimeout(sharedIdleTimer);
   sharedHeartbeatTimer = null;
   sharedIdleTimer = null;
+
+  clearRecycleTimer();
 }
 
 function sharedSafeClose() {
@@ -242,6 +330,45 @@ function sharedResetIdleTimer() {
   }, IDLE_CLOSE_MS);
 }
 
+async function refreshAccessTokenShared(args: {
+  dispatch: any;
+  getState: () => unknown;
+}): Promise<string | null> {
+  // ✅ reuse the SAME refresh mutex used by HTTP baseQuery
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const refreshResult = await rawBaseQuery(
+        { url: '/auth/refresh', method: 'POST' },
+        { dispatch: args.dispatch, getState: args.getState } as any,
+        {} as any,
+      );
+
+      if (refreshResult.data) {
+        args.dispatch(setTokensFromRefresh(refreshResult.data as RefreshResponse));
+        return true;
+      }
+
+      // ✅ Only logout if refresh token is definitely invalid/expired
+      const status = (refreshResult.error as any)?.status;
+      if (status === 401 || status === 403) {
+        args.dispatch(setUnauthenticated());
+        args.dispatch(apiSlice.util.resetApiState());
+      }
+
+      // ✅ 500/network: keep user logged in; we'll retry later
+      return false;
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+
+  const ok = await refreshInFlight;
+  if (!ok) return null;
+
+  const s2 = args.getState() as RootState;
+  return s2.auth.accessToken ?? null;
+}
+
 async function ensureFreshAccessTokenForWs(args: {
   dispatch: any;
   getState: () => unknown;
@@ -252,62 +379,87 @@ async function ensureFreshAccessTokenForWs(args: {
 
   if (!token || !expiresAt) return null;
 
+  // ✅ still valid
   if (Date.now() < expiresAt - EXPIRY_SKEW_MS) {
     return token;
   }
 
-  const refreshResult = await rawBaseQuery(
-    { url: '/auth/refresh', method: 'POST' },
-    { dispatch: args.dispatch, getState: args.getState } as any,
-    {} as any,
-  );
-
-  if (refreshResult.data) {
-    args.dispatch(setTokensFromRefresh(refreshResult.data as RefreshResponse));
-    const s2 = args.getState() as RootState;
-    return s2.auth.accessToken ?? null;
-  }
-
-  args.dispatch(setUnauthenticated());
-  args.dispatch(apiSlice.util.resetApiState());
-  return null;
+  // ✅ expired → refresh via shared mutex
+  return await refreshAccessTokenShared(args);
 }
 
-async function sharedOpenSocketIfNeeded(args: { dispatch: any; getState: () => unknown }) {
+async function sharedOpenSocketIfNeeded(
+  args: { dispatch: any; getState: () => unknown },
+  opts?: { force?: boolean },
+) {
   if (typeof window === 'undefined') return;
   if (document.visibilityState !== 'visible') return;
-  if (sharedSocket) return;
+
+  // ✅ KEY FIX: socket exists but CLOSED/CLOSING should be treated as absent
+  if (!opts?.force && isSocketUsable(sharedSocket)) return;
+
+  if (sharedSocket && !isSocketUsable(sharedSocket)) {
+    sharedSafeClose(); // clears timers + nulls socket
+  }
+
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
 
   const token = await ensureFreshAccessTokenForWs(args);
   if (!token) return;
 
+  const isReconnect = sharedEverOpened;
+
   sharedSocket = createClinicQueueWebSocket({
     token,
+
+    onOpen: () => {
+      sharedEverOpened = true;
+      reconnectAttempt = 0;
+      clearReconnectTimer();
+
+      if (isReconnect) {
+        invalidateRealtimeDrivenCaches({ dispatch: args.dispatch });
+      }
+
+      clearRecycleTimer();
+      recycleTimer = setTimeout(() => {
+        // recycle to avoid 2 hour max duration disconnects
+        sharedSafeClose();
+        void sharedOpenSocketIfNeeded(args, { force: true });
+      }, MAX_CONN_AGE_MS);
+
+      sharedResetIdleTimer();
+    },
+
     onMessage: (msg) => {
       for (const fn of sharedListeners) {
         try {
           fn(msg);
-        } catch {
-          // ignore listener errors
-        }
+        } catch {}
       }
       sharedResetIdleTimer();
     },
+
     onClose: () => {
+      // don’t call sharedSocket.close() here — it already closed
       sharedSocket = null;
       sharedStopTimers();
+      scheduleReconnect(args);
     },
+
     onError: () => {
-      sharedSocket = null;
-      sharedStopTimers();
+      sharedSafeClose();
+      scheduleReconnect(args);
     },
   });
 
   if (!sharedSocket) return;
 
   sharedHeartbeatTimer = setInterval(() => {
+    const sock = sharedSocket;
+    if (!sock || sock.readyState !== WebSocket.OPEN) return;
     try {
-      sharedSocket?.send(JSON.stringify({ type: 'ping' }));
+      sock.send(JSON.stringify({ type: 'ping' }));
     } catch {}
   }, HEARTBEAT_MS);
 
@@ -316,8 +468,10 @@ async function sharedOpenSocketIfNeeded(args: { dispatch: any; getState: () => u
 
 function sharedMarkActivity(args: { dispatch: any; getState: () => unknown }) {
   sharedResetIdleTimer();
-  if (!sharedSocket && sharedRefCount > 0) {
-    void sharedOpenSocketIfNeeded(args);
+
+  // ✅ force reopen if socket is stale (CLOSED/CLOSING) or missing
+  if (!isSocketUsable(sharedSocket) && sharedRefCount > 0) {
+    void sharedOpenSocketIfNeeded(args, { force: true });
   }
 }
 
@@ -336,16 +490,26 @@ function subscribeSharedRealtime(args: {
 
     const activityHandler = () => sharedMarkActivity(args);
     const visibilityHandler = () => {
-      if (document.visibilityState === 'visible') {
-        sharedMarkActivity(args);
-      }
+      if (document.visibilityState === 'visible') sharedMarkActivity(args);
     };
+
+    // ✅ wakes after minimize/sleep + back/forward cache restore
+    const focusHandler = () => sharedMarkActivity(args);
+    const pageShowHandler = () => sharedMarkActivity(args);
 
     (window as any).__dms_ws_activityHandler = activityHandler;
     (window as any).__dms_ws_visibilityHandler = visibilityHandler;
+    (window as any).__dms_ws_focusHandler = focusHandler;
+    (window as any).__dms_ws_pageShowHandler = pageShowHandler;
 
     activityEvents.forEach((e) => window.addEventListener(e, activityHandler));
     document.addEventListener('visibilitychange', visibilityHandler);
+    window.addEventListener('focus', focusHandler);
+    window.addEventListener('pageshow', pageShowHandler);
+
+    const onlineHandler = () => sharedMarkActivity(args);
+    (window as any).__dms_ws_onlineHandler = onlineHandler;
+    window.addEventListener('online', onlineHandler);
   }
 
   if (typeof window !== 'undefined' && document.visibilityState === 'visible') {
@@ -359,12 +523,21 @@ function subscribeSharedRealtime(args: {
     if (sharedRefCount === 0) {
       if (typeof window !== 'undefined') {
         const activityEvents = ['mousemove', 'keydown', 'mousedown', 'touchstart'] as const;
+
         const activityHandler = (window as any).__dms_ws_activityHandler as
           | (() => void)
           | undefined;
         const visibilityHandler = (window as any).__dms_ws_visibilityHandler as
           | (() => void)
           | undefined;
+
+        // ✅ NEW: wake/reconnect helpers
+        const focusHandler = (window as any).__dms_ws_focusHandler as (() => void) | undefined;
+        const pageShowHandler = (window as any).__dms_ws_pageShowHandler as
+          | (() => void)
+          | undefined;
+
+        const onlineHandler = (window as any).__dms_ws_onlineHandler as (() => void) | undefined;
 
         if (activityHandler) {
           activityEvents.forEach((e) => window.removeEventListener(e, activityHandler));
@@ -373,8 +546,27 @@ function subscribeSharedRealtime(args: {
           document.removeEventListener('visibilitychange', visibilityHandler);
         }
 
+        // ✅ NEW: remove focus/pageshow listeners
+        if (focusHandler) {
+          window.removeEventListener('focus', focusHandler);
+        }
+        if (pageShowHandler) {
+          window.removeEventListener('pageshow', pageShowHandler);
+        }
+
+        if (onlineHandler) window.removeEventListener('online', onlineHandler);
+
         delete (window as any).__dms_ws_activityHandler;
         delete (window as any).__dms_ws_visibilityHandler;
+
+        // ✅ NEW: cleanup stored handlers
+        delete (window as any).__dms_ws_focusHandler;
+        delete (window as any).__dms_ws_pageShowHandler;
+
+        delete (window as any).__dms_ws_onlineHandler;
+
+        // ✅ NEW: if you added a reconnect timer, clear it too
+        clearReconnectTimer();
       }
 
       sharedSafeClose();
@@ -403,16 +595,9 @@ export const apiSlice = createApi({
           onMessage: (data) => {
             if (data.type !== 'ClinicQueueUpdated') return;
 
-            const date = normalizeIsoDate(data.payload.visitDate);
-
-            dispatch(
-              apiSlice.util.invalidateTags([
-                { type: 'ClinicQueue' as const, id: date },
-                { type: 'DailyPatientSummary' as const, id: date },
-                { type: 'DailyReport' as const, id: date },
-                { type: 'DailyVisitsBreakdown' as const, id: date },
-              ]),
-            );
+            const msgDate = normalizeIsoDate(data.payload.visitDate);
+            invalidateQueueOnly(dispatch, msgDate);
+            // scheduleHeavyInvalidate(dispatch, msgDate);
           },
         });
 
@@ -481,6 +666,7 @@ export const apiSlice = createApi({
         url: '/reports/daily/patients/series',
         params: { startDate, endDate },
       }),
+      providesTags: () => [{ type: 'DailyPatientSummary' as const, id: 'SERIES' }], // ✅ ADD
     }),
 
     getDailyVisitsBreakdown: builder.query<
@@ -491,7 +677,9 @@ export const apiSlice = createApi({
           visitId: string;
           visitDate: string;
           status: 'QUEUED' | 'IN_PROGRESS' | 'DONE';
-          tag?: 'N' | 'F' | 'Z';
+          tag?: 'N' | 'F';
+          zeroBilled?: boolean;
+          anchorVisitId?: string;
           reason?: string;
           billingAmount?: number;
           createdAt: number;
@@ -544,26 +732,6 @@ export const apiSlice = createApi({
           id: arg.date ?? clinicDateISO(new Date()),
         },
       ],
-
-      async onCacheEntryAdded(arg, { cacheDataLoaded, cacheEntryRemoved, dispatch, getState }) {
-        await cacheDataLoaded;
-
-        const unsubscribe = subscribeSharedRealtime({
-          dispatch,
-          getState,
-          onMessage: (data) => {
-            if (data.type !== 'ClinicQueueUpdated') return;
-
-            const msgDate = normalizeIsoDate(data.payload.visitDate);
-            if (arg.date && arg.date !== msgDate) return;
-
-            dispatch(apiSlice.util.invalidateTags([{ type: 'ClinicQueue' as const, id: msgDate }]));
-          },
-        });
-
-        await cacheEntryRemoved;
-        unsubscribe();
-      },
     }),
 
     getPatients: builder.query<PatientsListResponse, Partial<PatientSearchQuery>>({
@@ -1224,7 +1392,7 @@ export const apiSlice = createApi({
         },
       }),
       providesTags: (_r, _e, arg) => [
-        { type: 'DailyReport' as const, id: arg.date ?? clinicDateISO(new Date()) },
+        { type: 'RecentCompleted' as const, id: arg.date ?? clinicDateISO(new Date()) }, // ✅ FIX
       ],
     }),
   }),

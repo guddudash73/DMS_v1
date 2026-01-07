@@ -4,10 +4,21 @@ export const connectionsTable = new sst.aws.Dynamo('ConnectionsTable', {
   fields: {
     PK: 'string',
     SK: 'string',
+
+    // ✅ for GSI listing connections
+    GSI1PK: 'string',
+    GSI1SK: 'string',
   },
   primaryIndex: {
     hashKey: 'PK',
     rangeKey: 'SK',
+  },
+  globalIndexes: {
+    // ✅ Query all WS connections without Scan
+    EntityTypeIndex: {
+      hashKey: 'GSI1PK',
+      rangeKey: 'GSI1SK',
+    },
   },
 });
 
@@ -23,9 +34,12 @@ realtimeWs.route('$connect', {
     APP_REGION: 'us-east-1',
     DDB_CONNECTIONS_TABLE: connectionsTable.name,
 
+    // ✅ used for verifyAccessToken
     JWT_ACCESS_SECRET: jwtAccessSecret.value,
     JWT_REFRESH_SECRET: jwtRefreshSecret.value,
 
+    // not required for connect, but OK to keep consistent
+    REALTIME_WS_ENDPOINT: realtimeWs.managementEndpoint, // :contentReference[oaicite:5]{index=5}
     NODE_ENV: 'production',
   },
 });
@@ -40,4 +54,9 @@ realtimeWs.route('$disconnect', {
 
 realtimeWs.route('$default', {
   handler: 'apps/api/src/realtime/wsDefault.handler',
+  link: [connectionsTable],
+  environment: {
+    DDB_CONNECTIONS_TABLE: connectionsTable.name,
+    REALTIME_WS_ENDPOINT: realtimeWs.managementEndpoint, // :contentReference[oaicite:6]{index=6}
+  },
 });

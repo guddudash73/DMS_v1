@@ -12,25 +12,42 @@ import { Button } from '@/components/ui/button';
 import { FileText, Printer, ChevronRight } from 'lucide-react';
 import { clinicDateISO } from '@/src/lib/clinicTime';
 
-type PatientTag = 'N' | 'F' | 'Z' | 'O';
+type PatientTag = 'N' | 'F';
 type VisitStatus = 'QUEUED' | 'IN_PROGRESS' | 'DONE';
 
 export type PatientsPanelItem = {
   visitId: string;
   patientName: string;
   doctorName: string;
+
+  // ✅ only N/F now
   tag: PatientTag;
+
+  // ✅ checkbox flag for zero-billed (preferred)
+  // NOTE: upstream sometimes types this as false|undefined, so treat as boolean-ish.
+  zeroBilled?: boolean;
+
   status: VisitStatus;
   billingAmount?: number;
+
   avatarUrl?: string | null;
   createdAt?: number;
+
+  // ✅ tolerate legacy/alternate shapes without breaking UI
+  // (some backends may send these)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [k: string]: any;
 };
 
 const TAG_META: Record<PatientTag, { label: string; className: string }> = {
   N: { label: 'N', className: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200' },
   F: { label: 'F', className: 'bg-pink-50 text-pink-700 ring-1 ring-pink-200' },
-  Z: { label: 'Z', className: 'bg-amber-50 text-amber-800 ring-1 ring-amber-200' },
-  O: { label: 'O', className: 'bg-slate-50 text-slate-700 ring-1 ring-slate-200' },
+};
+
+// ✅ Z should be gray (not amber)
+const ZERO_BILLED_META = {
+  label: 'Z',
+  className: 'bg-zinc-50 text-zinc-700 ring-1 ring-zinc-200',
 };
 
 const STATUS_META: Record<VisitStatus, { dotClass: string; label: string }> = {
@@ -43,6 +60,35 @@ function initials(name: string) {
   const parts = name.trim().split(/\s+/).filter(Boolean);
   const s = (parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? parts[0]?.[1] ?? '');
   return (s.slice(0, 2).toUpperCase() || 'P').trim();
+}
+
+// ✅ Make Z visible even if the upstream field name differs.
+// Preference order:
+// 1) explicit checkbox flag: zeroBilled truthy
+// 2) legacy flags: isZeroBilled / zero_billed / zeroBilledVisit / visit.zeroBilled
+// 3) fallback: billingAmount <= 0 (only when a numeric billingAmount exists)
+function isZeroBilled(p: PatientsPanelItem): boolean {
+  // 1) preferred flag (avoid `=== true` to prevent TS "no overlap" issues)
+  if (Boolean(p.zeroBilled)) return true;
+
+  // 2) legacy flags (read safely as unknown and coerce)
+  const anyP = p as unknown as Record<string, unknown>;
+  const visit = (anyP['visit'] as Record<string, unknown> | undefined) ?? undefined;
+
+  const legacy =
+    Boolean(anyP['isZeroBilled']) ||
+    Boolean(anyP['zero_billed']) ||
+    Boolean(anyP['zeroBilledVisit']) ||
+    Boolean(visit?.['zeroBilled']);
+
+  if (legacy) return true;
+
+  // 3) fallback from billingAmount
+  if (typeof p.billingAmount === 'number' && !Number.isNaN(p.billingAmount)) {
+    return p.billingAmount <= 0;
+  }
+
+  return false;
 }
 
 type PatientsPanelProps = {
@@ -102,6 +148,8 @@ function RealPill({ p, onOpen }: { p: PatientsPanelItem; onOpen: (visitId: strin
   const showPrint = typeof p.billingAmount === 'number' && !Number.isNaN(p.billingAmount);
   const showPaper = p.status === 'DONE';
 
+  const showZ = isZeroBilled(p);
+
   return (
     <li key={p.visitId}>
       <div
@@ -141,17 +189,34 @@ function RealPill({ p, onOpen }: { p: PatientsPanelItem; onOpen: (visitId: strin
                 />
               </div>
 
-              <div className="mt-0.5 flex items-center gap-2 text-[11px] text-gray-500">
+              <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
                 <span className="truncate">{p.doctorName}</span>
+
+                {/* ✅ show only N/F */}
                 <Badge
                   variant="secondary"
                   className={cn(
-                    'h-5 rounded-full px-2 text-[10px] font-semibold',
+                    'h-5 shrink-0 rounded-full px-2 text-[10px] font-semibold',
                     tagMeta.className,
                   )}
+                  title={p.tag === 'N' ? 'New (N)' : 'Follow-up (F)'}
                 >
                   {tagMeta.label}
                 </Badge>
+
+                {/* ✅ show Z next to N/F, in gray */}
+                {showZ ? (
+                  <Badge
+                    variant="secondary"
+                    className={cn(
+                      'h-5 shrink-0 rounded-full px-2 text-[10px] font-semibold',
+                      ZERO_BILLED_META.className,
+                    )}
+                    title="Zero billed (Z)"
+                  >
+                    {ZERO_BILLED_META.label}
+                  </Badge>
+                ) : null}
               </div>
             </div>
           </div>
@@ -162,10 +227,7 @@ function RealPill({ p, onOpen }: { p: PatientsPanelItem; onOpen: (visitId: strin
                 type="button"
                 variant="ghost"
                 size="icon"
-                className={cn(
-                  'h-9 w-9 rounded-xl',
-                  'opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100',
-                )}
+                className="h-9 w-9 rounded-xl"
                 title="Checkout done - Print available"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -183,10 +245,7 @@ function RealPill({ p, onOpen }: { p: PatientsPanelItem; onOpen: (visitId: strin
                 type="button"
                 variant="ghost"
                 size="icon"
-                className={cn(
-                  'h-9 w-9 rounded-xl',
-                  'opacity-100 md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100',
-                )}
+                className="h-9 w-9 rounded-xl"
                 title="Visit done - Documents available"
                 onClick={(e) => {
                   e.stopPropagation();
@@ -225,14 +284,14 @@ export default function PatientsPanel({
   };
 
   const VISIBLE_ROWS = 4;
-  const shouldScroll = patients.length > VISIBLE_ROWS;
 
   const visiblePatients = patients.slice(0, VISIBLE_ROWS);
-
   const placeholdersNeeded = Math.max(0, VISIBLE_ROWS - visiblePatients.length);
 
+  const shouldScroll = patients.length > VISIBLE_ROWS;
+
   return (
-    <Card className="w-full rounded-2xl border-none bg-white pt-4 shadow-sm">
+    <Card className="w-full rounded-2xl border-none bg-white pt-4 shadow-sm h-full">
       <div className="flex items-start justify-between gap-3 px-4 pb-2">
         <div className="flex min-w-0 flex-col">
           <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
@@ -253,7 +312,9 @@ export default function PatientsPanel({
         </Button>
       </div>
 
-      <div className={cn('px-2 pb-4', shouldScroll ? 'max-h-48 overflow-y-auto dms-scroll' : '')}>
+      <div
+        className={cn('px-2 pb-4', shouldScroll ? 'max-h-[268px] overflow-y-auto dms-scroll' : '')}
+      >
         <ul className="space-y-1">
           {loading ? (
             Array.from({ length: VISIBLE_ROWS }).map((_, i) => <SkeletonPill key={i} i={i} />)
@@ -274,11 +335,9 @@ export default function PatientsPanel({
                 <RealPill key={p.visitId} p={p} onOpen={goToVisit} />
               ))}
 
-              {placeholdersNeeded > 0
-                ? Array.from({ length: placeholdersNeeded }).map((_, i) => (
-                    <PlaceholderPill key={i} i={i} label="Patients" />
-                  ))
-                : null}
+              {Array.from({ length: placeholdersNeeded }).map((_, i) => (
+                <PlaceholderPill key={`ph-${i}`} i={i} label="Patients" />
+              ))}
             </>
           )}
 

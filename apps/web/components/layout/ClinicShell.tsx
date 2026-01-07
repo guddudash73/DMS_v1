@@ -9,8 +9,6 @@ import {
   User,
   FileText,
   Headphones,
-  FileStack,
-  Bell,
   Users,
   Search,
   Calendar,
@@ -175,7 +173,15 @@ export default function ClinicShell({ children }: ClinicShellProps) {
 
   const newPatientsToday = patientSummary?.newPatients;
   const followupPatientsToday = patientSummary?.followupPatients;
-  const totalPatients = patientSummary?.totalPatients;
+
+  /**
+   * ✅ FIX:
+   * zeroBilled is a checkbox on a visit (can be N or F), so it must NOT increase total.
+   * Total patients shown in header must be: N + F only.
+   */
+  const totalPatientsDerived =
+    (typeof newPatientsToday === 'number' ? newPatientsToday : 0) +
+    (typeof followupPatientsToday === 'number' ? followupPatientsToday : 0);
 
   // Search state (same as your existing)
   const [searchTerm, setSearchTerm] = useState('');
@@ -471,7 +477,7 @@ export default function ClinicShell({ children }: ClinicShellProps) {
                     ? '—'
                     : summaryLoading && !patientSummary
                       ? '…'
-                      : (totalPatients ?? 0)}
+                      : totalPatientsDerived}
                 </div>
               </div>
             </div>

@@ -1,3 +1,4 @@
+// apps/web/components/dashboard/DoctorQueueCard.tsx
 'use client';
 
 import * as React from 'react';
@@ -18,10 +19,18 @@ const statusDotClass: Record<VisitStatus, string> = {
   DONE: 'bg-emerald-500',
 };
 
+const SLOTS_PER_COLUMN = 6;
+
 function labelForColumn(status: VisitStatus): string {
   if (status === 'QUEUED') return 'WAITING';
   if (status === 'IN_PROGRESS') return 'IN_PROCESS';
   return 'DONE';
+}
+
+function emptyTextForColumn(status: VisitStatus): string {
+  if (status === 'QUEUED') return 'No patients waiting.';
+  if (status === 'IN_PROGRESS') return 'No visits in progress.';
+  return 'No completed visits yet.';
 }
 
 function getVisitLabel(v: PatientQueueItem): string {
@@ -66,28 +75,28 @@ export default function DoctorQueueCard() {
 
   const todayIso = React.useMemo(() => clinicDateISO(new Date()), []);
 
-  // clinic-wide queue, filtered per column
-  const waitingQ = useGetPatientQueueQuery(
-    { date: todayIso, status: 'QUEUED' },
-    { skip: !canUseApi },
+  // ✅ ONE request only
+  const queueQ = useGetPatientQueueQuery({ date: todayIso }, { skip: !canUseApi });
+
+  const allItems = (queueQ.data?.items ?? []) as PatientQueueItem[];
+
+  const waiting = React.useMemo(() => allItems.filter((x) => x.status === 'QUEUED'), [allItems]);
+  const inProgress = React.useMemo(
+    () => allItems.filter((x) => x.status === 'IN_PROGRESS'),
+    [allItems],
   );
+  const done = React.useMemo(() => allItems.filter((x) => x.status === 'DONE'), [allItems]);
 
-  const inProcessQ = useGetPatientQueueQuery(
-    { date: todayIso, status: 'IN_PROGRESS' },
-    { skip: !canUseApi },
-  );
-
-  const doneQ = useGetPatientQueueQuery({ date: todayIso, status: 'DONE' }, { skip: !canUseApi });
-
-  const openClinicVisit = (visitId: string) => {
-    router.push(`/visits/${visitId}`);
-  };
-
-  const cols: Array<{ status: VisitStatus; data?: PatientQueueItem[]; loading: boolean }> = [
-    { status: 'QUEUED', data: waitingQ.data?.items as any, loading: waitingQ.isLoading },
-    { status: 'IN_PROGRESS', data: inProcessQ.data?.items as any, loading: inProcessQ.isLoading },
-    { status: 'DONE', data: doneQ.data?.items as any, loading: doneQ.isLoading },
+  const cols: Array<{ status: VisitStatus; data: PatientQueueItem[] }> = [
+    { status: 'QUEUED', data: waiting },
+    { status: 'IN_PROGRESS', data: inProgress },
+    { status: 'DONE', data: done },
   ];
+
+  const loading = queueQ.isLoading || queueQ.isFetching;
+  const error = !!queueQ.isError;
+
+  const openClinicVisit = (visitId: string) => router.push(`/visits/${visitId}`);
 
   return (
     <Card className="w-full rounded-2xl border-none bg-white px-4 pb-4 pt-2 shadow-sm">
@@ -95,43 +104,72 @@ export default function DoctorQueueCard() {
         <h2 className="text-lg font-semibold text-gray-900">Patient Queue</h2>
       </div>
 
-      <div className="grid gap-8 md:grid-cols-3">
-        {cols.map((c) => {
-          const visits = (c.data ?? []) as PatientQueueItem[];
-          const loading = c.loading;
+      {!canUseApi ? (
+        <div className="mt-2 rounded-xl bg-gray-50 px-3 py-3 text-[11px] text-gray-400">
+          Please log in to view the queue.
+        </div>
+      ) : (
+        <div className="grid gap-8 md:grid-cols-3">
+          {cols.map((c) => {
+            const ordered =
+              c.status === 'DONE'
+                ? [...c.data].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
+                : [...c.data].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
 
-          // For DONE, show latest first; others oldest first.
-          const ordered =
-            c.status === 'DONE'
-              ? [...visits].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0)).slice(0, 4)
-              : [...visits].sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0)).slice(0, 4);
+            const visible = ordered.slice(0, SLOTS_PER_COLUMN);
 
-          return (
-            <div key={c.status}>
-              <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                {labelForColumn(c.status)}
+            return (
+              <div key={c.status}>
+                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  {labelForColumn(c.status)}
+                </div>
+
+                <div className="space-y-2">
+                  {error ? (
+                    <>
+                      <PlaceholderBlock text="Couldn’t load." />
+                      {Array.from({ length: SLOTS_PER_COLUMN - 1 }).map((_, i) => (
+                        <PlaceholderBlock key={`err-${i}`} text="—" />
+                      ))}
+                    </>
+                  ) : loading ? (
+                    Array.from({ length: SLOTS_PER_COLUMN }).map((_, i) => (
+                      <PlaceholderBlock key={`load-${i}`} text="Loading…" />
+                    ))
+                  ) : visible.length === 0 ? (
+                    <>
+                      <PlaceholderBlock text={emptyTextForColumn(c.status)} />
+                      {Array.from({ length: SLOTS_PER_COLUMN - 1 }).map((_, i) => (
+                        <PlaceholderBlock key={`empty-${i}`} text="—" />
+                      ))}
+                    </>
+                  ) : (
+                    <>
+                      {visible.map((v) => (
+                        <QueueItemRow
+                          key={v.visitId}
+                          label={getVisitLabel(v)}
+                          status={v.status}
+                          onClick={() => openClinicVisit(v.visitId)}
+                        />
+                      ))}
+
+                      {visible.length < SLOTS_PER_COLUMN
+                        ? Array.from({ length: SLOTS_PER_COLUMN - visible.length }).map((_, i) => (
+                            <PlaceholderBlock
+                              key={`pad-${i}`}
+                              text={i === 0 ? emptyTextForColumn(c.status) : '—'}
+                            />
+                          ))
+                        : null}
+                    </>
+                  )}
+                </div>
               </div>
-
-              <div className="space-y-2">
-                {loading ? (
-                  <PlaceholderBlock text="Loading…" />
-                ) : ordered.length === 0 ? (
-                  <PlaceholderBlock text="No visits." />
-                ) : (
-                  ordered.map((v) => (
-                    <QueueItemRow
-                      key={v.visitId}
-                      label={getVisitLabel(v)}
-                      status={v.status}
-                      onClick={() => openClinicVisit(v.visitId)}
-                    />
-                  ))
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </Card>
   );
 }

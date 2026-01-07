@@ -7,6 +7,7 @@ import { toast } from 'react-toastify';
 import type { PatientId, VisitCreate } from '@dms/types';
 import {
   useGetPatientByIdQuery,
+  useGetPatientVisitsQuery,
   useCreateVisitMutation,
   type ErrorResponse,
 } from '@/src/store/api';
@@ -36,7 +37,22 @@ const asErrorResponse = (data: unknown): ErrorResponse | null => {
   return null;
 };
 
-type VisitTag = 'N' | 'F' | 'Z';
+type VisitTag = 'N' | 'F';
+
+type VisitSummaryItem = {
+  visitId: string;
+  visitDate?: string;
+  createdAt?: number;
+  opdNo?: string;
+  tag?: string;
+};
+
+function safeVisitLabel(v: VisitSummaryItem) {
+  const date = v.visitDate ? String(v.visitDate) : '—';
+  const idShort = v.visitId ? `#${String(v.visitId).slice(0, 8)}` : '';
+  const opd = v.opdNo ? String(v.opdNo) : idShort;
+  return `${date} • ${opd}`;
+}
 
 export default function RegisterVisitPage() {
   const router = useRouter();
@@ -47,6 +63,9 @@ export default function RegisterVisitPage() {
 
   const [reason, setReason] = React.useState('');
   const [tag, setTag] = React.useState<VisitTag | undefined>('N');
+  const [zeroBilled, setZeroBilled] = React.useState(false);
+  const [anchorVisitId, setAnchorVisitId] = React.useState<string | undefined>(undefined);
+
   const [submitting, setSubmitting] = React.useState(false);
 
   const {
@@ -54,6 +73,10 @@ export default function RegisterVisitPage() {
     isLoading: patientLoading,
     error: rawPatientError,
   } = useGetPatientByIdQuery(patientId!, {
+    skip: !patientId,
+  });
+
+  const visitsQuery = useGetPatientVisitsQuery(patientId!, {
     skip: !patientId,
   });
 
@@ -70,6 +93,26 @@ export default function RegisterVisitPage() {
     router.back();
   };
 
+  const anchorCandidates = React.useMemo(() => {
+    const items = (visitsQuery.data as any)?.items as VisitSummaryItem[] | undefined;
+    const list = Array.isArray(items) ? items : [];
+
+    return list
+      .filter((v) => v && v.visitId && v.tag === 'N')
+      .slice()
+      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  }, [visitsQuery.data]);
+
+  React.useEffect(() => {
+    if (tag !== 'F') {
+      setAnchorVisitId(undefined);
+      return;
+    }
+
+    // Default anchor to latest N if not chosen yet
+    setAnchorVisitId((prev) => prev ?? anchorCandidates[0]?.visitId ?? undefined);
+  }, [tag, anchorCandidates]);
+
   const handleSubmit: React.FormEventHandler = async (e) => {
     e.preventDefault();
 
@@ -83,11 +126,17 @@ export default function RegisterVisitPage() {
       return;
     }
 
-    // ✅ Backend expects ONLY: patientId, reason, tag?
+    if (tag === 'F' && !anchorVisitId) {
+      toast.error('Please select the New (N) visit this follow-up refers to.');
+      return;
+    }
+
     const payload: VisitCreate = {
       patientId,
       reason: reason.trim(),
       ...(tag ? { tag } : {}),
+      ...(zeroBilled ? { zeroBilled: true } : {}),
+      ...(tag === 'F' && anchorVisitId ? { anchorVisitId: anchorVisitId as any } : {}),
     };
 
     try {
@@ -156,7 +205,7 @@ export default function RegisterVisitPage() {
                   </div>
                   <div className="flex gap-2">
                     <dt className="w-28 text-gray-500">SD-ID</dt>
-                    <dd>{patient.patientId}</dd>
+                    <dd>{(patient as any)?.sdId ?? patient.patientId}</dd>
                   </div>
                 </dl>
               </div>
@@ -187,19 +236,46 @@ export default function RegisterVisitPage() {
                       />
                       <span>F</span>
                     </label>
-                    <label className="inline-flex items-center gap-1">
+
+                    <label className="inline-flex items-center gap-2 ml-2">
                       <input
-                        type="radio"
+                        type="checkbox"
                         className="h-3 w-3"
-                        value="Z"
-                        checked={tag === 'Z'}
-                        onChange={() => setTag('Z')}
+                        checked={zeroBilled}
+                        onChange={(e) => setZeroBilled(e.target.checked)}
                       />
-                      <span>Z</span>
+                      <span>Zero billed (Z)</span>
                     </label>
                   </div>
                 </div>
               </div>
+
+              {tag === 'F' ? (
+                <div className="space-y-1">
+                  <label className="text-sm font-medium text-gray-800">
+                    Follow-up for New (N) Visit
+                  </label>
+                  <select
+                    className="h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm"
+                    value={anchorVisitId ?? ''}
+                    onChange={(e) => setAnchorVisitId(e.target.value || undefined)}
+                  >
+                    {anchorCandidates.length === 0 ? (
+                      <option value="">No prior N visits found</option>
+                    ) : (
+                      <>
+                        <option value="">Select an N visit…</option>
+                        {anchorCandidates.map((v) => (
+                          <option key={v.visitId} value={v.visitId}>
+                            {safeVisitLabel(v)}
+                          </option>
+                        ))}
+                      </>
+                    )}
+                  </select>
+                  <p className="h-3 text-xs">&nbsp;</p>
+                </div>
+              ) : null}
 
               <div className="space-y-1">
                 <label htmlFor="reason" className="text-sm font-medium text-gray-800">

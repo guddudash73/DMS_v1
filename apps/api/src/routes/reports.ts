@@ -56,6 +56,11 @@ const asyncHandler =
     fn(req, res, next).catch(next);
   };
 
+/**
+ * ✅ FIX:
+ * totalPatients MUST be N + F only.
+ * zeroBilledVisits (Z) is a subset of those visits, NOT additive.
+ */
 async function buildDailyPatientSummary(date: string): Promise<DailyPatientSummary> {
   const visits = await visitRepository.listByDate(date);
 
@@ -73,21 +78,15 @@ async function buildDailyPatientSummary(date: string): Promise<DailyPatientSumma
   let zeroBilledVisits = 0;
 
   for (const visit of filteredVisits) {
-    switch (visit.tag) {
-      case 'N':
-        newPatients++;
-        break;
-      case 'F':
-        followupPatients++;
-        break;
-      case 'Z':
-        zeroBilledVisits++;
-        break;
-      default:
-    }
+    if (visit.tag === 'N') newPatients++;
+    else if (visit.tag === 'F') followupPatients++;
+
+    if (visit.zeroBilled === true) zeroBilledVisits++;
   }
 
-  const totalPatients = newPatients + followupPatients + zeroBilledVisits;
+  // ✅ Visitors total = N + F (Z is NOT added)
+  const totalPatients = newPatients + followupPatients;
+
   return { date, newPatients, followupPatients, zeroBilledVisits, totalPatients };
 }
 
@@ -212,6 +211,7 @@ router.get(
           visitDate: v.visitDate,
           status: v.status,
           tag: v.tag,
+          zeroBilled: (v as any).zeroBilled === true ? true : undefined,
           reason: v.reason,
           billingAmount: v.billingAmount,
           createdAt: v.createdAt,
@@ -236,10 +236,6 @@ router.get(
   }),
 );
 
-/**
- * ✅ Clinic-wide "recent completed visits"
- * GET /reports/daily/recent-completed?date=YYYY-MM-DD&limit=5
- */
 router.get(
   '/daily/recent-completed',
   asyncHandler(async (req, res) => {

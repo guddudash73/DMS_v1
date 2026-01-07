@@ -17,8 +17,9 @@ type Props = {
   sdId?: string;
   opdNo?: string;
 
+  // kept for compatibility, but intentionally not used anymore
   doctorName?: string;
-  doctorRegdLabel?: string; // ✅ NEW
+  doctorRegdLabel?: string;
   visitDateLabel?: string;
 
   lines: RxLineType[];
@@ -71,22 +72,6 @@ function formatAgeSex(age?: number | string, sex?: PatientSex) {
   return ageStr || sexStr || '—';
 }
 
-function formatDateDDMMYYYY(d: Date) {
-  return d.toLocaleDateString('en-GB'); // dd/mm/yyyy
-}
-
-function parseDateFromVisitLabel(visitDateLabel?: string): Date | null {
-  if (!visitDateLabel) return null;
-
-  const raw = visitDateLabel.replace('Visit:', '').trim();
-  if (!raw) return null;
-
-  const d = new Date(raw);
-  if (!Number.isFinite(d.getTime())) return null;
-
-  return d;
-}
-
 export function PrescriptionPrintSheet(props: Props) {
   const {
     patientName,
@@ -95,8 +80,6 @@ export function PrescriptionPrintSheet(props: Props) {
     patientSex,
     sdId,
     opdNo,
-    doctorName,
-    doctorRegdLabel,
     visitDateLabel,
     lines,
     receptionNotes,
@@ -107,8 +90,6 @@ export function PrescriptionPrintSheet(props: Props) {
 
   const hasNotes = !!receptionNotes?.trim();
   const ageSex = formatAgeSex(patientAge, patientSex);
-
-  const rxDate = formatDateDDMMYYYY(parseDateFromVisitLabel(visitDateLabel) ?? new Date());
 
   if (!mounted) return null;
 
@@ -188,24 +169,21 @@ export function PrescriptionPrintSheet(props: Props) {
 
           <div className="mt-2 h-px w-full bg-emerald-600/60" />
 
-          {/* Doctor row + Date */}
+          {/* Doctor row (left + right) */}
           <div className="shrink-0 pt-3 px-4">
             <div className="flex items-start justify-between gap-6">
+              {/* ✅ Left doctor (hard-coded) */}
               <div className="flex flex-col">
-                {/* ✅ no hardcode, show '—' while loading */}
-                <div className="text-[12px] font-bold text-gray-900">
-                  {doctorName?.trim() ? doctorName : '—'}
-                </div>
-
-                {/* ✅ dynamic regd label */}
-                <div className="mt-0.5 text-[11px] font-semibold text-gray-700">
-                  {doctorRegdLabel?.trim() ? doctorRegdLabel : '—'}
-                </div>
+                <div className="text-[12px] font-bold text-gray-900">Dr. Soumendra Sarangi</div>
+                <div className="mt-0.5 text-[11px] font-light text-gray-700">B.D.S. Regd. - 68</div>
               </div>
 
-              <div className="flex flex-col items-end text-[11px]">
-                <div className="text-gray-600">Date</div>
-                <div className="font-semibold text-gray-900">{rxDate}</div>
+              {/* ✅ Right doctor (replaces Date block) */}
+              <div className="flex flex-col items-end text-right">
+                <div className="text-[12px] font-bold text-gray-900">Dr. Vaishnovee Sarangi</div>
+                <div className="mt-0.5 text-[11px] font-light text-gray-700">
+                  B.D.S. Redg. - 3057
+                </div>
               </div>
             </div>
 
@@ -259,7 +237,6 @@ export function PrescriptionPrintSheet(props: Props) {
           {/* Medicines */}
           <div className="min-h-0 flex-1 pt-4">
             {lines.length === 0 ? (
-              // ✅ Blank area for "blank Rx" print (no placeholder text)
               <div className="h-full" />
             ) : (
               <ol className="space-y-2 text-[14px] leading-6 text-gray-900">
