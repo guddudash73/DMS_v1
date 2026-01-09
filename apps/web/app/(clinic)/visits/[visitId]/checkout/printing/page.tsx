@@ -395,9 +395,9 @@ export default function VisitCheckoutPrintingPage() {
               type="button"
               variant="outline"
               className="w-full max-w-sm rounded-2xl py-6 text-base"
-              onClick={printRx}
+              onClick={() => router.push(`/visits/${visitId}/checkout/printing/prescription`)}
               disabled={!rxAvailable}
-              title={!rxAvailable ? 'No prescription available' : 'Print prescription'}
+              title={!rxAvailable ? 'No prescription available' : 'Open print preview'}
             >
               Print Prescription
             </Button>

@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
-import type { RxLineType } from '@dms/types';
+import type { RxLineType, Visit } from '@dms/types';
+import { useGetVisitRxQuery } from '@/src/store/api';
+import { formatClinicDateShort } from '@/src/lib/clinicTime';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
@@ -15,6 +17,11 @@ type Props = {
   patientSex?: PatientSex;
 
   sdId?: string;
+
+  /**
+   * NOTE:
+   * This might be current visit OPD; header will prefer anchor/new OPD from meta.
+   */
   opdNo?: string;
 
   // kept for compatibility, but intentionally not used anymore
@@ -23,6 +30,12 @@ type Props = {
   visitDateLabel?: string;
 
   lines: RxLineType[];
+
+  currentVisitId?: string;
+  chainVisitIds?: string[];
+  visitMetaMap?: Map<string, Visit>;
+  printWithHistory?: boolean;
+
   receptionNotes?: string;
 };
 
@@ -72,6 +85,80 @@ function formatAgeSex(age?: number | string, sex?: PatientSex) {
   return ageStr || sexStr || '—';
 }
 
+function getVisitOpdNo(v?: Visit): string | undefined {
+  if (!v) return undefined;
+  const anyV = v as any;
+  const raw =
+    anyV?.opdNo ??
+    anyV?.opdNumber ??
+    anyV?.opdId ??
+    anyV?.opd ??
+    anyV?.opd_no ??
+    anyV?.opd_no_str ??
+    undefined;
+
+  if (raw == null) return undefined;
+  const s = String(raw).trim();
+  return s || undefined;
+}
+
+function VisitRxBlock(props: {
+  visitId: string;
+  isCurrent: boolean;
+  currentLines: RxLineType[];
+  visit?: Visit;
+
+  showOpdInline?: boolean;
+  opdInlineText?: string;
+}) {
+  const { visitId, isCurrent, currentLines, visit, showOpdInline, opdInlineText } = props;
+
+  const rxQuery = useGetVisitRxQuery({ visitId }, { skip: isCurrent || !visitId });
+
+  const lines = isCurrent ? currentLines : (rxQuery.data?.rx?.lines ?? []);
+  const visitDate = (visit as any)?.visitDate as string | undefined;
+  const reason = (visit as any)?.reason as string | undefined;
+
+  if (!lines.length && !reason && !visitDate) return <div className="h-2 rx-block rx-block-prev" />;
+
+  return (
+    <div className={`rx-block ${isCurrent ? 'rx-block-current' : 'rx-block-prev'}`}>
+      <div className="rx-block-meta mb-2 flex items-baseline justify-between">
+        <div className="text-[12px] font-bold text-gray-900">
+          {visitDate ? formatClinicDateShort(visitDate) : '—'}
+        </div>
+
+        <div className="ml-4 flex min-w-0 flex-1 items-baseline justify-end gap-3">
+          <div className="min-w-0 flex-1 truncate text-right text-[11px] font-medium text-gray-700">
+            {reason?.trim() ? reason.trim() : ''}
+          </div>
+
+          {showOpdInline && opdInlineText ? (
+            <div className="shrink-0 text-right text-[11px] font-semibold text-gray-900">
+              {opdInlineText}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {lines.length ? (
+        <ol className="space-y-1 text-[13px] leading-5 text-gray-900">
+          {lines.map((l, idx) => (
+            <li key={idx} className="flex gap-2">
+              <div className="w-5 shrink-0 text-right font-medium">{idx + 1}.</div>
+              <div className="font-medium">{buildLineText(l)}</div>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <div className="text-[12px] text-gray-500">No medicines recorded.</div>
+      )}
+
+      <div className="rx-block-sep mt-3 h-px w-full bg-gray-200" />
+    </div>
+  );
+}
+
 export function PrescriptionPrintSheet(props: Props) {
   const {
     patientName,
@@ -83,6 +170,10 @@ export function PrescriptionPrintSheet(props: Props) {
     visitDateLabel,
     lines,
     receptionNotes,
+
+    currentVisitId: currentVisitIdProp,
+    chainVisitIds: chainVisitIdsProp,
+    visitMetaMap: visitMetaMapProp,
   } = props;
 
   const [mounted, setMounted] = useState(false);
@@ -90,6 +181,35 @@ export function PrescriptionPrintSheet(props: Props) {
 
   const hasNotes = !!receptionNotes?.trim();
   const ageSex = formatAgeSex(patientAge, patientSex);
+
+  const currentVisitId = useMemo(() => currentVisitIdProp ?? 'CURRENT', [currentVisitIdProp]);
+
+  const chainVisitIds = useMemo(() => {
+    if (chainVisitIdsProp && chainVisitIdsProp.length) return chainVisitIdsProp;
+    return [currentVisitId];
+  }, [chainVisitIdsProp, currentVisitId]);
+
+  const visitMetaMap = useMemo(
+    () => visitMetaMapProp ?? new Map<string, Visit>(),
+    [visitMetaMapProp],
+  );
+
+  // ✅ anchor/new visit is always first
+  const anchorVisitId = useMemo(() => chainVisitIds[0], [chainVisitIds]);
+
+  // ✅ HEADER OPD MUST BE ANCHOR/NEW VISIT OPD (fallback to prop)
+  const headerOpdNo = useMemo(() => {
+    const anchorVisit = anchorVisitId ? visitMetaMap.get(anchorVisitId) : undefined;
+    const anchorOpd = getVisitOpdNo(anchorVisit);
+    if (anchorOpd) return anchorOpd;
+    return opdNo ?? '—';
+  }, [anchorVisitId, visitMetaMap, opdNo]);
+
+  // ✅ Header micro-text
+  const CONTACT_NUMBER = '9938942846';
+  const ADDRESS_ONE_LINE = 'A-33, STALWART COMPLEX, UNIT - IV, BHUBANESWAR';
+  const CLINIC_HOURS =
+    'Clinic hours: 10 : 00 AM - 01 : 30 PM & 06 : 00 PM - 08:00 PM, Sunday Closed';
 
   if (!mounted) return null;
 
@@ -120,14 +240,31 @@ export function PrescriptionPrintSheet(props: Props) {
             box-sizing: border-box;
             background: white;
           }
+
+          body.print-rx.print-rx-current-only .rx-print-header,
+          body.print-rx.print-rx-current-only .rx-print-doctor,
+          body.print-rx.print-rx-current-only .rx-print-patient,
+          body.print-rx.print-rx-current-only .rx-print-sep-top,
+          body.print-rx.print-rx-current-only .rx-print-sep-mid {
+            visibility: hidden !important;
+          }
+
+          body.print-rx.print-rx-current-only .rx-print-notes {
+            display: none !important;
+          }
+
+          body.print-rx.print-rx-current-only .rx-block-prev {
+            visibility: hidden !important;
+          }
         }
       `}</style>
 
       <div className="rx-a4 text-black">
         <div className="flex h-full flex-col">
           {/* Header */}
-          <div className="shrink-0 px-10">
+          <div className="rx-print-header shrink-0 px-10">
             <div className="flex items-start justify-between gap-4">
+              {/* Left Logo */}
               <div className="relative h-20 w-20">
                 <Image
                   src="/rx-logo-r.png"
@@ -139,21 +276,22 @@ export function PrescriptionPrintSheet(props: Props) {
                 />
               </div>
 
-              <div className="mt-2 flex w-full items-center justify-center gap-10">
-                <div>
-                  <div className="text-[12px] font-semibold tracking-[0.25em] text-emerald-600">
-                    CONTACT
-                  </div>
-                  <div className="mt-1 text-[14px] font-semibold text-gray-900">9938942846</div>
+              {/* Center: Contact + address + hours (Emergency removed) */}
+              <div className="mt-2 flex w-full flex-col items-center justify-center text-center">
+                <div className="text-[12px] font-semibold tracking-[0.25em] text-emerald-600">
+                  CONTACT
                 </div>
-                <div>
-                  <div className="text-[12px] font-semibold tracking-widest text-emerald-600">
-                    EMERGENCY
-                  </div>
-                  <div className="mt-1 text-[14px] font-semibold text-gray-900">9938942846</div>
+                <div className="mt-1 text-[14px] font-semibold text-gray-900">{CONTACT_NUMBER}</div>
+
+                <div className="mt-1 max-w-[120mm] text-[9px] font-medium leading-4 text-gray-800">
+                  {ADDRESS_ONE_LINE}
+                </div>
+                <div className="max-w-[120mm] text-[9px] font-medium leading-4 text-red-400 uppercase">
+                  {CLINIC_HOURS}
                 </div>
               </div>
 
+              {/* Right Logo */}
               <div className="relative h-18 w-42">
                 <Image
                   src="/dashboard-logo.png"
@@ -167,18 +305,16 @@ export function PrescriptionPrintSheet(props: Props) {
             </div>
           </div>
 
-          <div className="mt-2 h-px w-full bg-emerald-600/60" />
+          <div className="rx-print-sep-top mt-2 h-px w-full bg-emerald-600/60" />
 
-          {/* Doctor row (left + right) */}
-          <div className="shrink-0 pt-3 px-4">
+          {/* Doctor row */}
+          <div className="rx-print-doctor shrink-0 px-4 pt-3">
             <div className="flex items-start justify-between gap-6">
-              {/* ✅ Left doctor (hard-coded) */}
               <div className="flex flex-col">
                 <div className="text-[12px] font-bold text-gray-900">Dr. Soumendra Sarangi</div>
                 <div className="mt-0.5 text-[11px] font-light text-gray-700">B.D.S. Regd. - 68</div>
               </div>
 
-              {/* ✅ Right doctor (replaces Date block) */}
               <div className="flex flex-col items-end text-right">
                 <div className="text-[12px] font-bold text-gray-900">Dr. Vaishnovee Sarangi</div>
                 <div className="mt-0.5 text-[11px] font-light text-gray-700">
@@ -186,8 +322,11 @@ export function PrescriptionPrintSheet(props: Props) {
                 </div>
               </div>
             </div>
+          </div>
 
-            <div className="mt-3 flex w-full justify-between gap-6">
+          {/* Patient meta */}
+          <div className="rx-print-patient shrink-0 px-4 pt-2">
+            <div className="mt-1 flex w-full justify-between gap-6">
               <div className="space-y-1 text-[11px] text-gray-800">
                 <div className="flex gap-3">
                   <div className="w-28 text-gray-600">Patient Name</div>
@@ -223,36 +362,45 @@ export function PrescriptionPrintSheet(props: Props) {
                   <div className="font-semibold text-gray-900">{sdId ?? '—'}</div>
                 </div>
 
+                {/* ✅ Header OPD shows PARENT/NEW (anchor) visit OPD */}
                 <div className="flex gap-3">
                   <div className="w-28 text-gray-600">OPD. No</div>
                   <div className="text-gray-600">:</div>
-                  <div className="font-semibold text-gray-900">{opdNo ?? '—'}</div>
+                  <div className="font-semibold text-gray-900">{headerOpdNo}</div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div className="mt-3 h-px w-full bg-gray-900/30" />
+          <div className="rx-print-sep-mid mt-3 h-px w-full bg-gray-900/30" />
 
           {/* Medicines */}
-          <div className="min-h-0 flex-1 pt-4">
-            {lines.length === 0 ? (
-              <div className="h-full" />
-            ) : (
-              <ol className="space-y-2 text-[14px] leading-6 text-gray-900">
-                {lines.map((l, idx) => (
-                  <li key={idx} className="flex gap-3">
-                    <div className="w-6 shrink-0 text-right font-medium">{idx + 1}.</div>
-                    <div className="font-medium">{buildLineText(l)}</div>
-                  </li>
-                ))}
-              </ol>
-            )}
+          <div className="rx-print-medicines min-h-0 flex-1 pt-4">
+            <div className="space-y-4">
+              {chainVisitIds.map((id) => {
+                const v = visitMetaMap.get(id);
+
+                const isAnchor = id === anchorVisitId;
+                const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
+
+                return (
+                  <VisitRxBlock
+                    key={id}
+                    visitId={id === 'CURRENT' ? '' : id}
+                    isCurrent={id === currentVisitId}
+                    currentLines={lines}
+                    visit={v}
+                    showOpdInline={!isAnchor}
+                    opdInlineText={opdInline}
+                  />
+                );
+              })}
+            </div>
           </div>
 
           {/* Notes */}
           {hasNotes ? (
-            <div className="shrink-0 pb-2">
+            <div className="rx-print-notes shrink-0 pb-2">
               <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
                 <div className="text-[11px] font-semibold text-gray-700">Reception Notes</div>
                 <div className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-gray-900">
@@ -262,16 +410,7 @@ export function PrescriptionPrintSheet(props: Props) {
             </div>
           ) : null}
 
-          {/* Footer */}
-          <div className="shrink-0 pb-2">
-            <div className="mt-6 h-px w-full bg-emerald-600/60" />
-            <div className="mt-2 text-[10px] font-medium text-gray-900">
-              <div>A-33</div>
-              <div>STALWART COMPLEX</div>
-              <div>UNIT - IV</div>
-              <div>BHUBANESWAR</div>
-            </div>
-          </div>
+          {/* ✅ Footer removed completely as requested */}
         </div>
       </div>
     </div>,

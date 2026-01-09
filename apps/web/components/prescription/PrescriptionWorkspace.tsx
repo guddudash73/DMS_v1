@@ -493,24 +493,6 @@ export function PrescriptionWorkspace(props: Props) {
           : '';
 
   const showStartRevision = isDone && !isRevisionMode;
-  const canPrint = lines.length > 0;
-
-  const printPrescription = () => {
-    if (!canPrint) return;
-
-    const onAfterPrint = () => {
-      document.body.classList.remove('print-rx');
-      window.removeEventListener('afterprint', onAfterPrint);
-    };
-
-    window.addEventListener('afterprint', onAfterPrint);
-    document.body.classList.add('print-rx');
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => window.print());
-    });
-  };
-
   const canManualSave = canEdit && hydratedRef.current && lines.length > 0;
 
   const saveAndExit = async () => {
@@ -538,6 +520,63 @@ export function PrescriptionWorkspace(props: Props) {
   // Visits (bottom)
   const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', { skip: !patientId });
   const allVisitsRaw = (visitsQuery.data?.items ?? []) as Visit[];
+
+  const currentVisit = visitQuery.data as Visit | undefined;
+
+  const printChain = useMemo(() => {
+    if (!patientId)
+      return { visitIds: [visitId], meta: new Map<string, Visit>(), currentVisitId: visitId };
+
+    const meta = new Map<string, Visit>();
+
+    // Include all known visits (DONE list + current visit if not in list)
+    for (const v of allVisitsRaw) meta.set(v.visitId, v);
+    if (currentVisit) meta.set(currentVisit.visitId, currentVisit);
+
+    const tag = (currentVisit as any)?.tag as string | undefined;
+    const anchorVisitId = (currentVisit as any)?.anchorVisitId as string | undefined;
+
+    const anchorId = tag === 'F' ? anchorVisitId : visitId;
+
+    // If we can’t determine anchor, just print current.
+    if (!anchorId) {
+      return { visitIds: [visitId], meta, currentVisitId: visitId };
+    }
+
+    const chain: Visit[] = [];
+
+    // Anchor
+    const anchor = meta.get(anchorId);
+    if (anchor) chain.push(anchor);
+
+    // Followups of anchor
+    for (const v of meta.values()) {
+      const aId = (v as any)?.anchorVisitId as string | undefined;
+      if (aId && aId === anchorId && v.visitId !== anchorId) chain.push(v);
+    }
+
+    // Ensure current visit is included
+    if (!chain.some((v) => v.visitId === visitId)) {
+      const cur = meta.get(visitId);
+      if (cur) chain.push(cur);
+      else chain.push({ visitId } as any);
+    }
+
+    // Sort old -> new
+    chain.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+
+    // De-dupe
+    const seen = new Set<string>();
+    const visitIds = chain
+      .map((v) => v.visitId)
+      .filter((id) => {
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+
+    return { visitIds, meta, currentVisitId: visitId };
+  }, [patientId, visitId, allVisitsRaw, currentVisit]);
 
   const allVisits = useMemo(() => {
     return [...allVisitsRaw]
@@ -718,16 +757,6 @@ export function PrescriptionWorkspace(props: Props) {
               >
                 Save
               </Button>
-
-              <Button
-                variant="default"
-                className="cursor-pointer rounded-xl"
-                onClick={printPrescription}
-                disabled={!canPrint}
-                title={!canPrint ? 'No medicines to print' : 'Print prescription'}
-              >
-                Print
-              </Button>
             </div>
           </div>
 
@@ -743,21 +772,12 @@ export function PrescriptionWorkspace(props: Props) {
               doctorRegdLabel={resolvedDoctorRegdLabel}
               visitDateLabel={computedVisitDateLabel}
               lines={lines}
+              // ✅ NEW: pass history props to show previous visits under current
+              currentVisitId={printChain.currentVisitId}
+              chainVisitIds={printChain.visitIds}
+              visitMetaMap={printChain.meta}
             />
           </div>
-
-          <PrescriptionPrintSheet
-            patientName={patientName}
-            patientPhone={patientPhone}
-            patientAge={patientAge}
-            patientSex={patientSex}
-            sdId={patientSdId}
-            opdNo={opdNo}
-            doctorName={resolvedDoctorName}
-            doctorRegdLabel={resolvedDoctorRegdLabel}
-            visitDateLabel={computedVisitDateLabel}
-            lines={lines}
-          />
         </div>
 
         {/* Medicines */}
@@ -797,7 +817,7 @@ export function PrescriptionWorkspace(props: Props) {
           </div>
         </Card>
 
-        {/* Bottom Visits section (NO View All button anymore) */}
+        {/* Bottom Visits section */}
         <Card className="w-full rounded-2xl border bg-white p-4 lg:col-span-10">
           <div className="flex items-center justify-between gap-3">
             <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>

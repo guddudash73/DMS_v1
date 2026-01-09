@@ -1,10 +1,10 @@
-// apps/web/components/prescription/PrescriptionPreview.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
-import type { RxLineType } from '@dms/types';
-import { clinicDateISO } from '@/src/lib/clinicTime';
+import type { RxLineType, Visit } from '@dms/types';
+import { clinicDateISO, formatClinicDateShort } from '@/src/lib/clinicTime';
+import { useGetVisitRxQuery } from '@/src/store/api';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
@@ -16,6 +16,11 @@ type Props = {
   patientSex?: PatientSex;
 
   sdId?: string;
+
+  /**
+   * NOTE:
+   * This can still be passed, but header OPD will prefer the parent/new (anchor) visit OPD from meta.
+   */
   opdNo?: string;
 
   // kept for compatibility, but intentionally not used anymore
@@ -28,8 +33,22 @@ type Props = {
    */
   visitDateLabel?: string;
 
+  /**
+   * Current visit lines (the visit you are editing / viewing)
+   */
   lines: RxLineType[];
+
   receptionNotes?: string;
+
+  /**
+   * ✅ OPTIONAL: pass these to show History blocks in preview, just like print sheet.
+   * - currentVisitId = the visit being edited/viewed now
+   * - chainVisitIds = [anchor, ...followups, current]
+   * - visitMetaMap = map for date + reason (+ opd fields)
+   */
+  currentVisitId?: string;
+  chainVisitIds?: string[];
+  visitMetaMap?: Map<string, Visit>;
 };
 
 const FREQ_LABEL: Record<RxLineType['frequency'], string> = {
@@ -88,6 +107,87 @@ function extractIsoFromVisitLabel(visitDateLabel?: string): string | null {
   return null;
 }
 
+/**
+ * Extract OPD number for a visit from meta, trying multiple keys.
+ * Returns the number only, or undefined.
+ */
+function getVisitOpdNo(v?: Visit): string | undefined {
+  if (!v) return undefined;
+  const anyV = v as any;
+  const raw =
+    anyV?.opdNo ??
+    anyV?.opdNumber ??
+    anyV?.opdId ??
+    anyV?.opd ??
+    anyV?.opd_no ??
+    anyV?.opd_no_str ??
+    undefined;
+
+  if (raw == null) return undefined;
+  const s = String(raw).trim();
+  return s || undefined;
+}
+
+function VisitRxPreviewBlock(props: {
+  visitId: string;
+  isCurrent: boolean;
+  currentLines: RxLineType[];
+  visit?: Visit;
+
+  // show OPD number (number only) on the right, for followups only
+  showOpdInline?: boolean;
+  opdInlineText?: string;
+}) {
+  const { visitId, isCurrent, currentLines, visit, showOpdInline, opdInlineText } = props;
+
+  // Fetch lines only for non-current visits (history)
+  const rxQuery = useGetVisitRxQuery({ visitId }, { skip: isCurrent || !visitId });
+
+  const lines = isCurrent ? currentLines : (rxQuery.data?.rx?.lines ?? []);
+
+  const visitDate = (visit as any)?.visitDate as string | undefined;
+  const reason = (visit as any)?.reason as string | undefined;
+
+  if (!lines.length && !reason && !visitDate) return <div className="h-2" />;
+
+  return (
+    <div className={`rx-prev-block ${isCurrent ? 'rx-prev-block-current' : 'rx-prev-block-prev'}`}>
+      <div className="mb-2 flex items-baseline justify-between">
+        <div className="text-[12px] font-bold text-gray-900">
+          {visitDate ? formatClinicDateShort(visitDate) : '—'}
+        </div>
+
+        <div className="ml-4 flex min-w-0 flex-1 items-baseline justify-end gap-3">
+          <div className="min-w-0 flex-1 truncate text-right text-[11px] font-medium text-gray-700">
+            {reason?.trim() ? reason.trim() : ''}
+          </div>
+
+          {showOpdInline && opdInlineText ? (
+            <div className="shrink-0 text-right text-[11px] font-semibold text-gray-900">
+              {opdInlineText}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      {lines.length === 0 ? (
+        <div className="text-[12px] text-gray-500">No medicines recorded.</div>
+      ) : (
+        <ol className="space-y-1 text-[13px] leading-5 text-gray-900">
+          {lines.map((l, idx) => (
+            <li key={idx} className="flex gap-2">
+              <div className="w-5 shrink-0 text-right font-medium">{idx + 1}.</div>
+              <div className="font-medium">{buildLineText(l)}</div>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      <div className="mt-3 h-px w-full bg-gray-200" />
+    </div>
+  );
+}
+
 export function PrescriptionPreview({
   patientName,
   patientPhone,
@@ -98,23 +198,66 @@ export function PrescriptionPreview({
   visitDateLabel,
   lines,
   receptionNotes,
+
+  currentVisitId: currentVisitIdProp,
+  chainVisitIds: chainVisitIdsProp,
+  visitMetaMap: visitMetaMapProp,
 }: Props) {
   const hasNotes = !!receptionNotes?.trim();
   const ageSex = formatAgeSex(patientAge, patientSex);
 
-  // ✅ clinic day key used for Regd. Date (kept)
   const visitISO = useMemo(
     () => extractIsoFromVisitLabel(visitDateLabel) ?? clinicDateISO(new Date()),
     [visitDateLabel],
   );
 
+  const currentVisitId = useMemo(() => currentVisitIdProp ?? 'CURRENT', [currentVisitIdProp]);
+
+  const chainVisitIds = useMemo(() => {
+    if (chainVisitIdsProp && chainVisitIdsProp.length) return chainVisitIdsProp;
+    return [currentVisitId];
+  }, [chainVisitIdsProp, currentVisitId]);
+
+  const visitMetaMap = useMemo(
+    () => visitMetaMapProp ?? new Map<string, Visit>(),
+    [visitMetaMapProp],
+  );
+
+  const historyEnabled =
+    !!currentVisitIdProp &&
+    !!chainVisitIdsProp &&
+    chainVisitIdsProp.length > 0 &&
+    !!visitMetaMapProp;
+
+  // ✅ anchor/new visit is first in chain
+  const anchorVisitId = useMemo(() => {
+    if (!historyEnabled) return undefined;
+    return chainVisitIds[0];
+  }, [historyEnabled, chainVisitIds]);
+
+  // ✅ HEADER OPD MUST BE THE PARENT/NEW VISIT OPD
+  const headerOpdNo = useMemo(() => {
+    if (historyEnabled && anchorVisitId) {
+      const anchorVisit = visitMetaMap.get(anchorVisitId);
+      const anchorOpd = getVisitOpdNo(anchorVisit);
+      if (anchorOpd) return anchorOpd;
+    }
+    // fallback to prop if meta not available
+    return opdNo ?? '—';
+  }, [historyEnabled, anchorVisitId, visitMetaMap, opdNo]);
+
+  // ✅ Header micro-text (match print header style)
+  const CONTACT_NUMBER = '9938942846';
+  const ADDRESS_ONE_LINE = 'A-33, STALWART COMPLEX, UNIT - IV, BHUBANESWAR';
+  const CLINIC_HOURS =
+    'Clinic hours: 10 : 00 AM - 01 : 30 PM & 06 : 00 PM - 08:00 PM, Sunday Closed';
+
   /**
    * ✅ Responsive shrink-to-fit:
-   * We keep a fixed "design size" sheet and scale it down to fit whatever space is available.
-   * This keeps the layout identical on small cards and large cards.
+   * Keep fixed "design size" and scale down to fit container.
    */
-  const BASE_W = 760; // design width
-  const BASE_H = Math.round((BASE_W * 297) / 210); // A4 aspect ratio
+  const BASE_W = 760;
+  const BASE_H = Math.round((BASE_W * 297) / 210);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
 
@@ -150,9 +293,10 @@ export function PrescriptionPreview({
         >
           <div className="h-full w-full overflow-hidden rounded-xl border bg-white shadow-sm">
             <div className="flex h-full flex-col">
-              {/* Header */}
+              {/* Header (updated like print sheet) */}
               <div className="shrink-0 px-6 pt-4">
                 <div className="flex items-start justify-between gap-4">
+                  {/* Left Logo */}
                   <div className="relative h-16 w-16">
                     <Image
                       src="/rx-logo-r.png"
@@ -164,21 +308,22 @@ export function PrescriptionPreview({
                     />
                   </div>
 
-                  <div className="mt-2 flex w-full items-center justify-center gap-10">
-                    <div>
-                      <div className="text-[10px] font-semibold tracking-[0.25em] text-emerald-600">
-                        CONTACT
-                      </div>
-                      <div className="mt-1 text-[11px] font-semibold text-gray-900">9938942846</div>
+                  {/* Center: Contact + address + clinic hours (Emergency removed) */}
+                  <div className="mt-1 flex w-full flex-col items-center justify-center text-center">
+                    <div className="text-[10px] font-semibold tracking-[0.30em] text-emerald-600">
+                      CONTACT
                     </div>
-                    <div>
-                      <div className="text-[10px] font-semibold tracking-widest text-emerald-600">
-                        EMERGENCY
-                      </div>
-                      <div className="mt-1 text-[11px] font-semibold text-gray-900">9938942846</div>
+                    <div className="text-[12px] font-semibold text-gray-900">{CONTACT_NUMBER}</div>
+
+                    <div className="mt-1 max-w-[520px] text-[9px] font-medium leading-4  text-gray-700">
+                      {ADDRESS_ONE_LINE}
+                    </div>
+                    <div className="max-w-[520px] text-[9px] font-medium leading-4 text-red-400 uppercase">
+                      {CLINIC_HOURS}
                     </div>
                   </div>
 
+                  {/* Right Logo */}
                   <div className="relative h-14 w-38">
                     <Image
                       src="/dashboard-logo.png"
@@ -191,13 +336,12 @@ export function PrescriptionPreview({
                   </div>
                 </div>
 
-                <div className="mt-1 h-px w-full bg-emerald-600/60" />
+                <div className="mt-2 h-px w-full bg-emerald-600/60" />
               </div>
 
               {/* Doctor row */}
               <div className="shrink-0 px-6 pt-3">
                 <div className="flex items-start justify-between gap-6">
-                  {/* ✅ Left doctor (hard-coded) */}
                   <div className="min-w-0 flex flex-col">
                     <div className="text-[0.8rem] font-bold text-gray-900">
                       Dr. Soumendra Sarangi
@@ -207,7 +351,6 @@ export function PrescriptionPreview({
                     </div>
                   </div>
 
-                  {/* ✅ Right doctor (replaces date area) */}
                   <div className="min-w-0 flex flex-col items-end text-right">
                     <div className="text-[0.8rem] font-bold text-gray-900">
                       Dr. Vaishnovee Sarangi
@@ -253,10 +396,11 @@ export function PrescriptionPreview({
                       <div className="font-semibold text-gray-900">{sdId ?? '—'}</div>
                     </div>
 
+                    {/* ✅ Header OPD shows PARENT/NEW (anchor) visit OPD */}
                     <div className="flex gap-3">
                       <div className="w-20 text-gray-600">OPD. No</div>
                       <div className="text-gray-600">:</div>
-                      <div className="font-semibold text-gray-900">{opdNo ?? '—'}</div>
+                      <div className="font-semibold text-gray-900">{headerOpdNo}</div>
                     </div>
                   </div>
                 </div>
@@ -264,19 +408,43 @@ export function PrescriptionPreview({
                 <div className="mt-3 h-px w-full bg-gray-900/30" />
               </div>
 
-              {/* Lines */}
+              {/* Lines / History blocks */}
               <div className="min-h-0 flex-1 px-6 pt-4">
-                {lines.length === 0 ? (
-                  <div className="text-[13px] text-gray-500">No medicines added yet.</div>
+                {!historyEnabled ? (
+                  lines.length === 0 ? (
+                    <div className="text-[13px] text-gray-500">No medicines added yet.</div>
+                  ) : (
+                    <ol className="text-sm leading-6 text-gray-900">
+                      {lines.map((l, idx) => (
+                        <li key={idx} className="flex gap-1">
+                          <div className="w-4 shrink-0 text-right font-medium">{idx + 1}.</div>
+                          <div className="font-medium">{buildLineText(l)}</div>
+                        </li>
+                      ))}
+                    </ol>
+                  )
                 ) : (
-                  <ol className="text-sm leading-6 text-gray-900">
-                    {lines.map((l, idx) => (
-                      <li key={idx} className="flex gap-1">
-                        <div className="w-4 shrink-0 text-right font-medium">{idx + 1}.</div>
-                        <div className="font-medium">{buildLineText(l)}</div>
-                      </li>
-                    ))}
-                  </ol>
+                  <div className="space-y-4">
+                    {chainVisitIds.map((id) => {
+                      const v = visitMetaMap.get(id);
+
+                      const isAnchor = anchorVisitId != null && id === anchorVisitId;
+                      const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
+
+                      return (
+                        <VisitRxPreviewBlock
+                          key={id}
+                          visitId={id === 'CURRENT' ? '' : id}
+                          isCurrent={id === currentVisitId}
+                          currentLines={lines}
+                          visit={v}
+                          // ✅ show OPD number only for followups (not for anchor/new)
+                          showOpdInline={!isAnchor}
+                          opdInlineText={opdInline}
+                        />
+                      );
+                    })}
+                  </div>
                 )}
               </div>
 
@@ -292,16 +460,7 @@ export function PrescriptionPreview({
                 </div>
               ) : null}
 
-              {/* Footer */}
-              <div className="shrink-0 px-6 pb-4">
-                <div className="mt-2 h-px w-full bg-emerald-600/60" />
-                <div className="mt-2 text-[0.5rem] font-medium text-gray-900">
-                  <div>A-33</div>
-                  <div>STALWART COMPLEX</div>
-                  <div>UNIT - IV</div>
-                  <div>BHUBANESWAR</div>
-                </div>
-              </div>
+              {/* Footer (kept same as before in preview) */}
             </div>
           </div>
         </div>
