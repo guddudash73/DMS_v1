@@ -9,7 +9,7 @@ import { visitRepository } from '../repositories/visitRepository';
 import { patientRepository } from '../repositories/patientRepository';
 import { sendZodValidationError } from '../lib/validation';
 import { logError } from '../lib/logger';
-import { RxLine } from '@dms/types';
+import { RxLine, ToothDetail } from '@dms/types';
 
 const router = express.Router();
 
@@ -41,10 +41,24 @@ const RxIdParam = z.object({
 });
 type RxIdParam = z.infer<typeof RxIdParam>;
 
-const RxUpdateBody = z.object({
-  lines: z.array(RxLine).min(1),
-  jsonKey: z.string().min(1).optional(),
-});
+const RxUpdateBody = z
+  .object({
+    lines: z.array(RxLine).optional().default([]),
+    jsonKey: z.string().min(1).optional(),
+    toothDetails: z.array(ToothDetail).optional(),
+  })
+  .superRefine((val, ctx) => {
+    const hasLines = (val.lines?.length ?? 0) > 0;
+    const hasTeeth = (val.toothDetails?.length ?? 0) > 0;
+
+    if (!hasLines && !hasTeeth) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['lines'],
+        message: 'Provide medicines or tooth details.',
+      });
+    }
+  });
 
 router.get(
   '/:rxId/json-url',
@@ -152,10 +166,14 @@ router.put(
         .json({ error: 'RX_NOT_FOUND', message: 'Prescription not found', traceId: req.requestId });
     }
 
+    const nextLines = body.data.lines ?? existing.lines ?? [];
+    const nextJsonKey = body.data.jsonKey ?? existing.jsonKey;
+
     const updated = await prescriptionRepository.updateById({
       rxId,
-      lines: body.data.lines,
-      jsonKey: body.data.jsonKey ?? existing.jsonKey,
+      lines: nextLines,
+      jsonKey: nextJsonKey,
+      toothDetails: body.data.toothDetails, // undefined => no change
     });
 
     if (!updated) {

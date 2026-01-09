@@ -46,6 +46,7 @@ import type {
   AdminResetUserPasswordRequest,
   PatientQueueResponse,
   RecentCompletedResponse,
+  ToothDetail,
 } from '@dms/types';
 
 import { createClinicQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
@@ -1164,12 +1165,15 @@ export const apiSlice = createApi({
 
     upsertVisitRx: builder.mutation<
       { rxId: string; visitId: string; version: number; createdAt: number; updatedAt: number },
-      { visitId: string; lines: RxLineType[] }
+      { visitId: string; lines: RxLineType[]; toothDetails?: ToothDetail[] }
     >({
-      query: ({ visitId, lines }) => ({
+      query: ({ visitId, lines, toothDetails }) => ({
         url: `/visits/${visitId}/rx`,
         method: 'POST',
-        body: { lines },
+        body: {
+          lines: lines ?? [],
+          ...(toothDetails !== undefined ? { toothDetails } : {}),
+        },
       }),
       invalidatesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
     }),
@@ -1215,12 +1219,15 @@ export const apiSlice = createApi({
 
     updateRxById: builder.mutation<
       { rxId: string; visitId: string; version: number; createdAt: number; updatedAt: number },
-      { rxId: string; lines: RxLineType[] }
+      { rxId: string; lines: RxLineType[]; toothDetails?: ToothDetail[] }
     >({
-      query: ({ rxId, lines }) => ({
+      query: ({ rxId, lines, toothDetails }) => ({
         url: `/rx/${rxId}`,
         method: 'PUT',
-        body: { lines },
+        body: {
+          lines: lines ?? [],
+          ...(toothDetails !== undefined ? { toothDetails } : {}),
+        },
       }),
     }),
 

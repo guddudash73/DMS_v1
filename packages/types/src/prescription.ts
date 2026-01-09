@@ -5,6 +5,25 @@ import { VisitId } from './visit';
 const Frequency = z.enum(['QD', 'BID', 'TID', 'QID', 'HS', 'PRN']);
 const Timing = z.enum(['BEFORE_MEAL', 'AFTER_MEAL', 'ANY']);
 
+export const ToothPosition = z.enum(['UL', 'UR', 'LL', 'LR']);
+export type ToothPosition = z.infer<typeof ToothPosition>;
+
+/**
+ * ✅ Store tooth "numbers" as raw strings.
+ * - Accept anything user types (single digit, letters, ranges, etc.)
+ * - Trim, keep length bounded.
+ */
+export const ToothNumber = z.string().min(1).max(20);
+
+export type ToothNumber = z.infer<typeof ToothNumber>;
+
+export const ToothDetail = z.object({
+  position: ToothPosition,
+  toothNumbers: z.array(ToothNumber).min(1).max(8), // now string[]
+  notes: z.string().max(500).optional(),
+});
+export type ToothDetail = z.infer<typeof ToothDetail>;
+
 export const RxLine = z.object({
   medicine: z.string().min(1),
   dose: z.string().min(1),
@@ -22,14 +41,17 @@ export const Prescription = z.object({
   rxId: RxId,
   visitId: VisitId,
 
-  // ❌ removed: doctorId
+  /**
+   * ✅ Allow empty lines if toothDetails exist
+   * (store as [] by default)
+   */
+  lines: z.array(RxLine).default([]),
 
-  lines: z.array(RxLine).min(1),
   version: z.number().int().min(1).default(1),
   jsonKey: z.string().min(1),
 
+  toothDetails: z.array(ToothDetail).optional(),
   receptionNotes: z.string().max(2000).optional(),
-
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 });

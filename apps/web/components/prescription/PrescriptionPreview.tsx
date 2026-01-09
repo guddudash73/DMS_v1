@@ -1,10 +1,12 @@
+// apps/web/components/prescription/PrescriptionPreview.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
-import type { RxLineType, Visit } from '@dms/types';
+import type { RxLineType, Visit, ToothDetail } from '@dms/types';
 import { clinicDateISO, formatClinicDateShort } from '@/src/lib/clinicTime';
 import { useGetVisitRxQuery } from '@/src/store/api';
+import { ToothDetailsBlock } from './ToothDetailsBlock';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
@@ -49,6 +51,11 @@ type Props = {
   currentVisitId?: string;
   chainVisitIds?: string[];
   visitMetaMap?: Map<string, Visit>;
+
+  /**
+   * ✅ NEW: current visit tooth details (the one being edited now)
+   */
+  toothDetails?: ToothDetail[];
 };
 
 const FREQ_LABEL: Record<RxLineType['frequency'], string> = {
@@ -134,21 +141,36 @@ function VisitRxPreviewBlock(props: {
   currentLines: RxLineType[];
   visit?: Visit;
 
-  // show OPD number (number only) on the right, for followups only
   showOpdInline?: boolean;
   opdInlineText?: string;
-}) {
-  const { visitId, isCurrent, currentLines, visit, showOpdInline, opdInlineText } = props;
 
-  // Fetch lines only for non-current visits (history)
+  /**
+   * ✅ current visit tooth details
+   */
+  currentToothDetails: ToothDetail[];
+}) {
+  const {
+    visitId,
+    isCurrent,
+    currentLines,
+    visit,
+    showOpdInline,
+    opdInlineText,
+    currentToothDetails,
+  } = props;
+
+  // Fetch rx only for non-current visits (history)
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: isCurrent || !visitId });
 
   const lines = isCurrent ? currentLines : (rxQuery.data?.rx?.lines ?? []);
+  const toothDetails = isCurrent ? currentToothDetails : (rxQuery.data?.rx?.toothDetails ?? []);
 
   const visitDate = (visit as any)?.visitDate as string | undefined;
   const reason = (visit as any)?.reason as string | undefined;
 
-  if (!lines.length && !reason && !visitDate) return <div className="h-2" />;
+  const hasToothDetails = (toothDetails?.length ?? 0) > 0;
+
+  if (!lines.length && !reason && !visitDate && !hasToothDetails) return <div className="h-2" />;
 
   return (
     <div className={`rx-prev-block ${isCurrent ? 'rx-prev-block-current' : 'rx-prev-block-prev'}`}>
@@ -169,6 +191,13 @@ function VisitRxPreviewBlock(props: {
           ) : null}
         </div>
       </div>
+
+      {/* ✅ Tooth details */}
+      {hasToothDetails ? (
+        <div className="mb-2">
+          <ToothDetailsBlock toothDetails={toothDetails} />
+        </div>
+      ) : null}
 
       {lines.length === 0 ? (
         <div className="text-[12px] text-gray-500">No medicines recorded.</div>
@@ -202,6 +231,8 @@ export function PrescriptionPreview({
   currentVisitId: currentVisitIdProp,
   chainVisitIds: chainVisitIdsProp,
   visitMetaMap: visitMetaMapProp,
+
+  toothDetails: toothDetailsProp,
 }: Props) {
   const hasNotes = !!receptionNotes?.trim();
   const ageSex = formatAgeSex(patientAge, patientSex);
@@ -214,8 +245,23 @@ export function PrescriptionPreview({
   const currentVisitId = useMemo(() => currentVisitIdProp ?? 'CURRENT', [currentVisitIdProp]);
 
   const chainVisitIds = useMemo(() => {
-    if (chainVisitIdsProp && chainVisitIdsProp.length) return chainVisitIdsProp;
-    return [currentVisitId];
+    // start from provided chain or fallback to [current]
+    const ids = (
+      chainVisitIdsProp && chainVisitIdsProp.length ? [...chainVisitIdsProp] : [currentVisitId]
+    ).filter(Boolean);
+
+    // ✅ ensure current visit is always present in the chain
+    if (currentVisitId && !ids.includes(currentVisitId)) {
+      ids.push(currentVisitId);
+    }
+
+    // de-dupe while preserving order
+    const seen = new Set<string>();
+    return ids.filter((x) => {
+      if (seen.has(x)) return false;
+      seen.add(x);
+      return true;
+    });
   }, [chainVisitIdsProp, currentVisitId]);
 
   const visitMetaMap = useMemo(
@@ -274,6 +320,9 @@ export function PrescriptionPreview({
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+
+  const currentToothDetails = useMemo(() => toothDetailsProp ?? [], [toothDetailsProp]);
+  const showCurrentToothDetails = !historyEnabled && currentToothDetails.length > 0;
 
   return (
     <div ref={wrapRef} className="w-full">
@@ -411,18 +460,28 @@ export function PrescriptionPreview({
               {/* Lines / History blocks */}
               <div className="min-h-0 flex-1 px-6 pt-4">
                 {!historyEnabled ? (
-                  lines.length === 0 ? (
-                    <div className="text-[13px] text-gray-500">No medicines added yet.</div>
-                  ) : (
-                    <ol className="text-sm leading-6 text-gray-900">
-                      {lines.map((l, idx) => (
-                        <li key={idx} className="flex gap-1">
-                          <div className="w-4 shrink-0 text-right font-medium">{idx + 1}.</div>
-                          <div className="font-medium">{buildLineText(l)}</div>
-                        </li>
-                      ))}
-                    </ol>
-                  )
+                  <>
+                    {/* ✅ Tooth details (current only mode) */}
+                    {showCurrentToothDetails ? (
+                      <div className="mb-3">
+                        <ToothDetailsBlock toothDetails={currentToothDetails} />
+                        <div className="mt-3 h-px w-full bg-gray-200" />
+                      </div>
+                    ) : null}
+
+                    {lines.length === 0 ? (
+                      <div className="text-[13px] text-gray-500">No medicines added yet.</div>
+                    ) : (
+                      <ol className="text-sm leading-6 text-gray-900">
+                        {lines.map((l, idx) => (
+                          <li key={idx} className="flex gap-1">
+                            <div className="w-4 shrink-0 text-right font-medium">{idx + 1}.</div>
+                            <div className="font-medium">{buildLineText(l)}</div>
+                          </li>
+                        ))}
+                      </ol>
+                    )}
+                  </>
                 ) : (
                   <div className="space-y-4">
                     {chainVisitIds.map((id) => {
@@ -438,9 +497,9 @@ export function PrescriptionPreview({
                           isCurrent={id === currentVisitId}
                           currentLines={lines}
                           visit={v}
-                          // ✅ show OPD number only for followups (not for anchor/new)
                           showOpdInline={!isAnchor}
                           opdInlineText={opdInline}
+                          currentToothDetails={currentToothDetails}
                         />
                       );
                     })}

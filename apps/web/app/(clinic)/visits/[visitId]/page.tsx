@@ -1,3 +1,4 @@
+// apps/web/app/(clinic)/visits/[visitId]/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -22,8 +23,10 @@ import {
   useUpdateVisitRxReceptionNotesMutation,
   useGetVisitBillQuery,
   useGetDoctorsQuery,
+  useGetPatientVisitsQuery, // ✅ NEW
 } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
+import type { ToothDetail, Visit } from '@dms/types';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
@@ -111,8 +114,8 @@ export default function ClinicVisitInfoPage() {
     refetchOnMountOrArgChange: true,
   });
 
-  const visit = visitQuery.data;
-  const patientId = visit?.patientId;
+  const visit = visitQuery.data as any;
+  const patientId = visit?.patientId as string | undefined;
 
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', {
     skip: !patientId,
@@ -144,6 +147,13 @@ export default function ClinicVisitInfoPage() {
 
   const doctorsQuery = useGetDoctorsQuery(undefined);
 
+  // ✅ NEW: fetch patient visits so we can show history blocks up to selected visit
+  const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', {
+    skip: !patientId,
+    refetchOnMountOrArgChange: true,
+  });
+  const allVisitsRaw = (visitsQuery.data?.items ?? []) as Visit[];
+
   React.useEffect(() => {
     if (!visitId) return;
 
@@ -159,12 +169,19 @@ export default function ClinicVisitInfoPage() {
   React.useEffect(() => {
     if (!patientId) return;
     patientQuery.refetch();
+    visitsQuery.refetch?.();
   }, [patientId]);
 
   const xrayIds = (xraysQuery.data?.items ?? []).map((x) => x.xrayId);
 
   const [updateNotes, updateNotesState] = useUpdateVisitRxReceptionNotesMutation();
   const rx = rxQuery.data?.rx ?? null;
+
+  // ✅ extract toothDetails from rx
+  const toothDetails = React.useMemo(() => {
+    const td = (rx as any)?.toothDetails ?? [];
+    return Array.isArray(td) ? (td as ToothDetail[]) : ([] as ToothDetail[]);
+  }, [rx]);
 
   const [notes, setNotes] = React.useState('');
   const hydratedRef = React.useRef(false);
@@ -271,8 +288,63 @@ export default function ClinicVisitInfoPage() {
 
   const primaryDisabled = !visit || !visitDone;
 
+  // kept (existing pattern)
   const PreviewAny: any = PrescriptionPreview;
   const PrintSheetAny: any = PrescriptionPrintSheet;
+
+  /**
+   * ✅ NEW:
+   * Build a LIMITED chain (anchor + followups) up to the selected visitId (inclusive),
+   * same logic as prescription printing page.
+   */
+  const rxChain = React.useMemo(() => {
+    const meta = new Map<string, Visit>();
+
+    for (const v of allVisitsRaw) meta.set(v.visitId, v);
+    if ((visit as any)?.visitId) meta.set((visit as any).visitId, visit as any);
+
+    const tag = (visit as any)?.tag as string | undefined;
+    const anchorVisitId = (visit as any)?.anchorVisitId as string | undefined;
+
+    const anchorId = tag === 'F' ? anchorVisitId : visitId;
+    if (!anchorId) return { visitIds: [visitId], meta, currentVisitId: visitId };
+
+    const anchor = meta.get(anchorId);
+    const chain: Visit[] = [];
+
+    if (anchor) chain.push(anchor);
+
+    const followups: Visit[] = [];
+    for (const v of meta.values()) {
+      const aId = (v as any)?.anchorVisitId as string | undefined;
+      if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
+    }
+
+    followups.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+    chain.push(...followups);
+
+    if (!chain.some((v) => v.visitId === visitId)) {
+      const cur = meta.get(visitId);
+      chain.push(cur ?? ({ visitId } as any));
+    }
+
+    chain.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+
+    const seen = new Set<string>();
+    const chainIdsOrdered = chain
+      .map((v) => v.visitId)
+      .filter((id) => {
+        if (!id) return false;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+
+    const idx = chainIdsOrdered.indexOf(visitId);
+    const limitedIds = idx >= 0 ? chainIdsOrdered.slice(0, idx + 1) : [visitId];
+
+    return { visitIds: limitedIds, meta, currentVisitId: visitId };
+  }, [allVisitsRaw, visit, visitId]);
 
   return (
     <section className="p-4 2xl:p-8">
@@ -342,22 +414,13 @@ export default function ClinicVisitInfoPage() {
               visitDateLabel={rxVisitDateLabel}
               lines={rx?.lines ?? []}
               receptionNotes={notes}
+              toothDetails={toothDetails}
+              // ✅ NEW: show history blocks up to the selected visit (inclusive), same as printing page
+              currentVisitId={rxChain.currentVisitId}
+              chainVisitIds={rxChain.visitIds}
+              visitMetaMap={rxChain.meta}
             />
           </div>
-
-          <PrintSheetAny
-            patientName={patientName}
-            patientPhone={patientPhone}
-            patientAge={patientAge}
-            patientSex={patientSex}
-            sdId={patientSdId}
-            opdNo={opdNo}
-            doctorName={resolvedDoctorName}
-            doctorRegdLabel={resolvedDoctorRegdLabel}
-            visitDateLabel={rxVisitDateLabel}
-            lines={rx?.lines ?? []}
-            receptionNotes={notes}
-          />
         </div>
 
         <Card className="lg:col-span-4 rounded-2xl border bg-white p-4">
@@ -406,12 +469,6 @@ export default function ClinicVisitInfoPage() {
           </div>
         </Card>
       </div>
-
-      <XrayPrintSheet
-        open={xrayPrintOpen}
-        xrayIds={xrayIds}
-        onAfterPrint={() => setXrayPrintOpen(false)}
-      />
     </section>
   );
 }

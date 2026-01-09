@@ -77,7 +77,7 @@ async function nextCounter(key: { PK: string; SK: string }): Promise<number> {
 }
 
 function tagLabel(tag: VisitTag | undefined): string {
-  if (tag === 'F') return 'SDFOLLOWUP';
+  if (tag === 'F') return 'SDFU';
   return 'SDNEW';
 }
 

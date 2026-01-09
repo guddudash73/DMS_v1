@@ -1,3 +1,4 @@
+// apps/web/components/prescription/PrescriptionWorkspace.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -44,6 +45,8 @@ import { Calendar as CalendarIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 import { clinicDateISO, clinicDateISOFromMs, formatClinicDateShort } from '@/src/lib/clinicTime';
+import type { ToothDetail } from '@dms/types';
+import { ToothDetailsEditor } from './ToothDetailsEditor';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
@@ -166,6 +169,13 @@ function MedicinesReadOnly({ lines }: { lines: RxLineType[] }) {
   );
 }
 
+/**
+ * ✅ UPDATED:
+ * View Rx dialog now shows:
+ * - selected visit
+ * - all visits UP TO the selected visit (inclusive)
+ * - toothDetails (even when medicines are empty)
+ */
 function VisitPrescriptionQuickLookDialog(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -195,11 +205,17 @@ function VisitPrescriptionQuickLookDialog(props: {
   } = props;
 
   const rxQuery = useGetVisitRxQuery({ visitId: visitId ?? '' }, { skip: !open || !visitId });
-  const lines = rxQuery.data?.rx?.lines ?? [];
-
   const visitQuery = useGetVisitByIdQuery(visitId ?? '', { skip: !open || !visitId });
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !open || !patientId });
 
+  // ✅ bring patient visits for history blocks
+  const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', {
+    skip: !open || !patientId,
+    refetchOnMountOrArgChange: true,
+  });
+  const allVisitsRaw = (visitsQuery.data?.items ?? []) as Visit[];
+
+  // current visit meta/date label
   const visitCreatedAtDate = useMemo(() => {
     const createdAt = isRecord(visitQuery.data) ? (visitQuery.data as any).createdAt : undefined;
     return safeParseDate(createdAt);
@@ -210,6 +226,7 @@ function VisitPrescriptionQuickLookDialog(props: {
     return ms ? `Visit: ${clinicDateISOFromMs(ms)}` : '';
   }, [visitCreatedAtDate]);
 
+  // Patient sex/age from fetched patient record (fallbacks remain)
   const patientSex = useMemo(() => {
     const p = patientQuery.data;
     const rec: Record<string, unknown> = isRecord(p) ? p : {};
@@ -232,6 +249,79 @@ function VisitPrescriptionQuickLookDialog(props: {
     return calcAgeYears(dob, at);
   }, [patientQuery.data, visitCreatedAtDate]);
 
+  // ✅ current visit (selected) rx lines + teeth
+  const currentLines = rxQuery.data?.rx?.lines ?? [];
+  const currentToothDetails = ((rxQuery.data?.rx as any)?.toothDetails ?? []) as ToothDetail[];
+
+  // ✅ LIMITED chain: anchor + followups up to selected visit (inclusive)
+  const rxChain = useMemo(() => {
+    const selectedId = visitId ?? '';
+    const meta = new Map<string, Visit>();
+
+    for (const v of allVisitsRaw) meta.set(v.visitId, v);
+    if ((visitQuery.data as any)?.visitId)
+      meta.set((visitQuery.data as any).visitId, visitQuery.data as any);
+
+    const vSelected = meta.get(selectedId) ?? (visitQuery.data as any as Visit | undefined);
+
+    const tag = (vSelected as any)?.tag as string | undefined;
+    const anchorVisitId = (vSelected as any)?.anchorVisitId as string | undefined;
+
+    const anchorId = tag === 'F' ? anchorVisitId : selectedId;
+    if (!anchorId)
+      return { visitIds: selectedId ? [selectedId] : [], meta, currentVisitId: selectedId };
+
+    const chain: Visit[] = [];
+
+    // anchor
+    const anchor = meta.get(anchorId);
+    if (anchor) chain.push(anchor);
+
+    // followups for anchor
+    const followups: Visit[] = [];
+    for (const v of meta.values()) {
+      const aId = (v as any)?.anchorVisitId as string | undefined;
+      if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
+    }
+    followups.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+    chain.push(...followups);
+
+    // ensure selected exists
+    if (selectedId && !chain.some((x) => x.visitId === selectedId)) {
+      const cur = meta.get(selectedId);
+      chain.push(cur ?? ({ visitId: selectedId } as any));
+    }
+
+    // sort overall old->new
+    chain.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+
+    // de-dupe
+    const seen = new Set<string>();
+    const chainIdsOrdered = chain
+      .map((x) => x.visitId)
+      .filter((id) => {
+        if (!id) return false;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+
+    // ✅ limit up to selectedId (inclusive)
+    const idx = selectedId ? chainIdsOrdered.indexOf(selectedId) : -1;
+    const limitedIds = idx >= 0 ? chainIdsOrdered.slice(0, idx + 1) : chainIdsOrdered;
+
+    return { visitIds: limitedIds, meta, currentVisitId: selectedId };
+  }, [allVisitsRaw, visitId, visitQuery.data]);
+
+  // use selected visit OPD if available (header will prefer anchor OPD from meta anyway)
+  const selectedVisitOpdNo = useMemo(() => {
+    const v = visitQuery.data as any;
+    const raw =
+      v?.opdNo ?? v?.opdNumber ?? v?.opdId ?? v?.opd ?? v?.opd_no ?? v?.opd_no_str ?? undefined;
+    const s = raw == null ? '' : String(raw).trim();
+    return s || undefined;
+  }, [visitQuery.data]);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl rounded-2xl">
@@ -240,22 +330,28 @@ function VisitPrescriptionQuickLookDialog(props: {
         </DialogHeader>
 
         <div className="min-w-0 overflow-x-hidden rounded-2xl border bg-white p-4">
-          {rxQuery.isFetching ? (
+          {rxQuery.isFetching || visitQuery.isFetching || patientQuery.isFetching ? (
             <div className="text-sm text-gray-500">Loading…</div>
-          ) : !rxQuery.data?.rx ? (
-            <div className="text-sm text-gray-500">No prescription found for this visit.</div>
+          ) : !visitId ? (
+            <div className="text-sm text-gray-500">Invalid visit.</div>
           ) : (
             <PrescriptionPreview
-              patientName={patientName}
-              patientPhone={patientPhone}
+              patientName={patientQuery.data?.name ?? patientName}
+              patientPhone={patientQuery.data?.phone ?? patientPhone}
               patientAge={patientAge}
               patientSex={patientSex}
-              sdId={patientSdId}
-              opdNo={opdNo}
+              sdId={(patientQuery.data as any)?.sdId ?? patientSdId}
+              opdNo={selectedVisitOpdNo ?? opdNo}
               doctorName={doctorName}
               doctorRegdLabel={doctorRegdLabel}
               visitDateLabel={visitDateLabelComputed}
-              lines={lines}
+              lines={currentLines}
+              // ✅ teeth (even when no medicines)
+              toothDetails={currentToothDetails}
+              // ✅ history up to selected visit
+              currentVisitId={rxChain.currentVisitId}
+              chainVisitIds={rxChain.visitIds}
+              visitMetaMap={rxChain.meta}
             />
           )}
         </div>
@@ -395,6 +491,7 @@ export function PrescriptionWorkspace(props: Props) {
 
   // Prescription editor state
   const [lines, setLines] = useState<RxLineType[]>([]);
+  const [toothDetails, setToothDetails] = useState<ToothDetail[]>([]);
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const [activeRxId, setActiveRxId] = useState<string | null>(null);
@@ -432,24 +529,31 @@ export function PrescriptionWorkspace(props: Props) {
     const rx = rxQuery.data?.rx ?? null;
     if (rx) {
       setLines(rx.lines ?? []);
+      setToothDetails((rx as any).toothDetails ?? []);
       setActiveRxId(rx.rxId);
-      lastHash.current = JSON.stringify(rx.lines ?? []);
+      lastHash.current = JSON.stringify({
+        lines: rx.lines ?? [],
+        toothDetails: (rx as any).toothDetails ?? [],
+      });
     } else {
       setLines([]);
+      setToothDetails([]);
       setActiveRxId(null);
-      lastHash.current = JSON.stringify([]);
+      lastHash.current = JSON.stringify({ lines: [], toothDetails: [] });
     }
 
     hydratedRef.current = true;
     setState('idle');
   }, [rxQuery.isSuccess, rxQuery.data]);
 
-  const hash = useMemo(() => JSON.stringify(lines), [lines]);
+  const hash = useMemo(() => JSON.stringify({ lines, toothDetails }), [lines, toothDetails]);
+
+  const hasAnyRxData = lines.length > 0 || toothDetails.length > 0;
 
   const canAutosave =
     canEdit &&
     hydratedRef.current &&
-    lines.length > 0 &&
+    hasAnyRxData &&
     hash !== lastHash.current &&
     (visitStatus !== 'DONE' || !!activeRxId);
 
@@ -465,9 +569,9 @@ export function PrescriptionWorkspace(props: Props) {
             setState('error');
             return;
           }
-          await updateRxById({ rxId: activeRxId, lines }).unwrap();
+          await updateRxById({ rxId: activeRxId, lines, toothDetails }).unwrap();
         } else {
-          const res = await upsert({ visitId, lines }).unwrap();
+          const res = await upsert({ visitId, lines, toothDetails }).unwrap();
           setActiveRxId(res.rxId);
         }
 
@@ -493,7 +597,8 @@ export function PrescriptionWorkspace(props: Props) {
           : '';
 
   const showStartRevision = isDone && !isRevisionMode;
-  const canManualSave = canEdit && hydratedRef.current && lines.length > 0;
+  const canManualSave =
+    canEdit && hydratedRef.current && (lines.length > 0 || toothDetails.length > 0);
 
   const saveAndExit = async () => {
     if (!canManualSave) return;
@@ -502,13 +607,13 @@ export function PrescriptionWorkspace(props: Props) {
     try {
       if (visitStatus === 'DONE') {
         if (!activeRxId) throw new Error('Missing rxId');
-        await updateRxById({ rxId: activeRxId, lines }).unwrap();
+        await updateRxById({ rxId: activeRxId, lines, toothDetails }).unwrap();
       } else {
-        const res = await upsert({ visitId, lines }).unwrap();
+        const res = await upsert({ visitId, lines, toothDetails }).unwrap();
         setActiveRxId(res.rxId);
       }
 
-      lastHash.current = JSON.stringify(lines);
+      lastHash.current = hash;
       setState('saved');
 
       router.push(DASHBOARD_PATH);
@@ -529,7 +634,6 @@ export function PrescriptionWorkspace(props: Props) {
 
     const meta = new Map<string, Visit>();
 
-    // Include all known visits (DONE list + current visit if not in list)
     for (const v of allVisitsRaw) meta.set(v.visitId, v);
     if (currentVisit) meta.set(currentVisit.visitId, currentVisit);
 
@@ -538,34 +642,28 @@ export function PrescriptionWorkspace(props: Props) {
 
     const anchorId = tag === 'F' ? anchorVisitId : visitId;
 
-    // If we can’t determine anchor, just print current.
     if (!anchorId) {
       return { visitIds: [visitId], meta, currentVisitId: visitId };
     }
 
     const chain: Visit[] = [];
 
-    // Anchor
     const anchor = meta.get(anchorId);
     if (anchor) chain.push(anchor);
 
-    // Followups of anchor
     for (const v of meta.values()) {
       const aId = (v as any)?.anchorVisitId as string | undefined;
       if (aId && aId === anchorId && v.visitId !== anchorId) chain.push(v);
     }
 
-    // Ensure current visit is included
     if (!chain.some((v) => v.visitId === visitId)) {
       const cur = meta.get(visitId);
       if (cur) chain.push(cur);
       else chain.push({ visitId } as any);
     }
 
-    // Sort old -> new
     chain.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
 
-    // De-dupe
     const seen = new Set<string>();
     const visitIds = chain
       .map((v) => v.visitId)
@@ -638,7 +736,7 @@ export function PrescriptionWorkspace(props: Props) {
       .map((followup) => ({ followup }));
 
     return { anchorsOrdered, orphanGroups };
-  }, [filteredVisits]);
+  }, [filteredVisits, visitById]);
 
   const PAGE_SIZE = 2;
   const [page, setPage] = useState(1);
@@ -753,7 +851,11 @@ export function PrescriptionWorkspace(props: Props) {
                 className="rounded-xl"
                 onClick={saveAndExit}
                 disabled={!canManualSave || state === 'saving'}
-                title={!canManualSave ? 'Add medicines to save' : 'Save prescription and return'}
+                title={
+                  !canManualSave
+                    ? 'Add medicines or tooth details to save'
+                    : 'Save prescription and return'
+                }
               >
                 Save
               </Button>
@@ -772,10 +874,10 @@ export function PrescriptionWorkspace(props: Props) {
               doctorRegdLabel={resolvedDoctorRegdLabel}
               visitDateLabel={computedVisitDateLabel}
               lines={lines}
-              // ✅ NEW: pass history props to show previous visits under current
               currentVisitId={printChain.currentVisitId}
               chainVisitIds={printChain.visitIds}
               visitMetaMap={printChain.meta}
+              toothDetails={toothDetails}
             />
           </div>
         </div>
@@ -806,6 +908,14 @@ export function PrescriptionWorkspace(props: Props) {
             ) : (
               <XrayTrayReadOnly visitId={visitId} />
             )}
+          </div>
+
+          <div className="mt-4">
+            <ToothDetailsEditor
+              value={toothDetails}
+              onChange={setToothDetails}
+              disabled={!canEdit}
+            />
           </div>
 
           <div className="mt-4 min-w-0">
@@ -914,9 +1024,7 @@ export function PrescriptionWorkspace(props: Props) {
                               <div className="flex flex-wrap items-center gap-2">
                                 <Badge
                                   variant="outline"
-                                  className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
-                                    'NEW',
-                                  )}`}
+                                  className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass('NEW')}`}
                                 >
                                   NEW
                                 </Badge>
@@ -935,9 +1043,7 @@ export function PrescriptionWorkspace(props: Props) {
                             <TableCell className="px-6 py-4 align-top">
                               <Badge
                                 variant="outline"
-                                className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
-                                  anchor.status,
-                                )}`}
+                                className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(anchor.status)}`}
                               >
                                 {stageLabel(anchor.status)}
                               </Badge>
@@ -997,9 +1103,7 @@ export function PrescriptionWorkspace(props: Props) {
                                 <div className="flex flex-wrap items-center gap-2">
                                   <Badge
                                     variant="outline"
-                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
-                                      'FOLLOWUP',
-                                    )}`}
+                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass('FOLLOWUP')}`}
                                   >
                                     FOLLOW UP
                                   </Badge>
@@ -1018,9 +1122,7 @@ export function PrescriptionWorkspace(props: Props) {
                               <TableCell className="px-6 py-2 align-top">
                                 <Badge
                                   variant="outline"
-                                  className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
-                                    f.status,
-                                  )}`}
+                                  className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(f.status)}`}
                                 >
                                   {stageLabel(f.status)}
                                 </Badge>
@@ -1079,9 +1181,7 @@ export function PrescriptionWorkspace(props: Props) {
                                 <div className="flex flex-wrap items-center gap-2">
                                   <Badge
                                     variant="outline"
-                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
-                                      'FOLLOWUP',
-                                    )}`}
+                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass('FOLLOWUP')}`}
                                   >
                                     FOLLOW UP
                                   </Badge>
@@ -1100,9 +1200,7 @@ export function PrescriptionWorkspace(props: Props) {
                               <TableCell className="px-6 py-3 align-top">
                                 <Badge
                                   variant="outline"
-                                  className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
-                                    followup.status,
-                                  )}`}
+                                  className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(followup.status)}`}
                                 >
                                   {stageLabel(followup.status)}
                                 </Badge>

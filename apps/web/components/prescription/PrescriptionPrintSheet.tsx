@@ -1,11 +1,13 @@
+// apps/web/components/prescription/PrescriptionPrintSheet.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
-import type { RxLineType, Visit } from '@dms/types';
+import type { RxLineType, Visit, ToothDetail } from '@dms/types';
 import { useGetVisitRxQuery } from '@/src/store/api';
 import { formatClinicDateShort } from '@/src/lib/clinicTime';
+import { ToothDetailsBlock } from './ToothDetailsBlock';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
@@ -37,6 +39,11 @@ type Props = {
   printWithHistory?: boolean;
 
   receptionNotes?: string;
+
+  /**
+   * ✅ current visit tooth details
+   */
+  toothDetails?: ToothDetail[];
 };
 
 const FREQ_LABEL: Record<RxLineType['frequency'], string> = {
@@ -110,16 +117,34 @@ function VisitRxBlock(props: {
 
   showOpdInline?: boolean;
   opdInlineText?: string;
+
+  /**
+   * ✅ current visit tooth details
+   */
+  currentToothDetails: ToothDetail[];
 }) {
-  const { visitId, isCurrent, currentLines, visit, showOpdInline, opdInlineText } = props;
+  const {
+    visitId,
+    isCurrent,
+    currentLines,
+    visit,
+    showOpdInline,
+    opdInlineText,
+    currentToothDetails,
+  } = props;
 
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: isCurrent || !visitId });
 
   const lines = isCurrent ? currentLines : (rxQuery.data?.rx?.lines ?? []);
+  const toothDetails = isCurrent ? currentToothDetails : (rxQuery.data?.rx?.toothDetails ?? []);
+
   const visitDate = (visit as any)?.visitDate as string | undefined;
   const reason = (visit as any)?.reason as string | undefined;
 
-  if (!lines.length && !reason && !visitDate) return <div className="h-2 rx-block rx-block-prev" />;
+  const hasToothDetails = (toothDetails?.length ?? 0) > 0;
+
+  if (!lines.length && !reason && !visitDate && !hasToothDetails)
+    return <div className="h-2 rx-block rx-block-prev" />;
 
   return (
     <div className={`rx-block ${isCurrent ? 'rx-block-current' : 'rx-block-prev'}`}>
@@ -140,6 +165,13 @@ function VisitRxBlock(props: {
           ) : null}
         </div>
       </div>
+
+      {/* ✅ Tooth details */}
+      {hasToothDetails ? (
+        <div className="mb-2">
+          <ToothDetailsBlock toothDetails={toothDetails} />
+        </div>
+      ) : null}
 
       {lines.length ? (
         <ol className="space-y-1 text-[13px] leading-5 text-gray-900">
@@ -174,6 +206,8 @@ export function PrescriptionPrintSheet(props: Props) {
     currentVisitId: currentVisitIdProp,
     chainVisitIds: chainVisitIdsProp,
     visitMetaMap: visitMetaMapProp,
+
+    toothDetails: toothDetailsProp,
   } = props;
 
   const [mounted, setMounted] = useState(false);
@@ -194,16 +228,31 @@ export function PrescriptionPrintSheet(props: Props) {
     [visitMetaMapProp],
   );
 
-  // ✅ anchor/new visit is always first
-  const anchorVisitId = useMemo(() => chainVisitIds[0], [chainVisitIds]);
+  // ✅ historyEnabled mirrors the preview logic: only "real history mode" when all props are present
+  const historyEnabled =
+    !!currentVisitIdProp &&
+    !!chainVisitIdsProp &&
+    chainVisitIdsProp.length > 0 &&
+    !!visitMetaMapProp;
+
+  // ✅ anchor/new visit is always first (when history enabled)
+  const anchorVisitId = useMemo(() => {
+    if (!historyEnabled) return undefined;
+    return chainVisitIds[0];
+  }, [historyEnabled, chainVisitIds]);
 
   // ✅ HEADER OPD MUST BE ANCHOR/NEW VISIT OPD (fallback to prop)
   const headerOpdNo = useMemo(() => {
-    const anchorVisit = anchorVisitId ? visitMetaMap.get(anchorVisitId) : undefined;
-    const anchorOpd = getVisitOpdNo(anchorVisit);
-    if (anchorOpd) return anchorOpd;
+    if (historyEnabled && anchorVisitId) {
+      const anchorVisit = visitMetaMap.get(anchorVisitId);
+      const anchorOpd = getVisitOpdNo(anchorVisit);
+      if (anchorOpd) return anchorOpd;
+    }
     return opdNo ?? '—';
-  }, [anchorVisitId, visitMetaMap, opdNo]);
+  }, [historyEnabled, anchorVisitId, visitMetaMap, opdNo]);
+
+  const currentToothDetails = useMemo(() => toothDetailsProp ?? [], [toothDetailsProp]);
+  const showCurrentToothDetails = !historyEnabled && currentToothDetails.length > 0;
 
   // ✅ Header micro-text
   const CONTACT_NUMBER = '9938942846';
@@ -276,7 +325,7 @@ export function PrescriptionPrintSheet(props: Props) {
                 />
               </div>
 
-              {/* Center: Contact + address + hours (Emergency removed) */}
+              {/* Center */}
               <div className="mt-2 flex w-full flex-col items-center justify-center text-center">
                 <div className="text-[12px] font-semibold tracking-[0.25em] text-emerald-600">
                   CONTACT
@@ -376,26 +425,54 @@ export function PrescriptionPrintSheet(props: Props) {
 
           {/* Medicines */}
           <div className="rx-print-medicines min-h-0 flex-1 pt-4">
-            <div className="space-y-4">
-              {chainVisitIds.map((id) => {
-                const v = visitMetaMap.get(id);
+            {!historyEnabled ? (
+              <div className="px-4">
+                {/* ✅ MATCH PREVIEW: show tooth details even when not in history mode */}
+                {showCurrentToothDetails ? (
+                  <div className="mb-3">
+                    <ToothDetailsBlock toothDetails={currentToothDetails} />
+                    <div className="mt-3 h-px w-full bg-gray-200" />
+                  </div>
+                ) : null}
 
-                const isAnchor = id === anchorVisitId;
-                const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
+                {lines.length ? (
+                  <ol className="space-y-1 text-[13px] leading-5 text-gray-900">
+                    {lines.map((l, idx) => (
+                      <li key={idx} className="flex gap-2">
+                        <div className="w-5 shrink-0 text-right font-medium">{idx + 1}.</div>
+                        <div className="font-medium">{buildLineText(l)}</div>
+                      </li>
+                    ))}
+                  </ol>
+                ) : (
+                  <div className="text-[12px] text-gray-500">No medicines recorded.</div>
+                )}
 
-                return (
-                  <VisitRxBlock
-                    key={id}
-                    visitId={id === 'CURRENT' ? '' : id}
-                    isCurrent={id === currentVisitId}
-                    currentLines={lines}
-                    visit={v}
-                    showOpdInline={!isAnchor}
-                    opdInlineText={opdInline}
-                  />
-                );
-              })}
-            </div>
+                <div className="mt-3 h-px w-full bg-gray-200" />
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {chainVisitIds.map((id) => {
+                  const v = visitMetaMap.get(id);
+
+                  const isAnchor = anchorVisitId != null && id === anchorVisitId;
+                  const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
+
+                  return (
+                    <VisitRxBlock
+                      key={id}
+                      visitId={id === 'CURRENT' ? '' : id}
+                      isCurrent={id === currentVisitId}
+                      currentLines={lines}
+                      visit={v}
+                      showOpdInline={!isAnchor}
+                      opdInlineText={opdInline}
+                      currentToothDetails={currentToothDetails}
+                    />
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Notes */}
@@ -409,8 +486,6 @@ export function PrescriptionPrintSheet(props: Props) {
               </div>
             </div>
           ) : null}
-
-          {/* ✅ Footer removed completely as requested */}
         </div>
       </div>
     </div>,

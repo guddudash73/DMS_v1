@@ -44,16 +44,36 @@ export interface PrescriptionRepository {
     visit: Visit;
     lines: RxLineType[];
     jsonKey: string;
+
+    /**
+     * ✅ NEW: visit-specific tooth details stored on prescription
+     * (optional so existing callers don’t break)
+     */
+    toothDetails?: Prescription['toothDetails'];
   }): Promise<Prescription>;
+
   createNewVersionForVisit(params: {
     visit: Visit;
     lines: RxLineType[];
     jsonKey: string;
+
+    /**
+     * ✅ NEW: tooth details can be copied to the new version
+     * (optional so callers can omit)
+     */
+    toothDetails?: Prescription['toothDetails'];
   }): Promise<Prescription>;
+
   updateById(params: {
     rxId: RxId;
     lines: RxLineType[];
     jsonKey: string;
+
+    /**
+     * ✅ NEW: if provided, updates toothDetails as well
+     * If omitted (undefined), toothDetails is left unchanged.
+     */
+    toothDetails?: Prescription['toothDetails'];
   }): Promise<Prescription | null>;
 
   updateReceptionNotesById(params: {
@@ -121,8 +141,13 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     return this.getById(currentRxId);
   }
 
-  async upsertDraftForVisit(params: { visit: Visit; lines: RxLineType[]; jsonKey: string }) {
-    const { visit, lines, jsonKey } = params;
+  async upsertDraftForVisit(params: {
+    visit: Visit;
+    lines: RxLineType[];
+    jsonKey: string;
+    toothDetails?: Prescription['toothDetails'];
+  }) {
+    const { visit, lines, jsonKey, toothDetails } = params;
 
     const { Item: visitMeta } = await docClient.send(
       new GetCommand({
@@ -134,8 +159,9 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
 
     const currentRxId = getStringProp(visitMeta, 'currentRxId');
 
+    // If draft exists, update it (optionally includes toothDetails)
     if (currentRxId) {
-      const updated = await this.updateById({ rxId: currentRxId, lines, jsonKey });
+      const updated = await this.updateById({ rxId: currentRxId, lines, jsonKey, toothDetails });
       if (updated) return updated;
     }
 
@@ -146,10 +172,13 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     const base: Prescription = {
       rxId,
       visitId: visit.visitId,
-      // ❌ removed: doctorId: visit.doctorId,
       lines,
       version,
       jsonKey,
+
+      // ✅ NEW
+      ...(toothDetails !== undefined ? { toothDetails } : {}),
+
       receptionNotes: undefined,
       createdAt: now,
       updatedAt: now,
@@ -186,18 +215,22 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
             Update: {
               TableName: TABLE_NAME,
               Key: buildVisitMetaKey(visit.visitId),
-              UpdateExpression: 'SET #currentRxId = :rxId, #currentRxVersion = :v, #updatedAt = :u',
+              // ✅ Update works even if META doesn't exist (DDB will create it).
+              // ✅ Also set createdAt once.
+              UpdateExpression:
+                'SET #currentRxId = :rxId, #currentRxVersion = :v, #updatedAt = :u, #createdAt = if_not_exists(#createdAt, :u)',
               ExpressionAttributeNames: {
                 '#currentRxId': 'currentRxId',
                 '#currentRxVersion': 'currentRxVersion',
                 '#updatedAt': 'updatedAt',
+                '#createdAt': 'createdAt',
               },
               ExpressionAttributeValues: {
                 ':rxId': rxId,
                 ':v': version,
                 ':u': now,
               },
-              ConditionExpression: 'attribute_exists(PK) AND attribute_not_exists(#currentRxId)',
+              // ✅ remove ConditionExpression entirely
             },
           },
         ],
@@ -207,8 +240,13 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     return base;
   }
 
-  async createNewVersionForVisit(params: { visit: Visit; lines: RxLineType[]; jsonKey: string }) {
-    const { visit, lines, jsonKey } = params;
+  async createNewVersionForVisit(params: {
+    visit: Visit;
+    lines: RxLineType[];
+    jsonKey: string;
+    toothDetails?: Prescription['toothDetails'];
+  }) {
+    const { visit, lines, jsonKey, toothDetails } = params;
 
     const existing = await this.listByVisit(visit.visitId);
     const maxVersion = existing.reduce((m, p) => (p.version > m ? p.version : m), 0);
@@ -220,10 +258,13 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     const base: Prescription = {
       rxId,
       visitId: visit.visitId,
-      // ❌ removed: doctorId: visit.doctorId,
       lines,
       version,
       jsonKey,
+
+      // ✅ NEW
+      ...(toothDetails !== undefined ? { toothDetails } : {}),
+
       receptionNotes: undefined,
       createdAt: now,
       updatedAt: now,
@@ -260,18 +301,20 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
             Update: {
               TableName: TABLE_NAME,
               Key: buildVisitMetaKey(visit.visitId),
-              UpdateExpression: 'SET #currentRxId = :rxId, #currentRxVersion = :v, #updatedAt = :u',
+              UpdateExpression:
+                'SET #currentRxId = :rxId, #currentRxVersion = :v, #updatedAt = :u, #createdAt = if_not_exists(#createdAt, :u)',
               ExpressionAttributeNames: {
                 '#currentRxId': 'currentRxId',
                 '#currentRxVersion': 'currentRxVersion',
                 '#updatedAt': 'updatedAt',
+                '#createdAt': 'createdAt',
               },
               ExpressionAttributeValues: {
                 ':rxId': rxId,
                 ':v': version,
                 ':u': now,
               },
-              ConditionExpression: 'attribute_exists(PK)',
+              // ✅ remove ConditionExpression
             },
           },
         ],
@@ -281,17 +324,45 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     return base;
   }
 
-  async updateById(params: { rxId: RxId; lines: RxLineType[]; jsonKey: string }) {
-    const { rxId, lines, jsonKey } = params;
+  async updateById(params: {
+    rxId: RxId;
+    lines: RxLineType[];
+    jsonKey: string;
+    toothDetails?: Prescription['toothDetails'];
+  }) {
+    const { rxId, lines, jsonKey, toothDetails } = params;
+
     const existing = await this.getById(rxId);
     if (!existing) return null;
 
     const now = Date.now();
+
+    const hasToothDetails = toothDetails !== undefined;
+
     const next: Prescription = {
       ...existing,
       lines,
       jsonKey,
+      ...(hasToothDetails ? { toothDetails } : {}),
       updatedAt: now,
+    };
+
+    const updateExpression = hasToothDetails
+      ? 'SET #lines = :l, #jsonKey = :j, #toothDetails = :t, #updatedAt = :u'
+      : 'SET #lines = :l, #jsonKey = :j, #updatedAt = :u';
+
+    const expressionAttributeNames: Record<string, string> = {
+      '#lines': 'lines',
+      '#jsonKey': 'jsonKey',
+      '#updatedAt': 'updatedAt',
+      ...(hasToothDetails ? { '#toothDetails': 'toothDetails' } : {}),
+    };
+
+    const expressionAttributeValues: Record<string, unknown> = {
+      ':l': lines,
+      ':j': jsonKey,
+      ':u': now,
+      ...(hasToothDetails ? { ':t': toothDetails } : {}),
     };
 
     await docClient.send(
@@ -301,17 +372,9 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
             Update: {
               TableName: TABLE_NAME,
               Key: buildRxMetaKey(rxId),
-              UpdateExpression: 'SET #lines = :l, #jsonKey = :j, #updatedAt = :u',
-              ExpressionAttributeNames: {
-                '#lines': 'lines',
-                '#jsonKey': 'jsonKey',
-                '#updatedAt': 'updatedAt',
-              },
-              ExpressionAttributeValues: {
-                ':l': lines,
-                ':j': jsonKey,
-                ':u': now,
-              },
+              UpdateExpression: updateExpression,
+              ExpressionAttributeNames: expressionAttributeNames,
+              ExpressionAttributeValues: expressionAttributeValues,
               ConditionExpression: 'attribute_exists(PK)',
             },
           },
@@ -319,17 +382,9 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
             Update: {
               TableName: TABLE_NAME,
               Key: buildVisitRxKey(existing.visitId, rxId),
-              UpdateExpression: 'SET #lines = :l, #jsonKey = :j, #updatedAt = :u',
-              ExpressionAttributeNames: {
-                '#lines': 'lines',
-                '#jsonKey': 'jsonKey',
-                '#updatedAt': 'updatedAt',
-              },
-              ExpressionAttributeValues: {
-                ':l': lines,
-                ':j': jsonKey,
-                ':u': now,
-              },
+              UpdateExpression: updateExpression,
+              ExpressionAttributeNames: expressionAttributeNames,
+              ExpressionAttributeValues: expressionAttributeValues,
               ConditionExpression: 'attribute_exists(PK)',
             },
           },

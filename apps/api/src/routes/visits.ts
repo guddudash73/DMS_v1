@@ -13,6 +13,7 @@ import {
   FollowUpUpsert,
   FollowUpStatusUpdate,
   FollowUpId,
+  ToothDetail,
 } from '@dms/types';
 import { v4 as randomUUID } from 'uuid';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
@@ -314,9 +315,23 @@ router.patch(
   }),
 );
 
-const RxCreateBody = z.object({
-  lines: z.array(RxLine).min(1),
-});
+const RxCreateBody = z
+  .object({
+    lines: z.array(RxLine).optional().default([]),
+    toothDetails: z.array(ToothDetail).optional().default([]),
+  })
+  .superRefine((val, ctx) => {
+    const hasLines = (val.lines?.length ?? 0) > 0;
+    const hasTeeth = (val.toothDetails?.length ?? 0) > 0;
+
+    if (!hasLines && !hasTeeth) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['lines'],
+        message: 'Provide medicines or tooth details.',
+      });
+    }
+  });
 
 router.post(
   '/:visitId/rx',
@@ -332,36 +347,32 @@ router.post(
 
     const visit = await visitRepository.getById(id.data);
     if (!visit) {
-      return res
-        .status(404)
-        .json({ error: 'NOT_FOUND', message: 'Visit not found', traceId: req.requestId });
+      return res.status(404).json({ error: 'NOT_FOUND', message: 'Visit not found' });
     }
 
     const patient = await patientRepository.getById(visit.patientId);
     if (!patient || patient.isDeleted) {
-      return res.status(404).json({
-        error: 'PATIENT_NOT_FOUND',
-        message: 'Cannot create prescriptions for deleted or missing patient',
-        traceId: req.requestId,
-      });
+      return res
+        .status(404)
+        .json({ error: 'PATIENT_NOT_FOUND', message: 'Patient missing/deleted' });
     }
 
     if (visit.status === 'DONE') {
       return res.status(409).json({
         error: 'RX_REVISION_REQUIRED',
         message: 'Visit is DONE. Start a revision to edit prescription.',
-        traceId: req.requestId,
       });
     }
 
-    const { lines } = parsedBody.data;
+    const { lines, toothDetails } = parsedBody.data;
     const now = Date.now();
     const jsonKey = `rx/${visit.visitId}/${randomUUID()}.json`;
 
-    // ✅ Remove doctorId from payload (visit no longer has it)
+    // ✅ store toothDetails even if lines are empty
     const jsonPayload = {
       visitId: visit.visitId,
       lines,
+      toothDetails,
       createdAt: now,
       updatedAt: now,
     };
@@ -394,6 +405,7 @@ router.post(
       visit,
       lines,
       jsonKey,
+      toothDetails: toothDetails?.length ? toothDetails : [],
     });
 
     return res.status(201).json({
@@ -710,36 +722,29 @@ router.post(
     if (!id.success) return handleValidationError(req, res, id.error.issues);
 
     const visit = await visitRepository.getById(id.data);
-    if (!visit) {
-      return res
-        .status(404)
-        .json({ error: 'NOT_FOUND', message: 'Visit not found', traceId: req.requestId });
-    }
+    if (!visit) return res.status(404).json({ error: 'NOT_FOUND', message: 'Visit not found' });
 
     if (visit.status !== 'DONE') {
       return res.status(409).json({
         error: 'RX_REVISION_NOT_ALLOWED',
         message: 'Revisions can be created only after visit is DONE',
-        traceId: req.requestId,
       });
     }
 
     const current = await prescriptionRepository.getCurrentForVisit(visit.visitId);
     if (!current) {
-      return res.status(409).json({
-        error: 'RX_MISSING',
-        message: 'No existing prescription found to revise',
-        traceId: req.requestId,
-      });
+      return res
+        .status(409)
+        .json({ error: 'RX_MISSING', message: 'No existing prescription found' });
     }
 
     const now = Date.now();
     const jsonKey = `rx/${visit.visitId}/${randomUUID()}.json`;
 
-    // ✅ Remove doctorId from payload
     const jsonPayload = {
       visitId: visit.visitId,
-      lines: current.lines,
+      lines: current.lines ?? [],
+      toothDetails: current.toothDetails ?? undefined, // ✅ COPY
       createdAt: now,
       updatedAt: now,
     };
@@ -770,8 +775,9 @@ router.post(
 
     const created = await prescriptionRepository.createNewVersionForVisit({
       visit,
-      lines: current.lines,
+      lines: current.lines ?? [],
       jsonKey,
+      toothDetails: current.toothDetails, // ✅ COPY
     });
 
     return res.status(201).json({

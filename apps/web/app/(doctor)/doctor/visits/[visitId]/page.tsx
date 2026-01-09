@@ -18,10 +18,12 @@ import {
   useGetVisitRxQuery,
   useUpdateVisitStatusMutation,
   useGetDoctorsQuery,
+  useGetPatientVisitsQuery, // ✅ NEW
 } from '@/src/store/api';
 
 import { useAuth } from '@/src/hooks/useAuth';
 import { ArrowRight, ClipboardList, Image as ImageIcon, Stethoscope } from 'lucide-react';
+import type { ToothDetail, Visit } from '@dms/types';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
@@ -92,6 +94,70 @@ export default function DoctorVisitPage() {
 
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: !visitId });
   const rx = rxQuery.data?.rx ?? null;
+
+  // ✅ tooth details
+  const toothDetails = React.useMemo(() => {
+    const td = (rx as any)?.toothDetails ?? [];
+    return Array.isArray(td) ? (td as ToothDetail[]) : ([] as ToothDetail[]);
+  }, [rx]);
+
+  // ✅ NEW: fetch all patient visits so preview can show history up to selected visit
+  const visitsQuery = useGetPatientVisitsQuery(patientId, { skip: !patientId });
+  const allVisitsRaw = (visitsQuery.data?.items ?? []) as Visit[];
+
+  /**
+   * ✅ NEW:
+   * Build a LIMITED chain (anchor + followups) up to the selected visitId (inclusive),
+   * same behavior as clinic visit page + printing page.
+   */
+  const rxChain = React.useMemo(() => {
+    const meta = new Map<string, Visit>();
+
+    for (const v of allVisitsRaw) meta.set(v.visitId, v);
+    if ((visit as any)?.visitId) meta.set((visit as any).visitId, visit as any);
+
+    const tag = (visit as any)?.tag as string | undefined;
+    const anchorVisitId = (visit as any)?.anchorVisitId as string | undefined;
+
+    const anchorId = tag === 'F' ? anchorVisitId : visitId;
+    if (!anchorId) return { visitIds: [visitId], meta, currentVisitId: visitId };
+
+    const anchor = meta.get(anchorId);
+    const chain: Visit[] = [];
+
+    if (anchor) chain.push(anchor);
+
+    const followups: Visit[] = [];
+    for (const v of meta.values()) {
+      const aId = (v as any)?.anchorVisitId as string | undefined;
+      if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
+    }
+
+    followups.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+    chain.push(...followups);
+
+    if (!chain.some((v) => v.visitId === visitId)) {
+      const cur = meta.get(visitId);
+      chain.push(cur ?? ({ visitId } as any));
+    }
+
+    chain.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+
+    const seen = new Set<string>();
+    const chainIdsOrdered = chain
+      .map((v) => v.visitId)
+      .filter((id) => {
+        if (!id) return false;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+
+    const idx = chainIdsOrdered.indexOf(visitId);
+    const limitedIds = idx >= 0 ? chainIdsOrdered.slice(0, idx + 1) : [visitId];
+
+    return { visitIds: limitedIds, meta, currentVisitId: visitId };
+  }, [allVisitsRaw, visit, visitId]);
 
   const [updateVisitStatus, updateVisitStatusState] = useUpdateVisitStatusMutation();
 
@@ -177,9 +243,6 @@ export default function DoctorVisitPage() {
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
-      {/* ✅ rest of your JSX remains same; only doctor label resolution was fixed */}
-      {/* (Kept your original render blocks intact below) */}
-
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
           <div className="text-lg font-semibold text-gray-900">Visit</div>
@@ -232,7 +295,6 @@ export default function DoctorVisitPage() {
         </div>
       </div>
 
-      {/* unchanged blocks */}
       {hasError ? (
         <Card className="rounded-2xl border bg-white p-6">
           <div className="text-sm text-red-600">Failed to load visit/patient.</div>
@@ -259,7 +321,7 @@ export default function DoctorVisitPage() {
               <ClipboardList className="h-4 w-4 text-gray-700" />
               <div className="text-sm font-semibold text-gray-900">Prescription</div>
               <div className="ml-auto text-xs text-gray-500">
-                {visitDate ? visitDate.replace('Visit:', '').trim() : ''}
+                {visitDate ? visitDate.trim() : ''}
               </div>
             </div>
 
@@ -276,6 +338,11 @@ export default function DoctorVisitPage() {
                 visitDateLabel={visitDateLabel}
                 lines={rx?.lines ?? []}
                 receptionNotes={rx?.receptionNotes ?? ''}
+                toothDetails={toothDetails}
+                // ✅ NEW: show all visits up to the selected visit (inclusive)
+                currentVisitId={rxChain.currentVisitId}
+                chainVisitIds={rxChain.visitIds}
+                visitMetaMap={rxChain.meta}
               />
             </div>
           </Card>
@@ -294,7 +361,6 @@ export default function DoctorVisitPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-          {/* Visit Overview */}
           <Card className="lg:col-span-5 rounded-2xl border bg-white p-6">
             <div className="flex items-center gap-2">
               <Stethoscope className="h-4 w-4 text-gray-700" />
@@ -351,9 +417,8 @@ export default function DoctorVisitPage() {
             </div>
           </Card>
 
-          {/* Prescription-style panel + CTA */}
+          {/* rest unchanged */}
           <Card className="lg:col-span-7 rounded-2xl border bg-white p-6">
-            {/* unchanged */}
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-sm font-semibold text-gray-900">Prescription</div>
