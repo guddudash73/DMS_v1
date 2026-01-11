@@ -15,7 +15,6 @@ import {
   FollowUpId,
   ToothDetail,
 } from '@dms/types';
-import { v4 as randomUUID } from 'uuid';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 
 import { visitRepository, InvalidStatusTransitionError } from '../repositories/visitRepository';
@@ -733,18 +732,25 @@ router.get(
       });
     }
 
+    const hasVisitId = (v: unknown): v is { visitId: string } =>
+      typeof v === 'object' &&
+      v !== null &&
+      'visitId' in v &&
+      typeof (v as { visitId: unknown }).visitId === 'string';
+
     // Priority:
     // 1) rxId (exact)
     // 2) version (specific)
     // 3) current (existing behavior)
-    let rx = null as any;
+    let rx: unknown | null = null;
 
     if (q.data.rxId) {
-      rx = await prescriptionRepository.getById(q.data.rxId as any);
+      rx = await prescriptionRepository.getById(q.data.rxId);
       // If rxId doesn't exist, keep compatibility: return { rx: null }
       if (!rx) return res.status(200).json({ rx: null });
       // Extra safety: ensure it belongs to the same visit
-      if (rx.visitId !== visit.visitId) return res.status(200).json({ rx: null });
+      if (!hasVisitId(rx) || rx.visitId !== visit.visitId)
+        return res.status(200).json({ rx: null });
       return res.status(200).json({ rx });
     }
 

@@ -48,7 +48,9 @@ type DoctorLite = {
   registrationNumber?: string;
 };
 
-function isRecord(v: unknown): v is Record<string, unknown> {
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is UnknownRecord {
   return typeof v === 'object' && v !== null;
 }
 
@@ -58,6 +60,19 @@ function getString(v: unknown): string | undefined {
 
 function getNumber(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+function getProp(obj: unknown, key: string): unknown {
+  if (!isRecord(obj)) return undefined;
+  return obj[key];
+}
+
+function getPropString(obj: unknown, key: string): string | undefined {
+  return getString(getProp(obj, key));
+}
+
+function getPropNumber(obj: unknown, key: string): number | undefined {
+  return getNumber(getProp(obj, key));
 }
 
 function toLocalISODate(d: Date): string {
@@ -130,20 +145,24 @@ function getErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
 
   if (isRecord(err)) {
-    const data = (err as any).data;
+    const data = getProp(err, 'data');
     if (isRecord(data)) {
-      const msg = getString((data as any).message);
+      const msg = getString(getProp(data, 'message'));
       if (msg) return msg;
     }
-    const msg = getString((err as any).message);
+    const msg = getString(getProp(err, 'message'));
     if (msg) return msg;
   }
   return 'Request failed.';
 }
 
 function anchorIdFromVisit(v: Visit): string | undefined {
-  const rec: Record<string, unknown> = isRecord(v) ? (v as unknown as Record<string, unknown>) : {};
-  return getString((rec as any).anchorVisitId) ?? getString((rec as any).anchorId) ?? undefined;
+  // Visit is an object at runtime; safely read possible anchor keys without `any`
+  return (
+    getPropString(v as unknown, 'anchorVisitId') ??
+    getPropString(v as unknown, 'anchorId') ??
+    undefined
+  );
 }
 
 export default function ClinicVisitInfoPage() {
@@ -183,7 +202,7 @@ export default function ClinicVisitInfoPage() {
   });
 
   const allVisitsRaw = React.useMemo(() => {
-    const items = (visitsQuery.data as any)?.items;
+    const items = getProp(visitsQuery.data, 'items');
     return Array.isArray(items) ? (items as Visit[]) : [];
   }, [visitsQuery.data]);
 
@@ -194,7 +213,7 @@ export default function ClinicVisitInfoPage() {
   );
 
   const versions = React.useMemo(() => {
-    const v = (versionsQuery.data as any)?.versions;
+    const v = getProp(versionsQuery.data, 'versions');
     return Array.isArray(v) ? (v as number[]).filter((n) => Number.isFinite(n) && n > 0) : [];
   }, [versionsQuery.data]);
 
@@ -220,7 +239,7 @@ export default function ClinicVisitInfoPage() {
 
   // Versioned rx query (preferred when DONE / when versions exist)
   const rxByVersionQuery = useGetVisitRxQuery(
-    { visitId, version: selectedRxVersion ?? undefined } as any,
+    { visitId, version: selectedRxVersion ?? undefined },
     {
       skip: !visitId || selectedRxVersion == null,
       refetchOnMountOrArgChange: true,
@@ -228,20 +247,20 @@ export default function ClinicVisitInfoPage() {
   );
 
   const rxToShow = React.useMemo(() => {
-    const versioned = (rxByVersionQuery.data as any)?.rx ?? null;
-    const latest = (rxLatestQuery.data as any)?.rx ?? null;
+    const versioned = getProp(rxByVersionQuery.data, 'rx') ?? null;
+    const latest = getProp(rxLatestQuery.data, 'rx') ?? null;
     return versioned ?? latest;
   }, [rxByVersionQuery.data, rxLatestQuery.data]);
 
   const toothDetails = React.useMemo<ToothDetail[]>(() => {
     if (!rxToShow || !isRecord(rxToShow)) return [];
-    const td = (rxToShow as any).toothDetails;
+    const td = getProp(rxToShow, 'toothDetails');
     return Array.isArray(td) ? (td as ToothDetail[]) : [];
   }, [rxToShow]);
 
   const doctorNotes = React.useMemo(() => {
     if (!rxToShow || !isRecord(rxToShow)) return '';
-    return String((rxToShow as any).doctorNotes ?? '');
+    return String(getProp(rxToShow, 'doctorNotes') ?? '');
   }, [rxToShow]);
 
   // --- Reception notes editing (only allow on Latest) ---
@@ -277,11 +296,8 @@ export default function ClinicVisitInfoPage() {
     hydratedRef.current = true;
 
     if (rxToShow && isRecord(rxToShow)) {
-      setNotes(
-        typeof (rxToShow as any).receptionNotes === 'string'
-          ? (rxToShow as any).receptionNotes
-          : '',
-      );
+      const rn = getProp(rxToShow, 'receptionNotes');
+      setNotes(typeof rn === 'string' ? rn : '');
     } else {
       setNotes('');
     }
@@ -318,33 +334,33 @@ export default function ClinicVisitInfoPage() {
   };
 
   // --- Patient computed fields ---
-  const patientName = (patientQuery.data as any)?.name;
-  const patientPhone = (patientQuery.data as any)?.phone;
+  const patientName = getProp(patientQuery.data, 'name') as unknown;
+  const patientPhone = getProp(patientQuery.data, 'phone') as unknown;
 
   const patientDataUnknown: unknown = patientQuery.data;
   const patientDataRec = isRecord(patientDataUnknown) ? patientDataUnknown : undefined;
 
-  const patientSdId = getString((patientQuery.data as any)?.sdId) ?? getString(visit?.sdId);
+  const patientSdId = getPropString(patientQuery.data, 'sdId') ?? getString(visit?.sdId);
 
   const opdNo =
     getString(visit?.opdNo) ?? getString(visit?.opdId) ?? getString(visit?.opdNumber) ?? undefined;
 
   const patientDobRaw =
-    (patientQuery.data as any)?.dob ??
-    (patientDataRec as any)?.dateOfBirth ??
-    (patientDataRec as any)?.birthDate ??
-    (patientDataRec as any)?.dobIso ??
+    getProp(patientQuery.data, 'dob') ??
+    getProp(patientDataRec, 'dateOfBirth') ??
+    getProp(patientDataRec, 'birthDate') ??
+    getProp(patientDataRec, 'dobIso') ??
     null;
 
   const patientSexRaw =
-    (patientQuery.data as any)?.gender ??
-    (patientDataRec as any)?.sex ??
-    (patientDataRec as any)?.patientSex ??
+    getProp(patientQuery.data, 'gender') ??
+    getProp(patientDataRec, 'sex') ??
+    getProp(patientDataRec, 'patientSex') ??
     null;
 
   const patientDob = safeParseDobToDate(patientDobRaw);
 
-  const visitCreatedAtMs = getNumber(visit?.createdAt) ?? Date.now();
+  const visitCreatedAtMs = getPropNumber(visit, 'createdAt') ?? Date.now();
 
   const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
   const patientSex = normalizeSex(patientSexRaw);
@@ -353,7 +369,7 @@ export default function ClinicVisitInfoPage() {
   const doctorId = getString(visit?.doctorId);
 
   const doctorFromList = React.useMemo<DoctorLite | null>(() => {
-    const list = doctorsQuery.data as any;
+    const list = doctorsQuery.data;
     if (!doctorId || !Array.isArray(list)) return null;
 
     const mapped = (list as unknown[]).filter(isRecord).map((d) => d as unknown as DoctorLite);
@@ -385,7 +401,7 @@ export default function ClinicVisitInfoPage() {
   const role = auth.status === 'authenticated' ? auth.role : undefined;
   const isAdmin = role === 'ADMIN';
 
-  const visitDone = Boolean(visit && (visit as any).status === 'DONE');
+  const visitDone = Boolean(visit && getPropString(visit, 'status') === 'DONE');
   const hasBill = Boolean(bill);
 
   const primaryLabel = hasBill ? 'Print/Followup' : 'Checkout';
@@ -402,7 +418,7 @@ export default function ClinicVisitInfoPage() {
     try {
       setOfflineCheckoutBusy(true);
 
-      if ((visit as any).status !== 'DONE') {
+      if (getPropString(visit, 'status') !== 'DONE') {
         await updateVisitStatus({ visitId, status: 'DONE' }).unwrap();
         await visitQuery.refetch();
       }
@@ -427,8 +443,8 @@ export default function ClinicVisitInfoPage() {
     for (const v of allVisitsRaw) meta.set(v.visitId, v);
     if (visit?.visitId) meta.set(visit.visitId, visit);
 
-    const tag = getString((visit as any)?.tag);
-    const anchorVisitId = getString((visit as any)?.anchorVisitId);
+    const tag = getPropString(visit, 'tag');
+    const anchorVisitId = getPropString(visit, 'anchorVisitId');
 
     const anchorId = tag === 'F' ? anchorVisitId : visitId;
     if (!anchorId) return { visitIds: [visitId], meta, currentVisitId: visitId };
@@ -445,8 +461,8 @@ export default function ClinicVisitInfoPage() {
 
     followups.sort(
       (a, b) =>
-        ((a as any).createdAt ?? (a as any).updatedAt ?? 0) -
-        ((b as any).createdAt ?? (b as any).updatedAt ?? 0),
+        (getPropNumber(a, 'createdAt') ?? getPropNumber(a, 'updatedAt') ?? 0) -
+        (getPropNumber(b, 'createdAt') ?? getPropNumber(b, 'updatedAt') ?? 0),
     );
     chain.push(...followups);
 
@@ -457,8 +473,8 @@ export default function ClinicVisitInfoPage() {
 
     chain.sort(
       (a, b) =>
-        ((a as any).createdAt ?? (a as any).updatedAt ?? 0) -
-        ((b as any).createdAt ?? (b as any).updatedAt ?? 0),
+        (getPropNumber(a, 'createdAt') ?? getPropNumber(a, 'updatedAt') ?? 0) -
+        (getPropNumber(b, 'createdAt') ?? getPropNumber(b, 'updatedAt') ?? 0),
     );
 
     const seen = new Set<string>();
@@ -598,8 +614,8 @@ export default function ClinicVisitInfoPage() {
 
           <div className="min-w-0 overflow-hidden">
             <Preview
-              patientName={patientName}
-              patientPhone={patientPhone}
+              patientName={patientName as PreviewProps['patientName']}
+              patientPhone={patientPhone as PreviewProps['patientPhone']}
               patientAge={patientAge}
               patientSex={patientSex}
               sdId={patientSdId}
@@ -608,8 +624,8 @@ export default function ClinicVisitInfoPage() {
               doctorRegdLabel={resolvedDoctorRegdLabel}
               visitDateLabel={rxVisitDateLabel}
               lines={
-                isRecord(rxToShow) && Array.isArray((rxToShow as any).lines)
-                  ? ((rxToShow as any).lines as PreviewProps['lines'])
+                isRecord(rxToShow) && Array.isArray(getProp(rxToShow, 'lines'))
+                  ? (getProp(rxToShow, 'lines') as PreviewProps['lines'])
                   : []
               }
               receptionNotes={notes}

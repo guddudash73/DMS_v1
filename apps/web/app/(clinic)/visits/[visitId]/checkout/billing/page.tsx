@@ -45,6 +45,13 @@ const getBool = (obj: unknown, key: string): boolean | undefined => {
   return typeof v === 'boolean' ? v : undefined;
 };
 
+// ✅ NEW: safely read message from unknown (no `any`)
+const getErrorMessage = (err: unknown): string | undefined => {
+  if (err instanceof Error) return err.message;
+  if (isRecord(err) && typeof err.message === 'string') return err.message;
+  return undefined;
+};
+
 type ApiError = { status?: number; data?: unknown };
 
 function IconPlus(props: React.SVGProps<SVGSVGElement>) {
@@ -281,7 +288,7 @@ export default function VisitCheckoutBillingPage() {
         const e = err as ApiError;
         const msg =
           (isRecord(e.data) && typeof e.data.message === 'string' && e.data.message) ||
-          (isRecord(err) && typeof (err as any).message === 'string' && (err as any).message) ||
+          getErrorMessage(err) ||
           'Failed to mark visit DONE.';
         toast.error(msg);
         return;
@@ -334,7 +341,7 @@ export default function VisitCheckoutBillingPage() {
         isRecord(e.data) && typeof e.data.error === 'string' ? (e.data.error as string) : undefined;
       const msg =
         (isRecord(e.data) && typeof e.data.message === 'string' && e.data.message) ||
-        (isRecord(err) && typeof (err as any).message === 'string' && (err as any).message) ||
+        getErrorMessage(err) ||
         'Checkout failed.';
 
       if (code === 'VISIT_NOT_DONE') toast.error('Visit must be DONE before checkout.');

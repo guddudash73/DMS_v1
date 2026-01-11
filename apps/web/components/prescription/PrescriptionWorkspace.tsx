@@ -526,7 +526,7 @@ export function PrescriptionWorkspace(props: Props) {
 
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
-  const [activeRxId, setActiveRxId] = useState<string | null>(null);
+  const [, setActiveRxId] = useState<string | null>(null);
   const hydratedRef = useRef(false);
 
   const lastHash = useRef<string>('');

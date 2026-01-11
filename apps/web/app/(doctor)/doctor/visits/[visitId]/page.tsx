@@ -69,7 +69,9 @@ type VisitExtras = {
 };
 type VisitWithExtras = Visit & VisitExtras;
 
-function isRecord(v: unknown): v is Record<string, unknown> {
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is UnknownRecord {
   return typeof v === 'object' && v !== null;
 }
 
@@ -77,24 +79,37 @@ function getString(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v : undefined;
 }
 
+function getProp(obj: unknown, key: string): unknown {
+  if (!isRecord(obj)) return undefined;
+  return obj[key];
+}
+
+function getPropString(obj: unknown, key: string): string | undefined {
+  return getString(getProp(obj, key));
+}
+
+function getPropNumber(obj: unknown, key: string): number | undefined {
+  const v = getProp(obj, key);
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
 function getErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
 
   if (isRecord(err)) {
-    const data = err.data;
+    const data = getProp(err, 'data');
     if (isRecord(data)) {
-      const msg = getString(data.message);
+      const msg = getString(getProp(data, 'message'));
       if (msg) return msg;
     }
-    const msg = getString(err.message);
+    const msg = getString(getProp(err, 'message'));
     if (msg) return msg;
   }
   return 'Request failed.';
 }
 
 function safeSexFromPatient(p: unknown): PatientSex {
-  const rec = isRecord(p) ? p : {};
-  const raw = String(rec.gender ?? rec.sex ?? '')
+  const raw = String(getProp(p, 'gender') ?? getProp(p, 'sex') ?? getProp(p, 'patientSex') ?? '')
     .trim()
     .toUpperCase();
 
@@ -207,7 +222,7 @@ function MedicinesReadOnly({ lines }: { lines: unknown[] }) {
         </TableHeader>
         <TableBody>
           {lines.map((l, idx) => {
-            const rec: Record<string, unknown> = isRecord(l) ? l : {};
+            const rec: UnknownRecord = isRecord(l) ? l : {};
             const idVal = rec['id'];
             const rxLineIdVal = rec['rxLineId'];
 
@@ -259,9 +274,7 @@ function VisitPrescriptionQuickLookDialog(props: {
     doctorRegdLabel,
   } = props;
 
-  const rxQuery = useGetVisitRxQuery({ visitId: visitId ?? '' } as any, {
-    skip: !open || !visitId,
-  });
+  const rxQuery = useGetVisitRxQuery({ visitId: visitId ?? '' }, { skip: !open || !visitId });
   const visitQuery = useGetVisitByIdQuery(visitId ?? '', { skip: !open || !visitId });
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !open || !patientId });
 
@@ -269,11 +282,15 @@ function VisitPrescriptionQuickLookDialog(props: {
     skip: !open || !patientId,
     refetchOnMountOrArgChange: true,
   });
-  const allVisitsRaw = (visitsQuery.data?.items ?? []) as Visit[];
+
+  const allVisitsRaw = React.useMemo(() => {
+    const items = getProp(visitsQuery.data, 'items');
+    return Array.isArray(items) ? (items as Visit[]) : [];
+  }, [visitsQuery.data]);
 
   const visitCreatedAtDate = React.useMemo(() => {
     const d = visitQuery.data;
-    const createdAt = isRecord(d) ? d.createdAt : undefined;
+    const createdAt = getProp(d, 'createdAt');
     return safeParseDate(createdAt);
   }, [visitQuery.data]);
 
@@ -283,9 +300,12 @@ function VisitPrescriptionQuickLookDialog(props: {
   }, [visitCreatedAtDate]);
 
   const patientSex = React.useMemo(() => {
-    const pUnknown: unknown = patientQuery.data;
-    const rec: Record<string, unknown> = isRecord(pUnknown) ? pUnknown : {};
-    const raw = String(rec.gender ?? rec.sex ?? rec.patientSex ?? '')
+    const raw = String(
+      getProp(patientQuery.data, 'gender') ??
+        getProp(patientQuery.data, 'sex') ??
+        getProp(patientQuery.data, 'patientSex') ??
+        '',
+    )
       .trim()
       .toUpperCase();
 
@@ -297,9 +317,12 @@ function VisitPrescriptionQuickLookDialog(props: {
   }, [patientQuery.data]);
 
   const patientAge = React.useMemo(() => {
-    const pUnknown: unknown = patientQuery.data;
-    const rec: Record<string, unknown> = isRecord(pUnknown) ? pUnknown : {};
-    const dobRaw = rec.dob ?? rec.dateOfBirth ?? rec.birthDate ?? rec.dobIso ?? null;
+    const dobRaw =
+      getProp(patientQuery.data, 'dob') ??
+      getProp(patientQuery.data, 'dateOfBirth') ??
+      getProp(patientQuery.data, 'birthDate') ??
+      getProp(patientQuery.data, 'dobIso') ??
+      null;
 
     const dob = safeParseDate(dobRaw);
     const at = visitCreatedAtDate ?? new Date();
@@ -307,13 +330,15 @@ function VisitPrescriptionQuickLookDialog(props: {
     return calcAgeYearsFromDates(dob, at);
   }, [patientQuery.data, visitCreatedAtDate]);
 
-  const currentLines = (rxQuery.data as any)?.rx?.lines ?? [];
+  const rxUnknown = getProp(rxQuery.data, 'rx');
+  const currentLinesUnknown = isRecord(rxUnknown) ? getProp(rxUnknown, 'lines') : undefined;
+  const currentLines = Array.isArray(currentLinesUnknown) ? currentLinesUnknown : [];
+
   const currentToothDetails = React.useMemo<ToothDetail[]>(() => {
-    const r = (rxQuery.data as any)?.rx;
-    if (!r || !isRecord(r)) return [];
-    const td = (r as any).toothDetails;
+    if (!rxUnknown || !isRecord(rxUnknown)) return [];
+    const td = getProp(rxUnknown, 'toothDetails');
     return Array.isArray(td) ? (td as ToothDetail[]) : [];
-  }, [rxQuery.data]);
+  }, [rxUnknown]);
 
   const rxChain = React.useMemo(() => {
     const selectedId = visitId ?? '';
@@ -322,17 +347,13 @@ function VisitPrescriptionQuickLookDialog(props: {
     for (const v of allVisitsRaw) meta.set(v.visitId, v);
 
     const vd = visitQuery.data;
-    if (isRecord(vd) && typeof (vd as any).visitId === 'string')
-      meta.set((vd as any).visitId, vd as unknown as Visit);
+    const vdId = getPropString(vd, 'visitId');
+    if (vdId) meta.set(vdId, vd as unknown as Visit);
 
     const vSelected = meta.get(selectedId) ?? (vd as unknown as Visit | undefined);
 
-    const tag = isRecord(vSelected)
-      ? getString((vSelected as Record<string, unknown>).tag)
-      : undefined;
-    const anchorVisitId = isRecord(vSelected)
-      ? getString((vSelected as Record<string, unknown>).anchorVisitId)
-      : undefined;
+    const tag = getPropString(vSelected, 'tag');
+    const anchorVisitId = getPropString(vSelected, 'anchorVisitId');
 
     const anchorId = tag === 'F' ? anchorVisitId : selectedId;
     if (!anchorId)
@@ -344,15 +365,11 @@ function VisitPrescriptionQuickLookDialog(props: {
 
     const followups: Visit[] = [];
     for (const v of meta.values()) {
-      const aId = isRecord(v)
-        ? getString((v as unknown as Record<string, unknown>).anchorVisitId)
-        : undefined;
+      const aId = getPropString(v, 'anchorVisitId');
       if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
     }
     followups.sort(
-      (a, b) =>
-        ((a as any).createdAt ?? (a as any).updatedAt ?? 0) -
-        ((b as any).createdAt ?? (b as any).updatedAt ?? 0),
+      (a, b) => (getPropNumber(a, 'createdAt') ?? 0) - (getPropNumber(b, 'createdAt') ?? 0),
     );
     chain.push(...followups);
 
@@ -363,8 +380,8 @@ function VisitPrescriptionQuickLookDialog(props: {
 
     chain.sort(
       (a, b) =>
-        ((a as any).createdAt ?? (a as any).updatedAt ?? 0) -
-        ((b as any).createdAt ?? (b as any).updatedAt ?? 0),
+        (getPropNumber(a, 'createdAt') ?? getPropNumber(a, 'updatedAt') ?? 0) -
+        (getPropNumber(b, 'createdAt') ?? getPropNumber(b, 'updatedAt') ?? 0),
     );
 
     const seen = new Set<string>();
@@ -385,15 +402,15 @@ function VisitPrescriptionQuickLookDialog(props: {
 
   const selectedVisitOpdNo = React.useMemo(() => {
     const vUnknown: unknown = visitQuery.data;
-    const v = isRecord(vUnknown) ? vUnknown : {};
     const raw =
-      (v as any).opdNo ??
-      (v as any).opdNumber ??
-      (v as any).opdId ??
-      (v as any).opd ??
-      (v as any).opd_no ??
-      (v as any).opd_no_str ??
+      getProp(vUnknown, 'opdNo') ??
+      getProp(vUnknown, 'opdNumber') ??
+      getProp(vUnknown, 'opdId') ??
+      getProp(vUnknown, 'opd') ??
+      getProp(vUnknown, 'opd_no') ??
+      getProp(vUnknown, 'opd_no_str') ??
       undefined;
+
     const s = raw == null ? '' : String(raw).trim();
     return s || undefined;
   }, [visitQuery.data]);
@@ -414,11 +431,16 @@ function VisitPrescriptionQuickLookDialog(props: {
             <div className="text-sm text-gray-500">Invalid visit.</div>
           ) : (
             <PrescriptionPreview
-              patientName={(patientQuery.data as any)?.name ?? patientName}
-              patientPhone={(patientQuery.data as any)?.phone ?? patientPhone}
+              patientName={
+                (getProp(patientQuery.data, 'name') as PreviewProps['patientName']) ?? patientName
+              }
+              patientPhone={
+                (getProp(patientQuery.data, 'phone') as PreviewProps['patientPhone']) ??
+                patientPhone
+              }
               patientAge={patientAge}
               patientSex={patientSex}
-              sdId={(patientQuery.data as any)?.sdId ?? patientSdId}
+              sdId={(getProp(patientQuery.data, 'sdId') as string | undefined) ?? patientSdId}
               opdNo={selectedVisitOpdNo ?? opdNo}
               doctorName={doctorName}
               doctorRegdLabel={doctorRegdLabel}
@@ -457,18 +479,15 @@ function VisitXrayQuickLookDialog(props: {
 
 // Grouping helpers
 function anchorIdFromVisit(v: Visit): string | undefined {
-  const rec: Record<string, unknown> = isRecord(v) ? (v as unknown as Record<string, unknown>) : {};
-  return getString((rec as any).anchorVisitId) ?? getString((rec as any).anchorId) ?? undefined;
+  return getPropString(v, 'anchorVisitId') ?? getPropString(v, 'anchorId') ?? undefined;
 }
 
 function isZeroBilledVisit(v: Visit): boolean {
-  const rec: Record<string, unknown> = isRecord(v) ? (v as unknown as Record<string, unknown>) : {};
-  return Boolean((rec as any).zeroBilled);
+  return Boolean(getProp(v, 'zeroBilled'));
 }
 
 function isOfflineVisit(v: Visit): boolean {
-  const rec: Record<string, unknown> = isRecord(v) ? (v as unknown as Record<string, unknown>) : {};
-  return Boolean((rec as any).isOffline);
+  return Boolean(getProp(v, 'isOffline'));
 }
 
 function typeBadgeClass(kind: 'NEW' | 'FOLLOWUP') {
@@ -516,18 +535,14 @@ export default function DoctorVisitPage() {
   const patient = patientQuery.data ?? null;
 
   // Base Rx query (latest by default)
-  const rxQuery = useGetVisitRxQuery({ visitId } as any, { skip: !visitId });
-  const rxLatest = (rxQuery.data as any)?.rx ?? null;
-
-  React.useEffect(() => {
-    if ((rxQuery.data as any)?.rx) {
-      // eslint-disable-next-line no-console
-      console.log('RX_SHAPE', (rxQuery.data as any).rx);
-    }
-  }, [rxQuery.data]);
+  const rxQuery = useGetVisitRxQuery({ visitId }, { skip: !visitId });
+  const rxLatest = (getProp(rxQuery.data, 'rx') as unknown) ?? null;
 
   const visitsQuery = useGetPatientVisitsQuery(patientId, { skip: !patientId });
-  const allVisitsRaw = (visitsQuery.data?.items ?? []) as Visit[];
+  const allVisitsRaw = React.useMemo(() => {
+    const items = getProp(visitsQuery.data, 'items');
+    return Array.isArray(items) ? (items as Visit[]) : [];
+  }, [visitsQuery.data]);
 
   const rxChain = React.useMemo(() => {
     const meta = new Map<string, Visit>();
@@ -552,8 +567,8 @@ export default function DoctorVisitPage() {
 
     followups.sort(
       (a, b) =>
-        ((a as any).createdAt ?? (a as any).updatedAt ?? 0) -
-        ((b as any).createdAt ?? (b as any).updatedAt ?? 0),
+        (getPropNumber(a, 'createdAt') ?? getPropNumber(a, 'updatedAt') ?? 0) -
+        (getPropNumber(b, 'createdAt') ?? getPropNumber(b, 'updatedAt') ?? 0),
     );
     chain.push(...followups);
 
@@ -564,8 +579,8 @@ export default function DoctorVisitPage() {
 
     chain.sort(
       (a, b) =>
-        ((a as any).createdAt ?? (a as any).updatedAt ?? 0) -
-        ((b as any).createdAt ?? (b as any).updatedAt ?? 0),
+        (getPropNumber(a, 'createdAt') ?? getPropNumber(a, 'updatedAt') ?? 0) -
+        (getPropNumber(b, 'createdAt') ?? getPropNumber(b, 'updatedAt') ?? 0),
     );
 
     const seen = new Set<string>();
@@ -615,9 +630,9 @@ export default function DoctorVisitPage() {
   const visitDateLabel = visitDate ? `Visit: ${visitDate}` : undefined;
 
   const patientSex = safeSexFromPatient(patient);
-  const patientAge = calcAgeYears((patient as any)?.dob, visitDate) ?? undefined;
+  const patientAge = calcAgeYears(getPropString(patient, 'dob'), visitDate) ?? undefined;
 
-  const opdNo = getString((visit as any)?.opdNo) ?? getString((visit as any)?.opdId) ?? undefined;
+  const opdNo = getString(visit?.opdNo) ?? getString(visit?.opdId) ?? undefined;
 
   const loading = visitQuery.isLoading || patientQuery.isLoading;
   const hasError = visitQuery.isError || patientQuery.isError;
@@ -628,17 +643,14 @@ export default function DoctorVisitPage() {
     'This is an offline visit. Session editing is disabled in Doctor view.';
 
   // -------- Rx version dropdown (DONE visits) --------
-  // NOTE: This uses GET /visits/:visitId/rx?version=N (your api.ts must allow optional version param).
-  // If your backend does not support version query param yet, it will still show latest.
   const [selectedRxVersion, setSelectedRxVersion] = React.useState<number | null>(null);
 
   const latestVersionFromRx = React.useMemo(() => {
     if (!rxLatest || !isRecord(rxLatest)) return null;
-    const v = (rxLatest as any).version;
+    const v = getProp(rxLatest, 'version');
     return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
   }, [rxLatest]);
 
-  // Build options: [latest..1]. (If you later add a real versions endpoint, you can replace this easily.)
   const versionOptions = React.useMemo(() => {
     const latest = latestVersionFromRx;
     if (!latest) return [];
@@ -652,19 +664,18 @@ export default function DoctorVisitPage() {
   }, [isDone, latestVersionFromRx, selectedRxVersion]);
 
   const rxByVersionQuery = useGetVisitRxQuery(
-    { visitId, version: selectedRxVersion ?? undefined } as any,
+    { visitId, version: selectedRxVersion ?? undefined },
     { skip: !visitId || !isDone || selectedRxVersion == null },
   );
 
   const rxToShow = React.useMemo(() => {
-    // if versioned query is enabled and has data, use it; otherwise fall back to latest
-    const r = (rxByVersionQuery.data as any)?.rx ?? null;
+    const r = getProp(rxByVersionQuery.data, 'rx') ?? null;
     return r ?? rxLatest;
   }, [rxByVersionQuery.data, rxLatest]);
 
   const toothDetails = React.useMemo<ToothDetail[]>(() => {
     if (!rxToShow || !isRecord(rxToShow)) return [];
-    const td = (rxToShow as any).toothDetails;
+    const td = getProp(rxToShow, 'toothDetails');
     return Array.isArray(td) ? (td as ToothDetail[]) : [];
   }, [rxToShow]);
 
@@ -708,7 +719,7 @@ export default function DoctorVisitPage() {
         await updateVisitStatus({
           visitId,
           status: 'IN_PROGRESS',
-          date: (visit as any)?.visitDate,
+          date: visit?.visitDate,
         }).unwrap();
 
         toast.success('Session started.');
@@ -725,11 +736,11 @@ export default function DoctorVisitPage() {
   // Previous Visits table
   const allDoneVisits = React.useMemo(() => {
     return [...allVisitsRaw]
-      .filter((v) => (v as any).status === 'DONE')
+      .filter((v) => getPropString(v, 'status') === 'DONE')
       .sort(
         (a, b) =>
-          ((b as any).updatedAt ?? (b as any).createdAt ?? 0) -
-          ((a as any).updatedAt ?? (a as any).createdAt ?? 0),
+          (getPropNumber(b, 'updatedAt') ?? getPropNumber(b, 'createdAt') ?? 0) -
+          (getPropNumber(a, 'updatedAt') ?? getPropNumber(a, 'createdAt') ?? 0),
       );
   }, [allVisitsRaw]);
 
@@ -743,7 +754,7 @@ export default function DoctorVisitPage() {
 
   const filteredVisits = React.useMemo(() => {
     if (!selectedDateStr) return allDoneVisits;
-    return allDoneVisits.filter((v) => (v as any).visitDate === selectedDateStr);
+    return allDoneVisits.filter((v) => getPropString(v, 'visitDate') === selectedDateStr);
   }, [allDoneVisits, selectedDateStr]);
 
   const visitById = React.useMemo(() => {
@@ -773,25 +784,27 @@ export default function DoctorVisitPage() {
     }
 
     for (const g of anchorMap.values()) {
-      g.followups.sort((a, b) => ((a as any).createdAt ?? 0) - ((b as any).createdAt ?? 0));
+      g.followups.sort(
+        (a, b) => (getPropNumber(a, 'createdAt') ?? 0) - (getPropNumber(b, 'createdAt') ?? 0),
+      );
     }
 
     const anchorsOrdered = Array.from(anchorMap.values()).sort(
       (a, b) =>
-        ((b.anchor as any).updatedAt ?? (b.anchor as any).createdAt ?? 0) -
-        ((a.anchor as any).updatedAt ?? (a.anchor as any).createdAt ?? 0),
+        (getPropNumber(b.anchor, 'updatedAt') ?? getPropNumber(b.anchor, 'createdAt') ?? 0) -
+        (getPropNumber(a.anchor, 'updatedAt') ?? getPropNumber(a.anchor, 'createdAt') ?? 0),
     );
 
     const orphanGroups = orphanFollowups
       .sort(
         (a, b) =>
-          ((b as any).updatedAt ?? (b as any).createdAt ?? 0) -
-          ((a as any).updatedAt ?? (a as any).createdAt ?? 0),
+          (getPropNumber(b, 'updatedAt') ?? getPropNumber(b, 'createdAt') ?? 0) -
+          (getPropNumber(a, 'updatedAt') ?? getPropNumber(a, 'createdAt') ?? 0),
       )
       .map((followup) => ({ followup }));
 
     return { anchorsOrdered, orphanGroups };
-  }, [filteredVisits, visitById]);
+  }, [filteredVisits]);
 
   const PAGE_SIZE = 2;
   const [page, setPage] = React.useState(1);
@@ -843,17 +856,18 @@ export default function DoctorVisitPage() {
                 ? visitById.get(anchorIdFromVisit(visitRow)!)
                 : undefined);
 
-            const aReason = ((a as any)?.reason || '—').toString();
-            const aDate = (a as any)?.visitDate ? formatClinicDateShort((a as any).visitDate) : '—';
+            const aReason = String(getProp(a, 'reason') ?? '—');
+            const aDateRaw = getPropString(a, 'visitDate');
+            const aDate = aDateRaw ? formatClinicDateShort(aDateRaw) : '—';
             return `Follow-up of: ${aReason} • ${aDate}`;
           })()
         : null;
 
+    const reason = String(getProp(visitRow, 'reason') ?? '').trim();
+
     return (
       <div className="min-w-0">
-        <div className="truncate text-sm font-semibold text-gray-900">
-          {(visitRow as any).reason?.trim() ? (visitRow as any).reason : '—'}
-        </div>
+        <div className="truncate text-sm font-semibold text-gray-900">{reason ? reason : '—'}</div>
 
         <div className="mt-0.5 text-[11px] text-gray-500">
           {opts.kind === 'NEW' ? (
@@ -1012,7 +1026,6 @@ export default function DoctorVisitPage() {
                 </div>
               </div>
 
-              {/* ✅ Version dropdown */}
               {versionOptions.length > 0 ? (
                 <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-gray-50 px-3 py-2">
                   <div className="text-xs font-medium text-gray-700">
@@ -1045,18 +1058,22 @@ export default function DoctorVisitPage() {
 
               <div className="min-w-0 overflow-x-hidden">
                 <PrescriptionPreview
-                  patientName={(patient as any)?.name}
-                  patientPhone={(patient as any)?.phone}
+                  patientName={getProp(patient, 'name') as PreviewProps['patientName']}
+                  patientPhone={getProp(patient, 'phone') as PreviewProps['patientPhone']}
                   patientAge={patientAge}
                   patientSex={patientSex}
-                  sdId={(patient as any)?.sdId}
+                  sdId={getProp(patient, 'sdId') as string | undefined}
                   opdNo={opdNo}
                   doctorName={doctorLabel}
                   doctorRegdLabel={doctorRegdLabel}
                   visitDateLabel={visitDateLabel}
-                  lines={((rxToShow as any)?.lines ?? []) as PreviewProps['lines']}
+                  lines={
+                    Array.isArray(getProp(rxToShow, 'lines'))
+                      ? (getProp(rxToShow, 'lines') as PreviewProps['lines'])
+                      : []
+                  }
                   receptionNotes={
-                    isRecord(rxToShow) ? String((rxToShow as any).receptionNotes ?? '') : ''
+                    isRecord(rxToShow) ? String(getProp(rxToShow, 'receptionNotes') ?? '') : ''
                   }
                   toothDetails={toothDetails}
                   currentVisitId={rxChain.currentVisitId}
@@ -1079,7 +1096,6 @@ export default function DoctorVisitPage() {
             </Card>
           </div>
 
-          {/* ... rest of your DONE view unchanged ... */}
           <Card className="mt-4 w-full rounded-2xl border bg-white p-4">
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm font-semibold text-gray-900">Previous visits</div>
@@ -1169,7 +1185,7 @@ export default function DoctorVisitPage() {
                           <React.Fragment key={anchor.visitId}>
                             <TableRow className="hover:bg-gray-50/60">
                               <TableCell className="px-6 py-4 align-top text-sm font-medium text-gray-900">
-                                {formatClinicDateShort((anchor as any).visitDate)}
+                                {formatClinicDateShort(String(getProp(anchor, 'visitDate') ?? ''))}
                               </TableCell>
 
                               <TableCell className="px-6 py-4 align-top">
@@ -1211,10 +1227,12 @@ export default function DoctorVisitPage() {
                                 <Badge
                                   variant="outline"
                                   className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass2(
-                                    (anchor as any).status,
+                                    getProp(anchor, 'status') as Visit['status'] | undefined,
                                   )}`}
                                 >
-                                  {stageLabel2((anchor as any).status)}
+                                  {stageLabel2(
+                                    getProp(anchor, 'status') as Visit['status'] | undefined,
+                                  )}
                                 </Badge>
                               </TableCell>
 
@@ -1254,7 +1272,7 @@ export default function DoctorVisitPage() {
                                   <div className="flex items-center gap-3">
                                     <div className="ml-1 h-7 w-[2px] rounded-full bg-gray-200" />
                                     <div className="text-sm text-gray-900">
-                                      {formatClinicDateShort((f as any).visitDate)}
+                                      {formatClinicDateShort(String(getProp(f, 'visitDate') ?? ''))}
                                     </div>
                                   </div>
                                 </TableCell>
@@ -1303,10 +1321,12 @@ export default function DoctorVisitPage() {
                                   <Badge
                                     variant="outline"
                                     className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass2(
-                                      (f as any).status,
+                                      getProp(f, 'status') as Visit['status'] | undefined,
                                     )}`}
                                   >
-                                    {stageLabel2((f as any).status)}
+                                    {stageLabel2(
+                                      getProp(f, 'status') as Visit['status'] | undefined,
+                                    )}
                                   </Badge>
                                 </TableCell>
 
@@ -1362,7 +1382,6 @@ export default function DoctorVisitPage() {
           </Card>
         </>
       ) : (
-        // --- non-DONE branch stays unchanged from your version ---
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
           <Card className="lg:col-span-5 rounded-2xl border bg-white p-6">
             <div className="flex items-center gap-2">
@@ -1373,12 +1392,16 @@ export default function DoctorVisitPage() {
             <div className="mt-4 grid gap-3 text-sm text-gray-800">
               <div className="flex justify-between gap-3">
                 <div className="text-gray-600">Patient</div>
-                <div className="font-semibold text-gray-900">{(patient as any)?.name ?? '—'}</div>
+                <div className="font-semibold text-gray-900">
+                  {String(getProp(patient, 'name') ?? '—')}
+                </div>
               </div>
 
               <div className="flex justify-between gap-3">
                 <div className="text-gray-600">Phone</div>
-                <div className="font-semibold text-gray-900">{(patient as any)?.phone ?? '—'}</div>
+                <div className="font-semibold text-gray-900">
+                  {String(getProp(patient, 'phone') ?? '—')}
+                </div>
               </div>
 
               <div className="flex justify-between gap-3">
@@ -1390,7 +1413,9 @@ export default function DoctorVisitPage() {
 
               <div className="flex justify-between gap-3">
                 <div className="text-gray-600">SD-ID</div>
-                <div className="font-semibold text-gray-900">{(patient as any)?.sdId ?? '—'}</div>
+                <div className="font-semibold text-gray-900">
+                  {String(getProp(patient, 'sdId') ?? '—')}
+                </div>
               </div>
 
               <div className="flex justify-between gap-3">
@@ -1405,7 +1430,9 @@ export default function DoctorVisitPage() {
 
               <div className="flex justify-between gap-3">
                 <div className="text-gray-600">Reason</div>
-                <div className="font-semibold text-gray-900">{(visit as any)?.reason ?? '—'}</div>
+                <div className="font-semibold text-gray-900">
+                  {String(getProp(visit, 'reason') ?? '—')}
+                </div>
               </div>
 
               <div className="flex justify-between gap-3">
@@ -1505,8 +1532,8 @@ export default function DoctorVisitPage() {
                 </div>
                 <MedicinesReadOnly
                   lines={
-                    (rxLatest && isRecord(rxLatest) && Array.isArray((rxLatest as any).lines)
-                      ? (rxLatest as any).lines
+                    (rxLatest && isRecord(rxLatest) && Array.isArray(getProp(rxLatest, 'lines'))
+                      ? (getProp(rxLatest, 'lines') as unknown[])
                       : []) as unknown[]
                   }
                 />
@@ -1514,14 +1541,7 @@ export default function DoctorVisitPage() {
             ) : null}
           </Card>
 
-          {/* Keep your "Previous visits" table block unchanged — already included above in your original file */}
-          <Card className="lg:col-span-12 rounded-2xl border bg-white p-4">
-            {/* (unchanged contents omitted for brevity in this section) */}
-            {/* NOTE: You can keep exactly what you already have here. */}
-            <div className="text-sm text-gray-500">
-              Previous visits section unchanged (keep your existing code here).
-            </div>
-          </Card>
+          {/* Keep your remaining "Previous visits" non-DONE block as-is in your repo if it exists */}
         </div>
       )}
 
@@ -1530,9 +1550,9 @@ export default function DoctorVisitPage() {
         onOpenChange={(o) => setRxQuickOpen(o)}
         visitId={quickVisitId}
         patientId={patientId}
-        patientName={(patient as any)?.name}
-        patientPhone={(patient as any)?.phone}
-        patientSdId={(patient as any)?.sdId}
+        patientName={getPropString(patient, 'name')}
+        patientPhone={getPropString(patient, 'phone')}
+        patientSdId={getPropString(patient, 'sdId')}
         opdNo={opdNo}
         doctorName={doctorLabel}
         doctorRegdLabel={doctorRegdLabel}
