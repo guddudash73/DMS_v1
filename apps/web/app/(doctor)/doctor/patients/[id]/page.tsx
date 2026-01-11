@@ -112,14 +112,15 @@ function stageBadgeClass(status?: Visit['status']) {
 type VisitKind = 'NEW' | 'FOLLOWUP';
 
 function getAnchorVisitId(v: Visit): string | null {
-  const anyV = v as any;
-  const raw = typeof anyV?.anchorVisitId === 'string' ? anyV.anchorVisitId : null;
-  return raw && raw.length > 0 ? raw : null;
+  const rec = v as unknown as Record<string, unknown>;
+  const raw = rec?.anchorVisitId;
+  const id = typeof raw === 'string' ? raw : null;
+  return id && id.length > 0 ? id : null;
 }
 
 function getIsZeroBilled(v: Visit): boolean {
-  const anyV = v as any;
-  return Boolean(anyV?.zeroBilled);
+  const rec = v as unknown as Record<string, unknown>;
+  return rec?.zeroBilled === true;
 }
 
 function getKind(v: Visit): VisitKind {
@@ -133,7 +134,7 @@ function visitTitle(v: Visit): string {
   return (v.reason || '').trim() || '—';
 }
 
-function followupMetaText(f: Visit, anchor: Visit | null): string {
+function followupMetaText(_f: Visit, anchor: Visit | null): string {
   if (!anchor) return 'Follow-up of: —';
   const aName = visitTitle(anchor);
   const aDate = anchor.visitDate ? formatVisitDate(anchor.visitDate) : '—';

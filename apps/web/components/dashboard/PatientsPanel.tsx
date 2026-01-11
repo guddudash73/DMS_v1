@@ -1,3 +1,4 @@
+// apps/web/components/dashboard/PatientsPanel.tsx
 'use client';
 
 import * as React from 'react';
@@ -68,8 +69,8 @@ function initials(name: string) {
 // 2) legacy flags: isZeroBilled / zero_billed / zeroBilledVisit / visit.zeroBilled
 // 3) fallback: billingAmount <= 0 (only when a numeric billingAmount exists)
 function isZeroBilled(p: PatientsPanelItem): boolean {
-  // 1) preferred flag (avoid `=== true` to prevent TS "no overlap" issues)
-  if (Boolean(p.zeroBilled)) return true;
+  // 1) preferred flag (avoid redundant Boolean() cast)
+  if (p.zeroBilled) return true;
 
   // 2) legacy flags (read safely as unknown and coerce)
   const anyP = p as unknown as Record<string, unknown>;

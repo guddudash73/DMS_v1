@@ -42,6 +42,8 @@ export function buildTokenEscPos(p: TokenPrintPayload): string {
     .slice(0, 64);
 
   const tag = p.tag ?? 'N';
+  const offline = !!(p as any).isOffline;
+
   const visitNo = p.visitNumberForPatient;
   const waitingNo = p.tokenNumber;
   const created = fmtDateTime(p.createdAt);
@@ -78,7 +80,10 @@ export function buildTokenEscPos(p: TokenPrintPayload): string {
   out += `Name   : ${patientName}${LF}`;
   if (phoneMasked) out += `Phone  : ${phoneMasked}${LF}`;
   out += `Reason : ${reason}${LF}`;
-  out += `Tag    : ${tag}${LF}`;
+
+  // ✅ "offline tag" on token
+  out += `Tag    : ${offline ? `${tag} / OFFLINE` : tag}${LF}`;
+
   out += `Visit# : ${visitNo}${LF}`;
   out += `VisitId: ${p.visitId}${LF}`;
   out += `Time   : ${created}${LF}`;

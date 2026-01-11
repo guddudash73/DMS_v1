@@ -4,7 +4,7 @@ import { useRouter } from 'next/navigation';
 import { useForm, type SubmitErrorHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'react-toastify';
-import { z } from 'zod';
+import type { z } from 'zod';
 
 import { PatientCreate as PatientCreateSchema, type PatientCreate } from '@dms/types';
 import { Button } from '@/components/ui/button';
@@ -47,7 +47,7 @@ export default function NewPatientPage() {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<PatientCreateFormInput, any, PatientCreateFormOutput>({
+  } = useForm<PatientCreateFormInput, unknown, PatientCreateFormOutput>({
     resolver: zodResolver(PatientCreateSchema),
     mode: 'onBlur',
     defaultValues: {

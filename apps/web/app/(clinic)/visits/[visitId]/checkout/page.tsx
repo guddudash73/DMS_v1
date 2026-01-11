@@ -5,6 +5,10 @@ import { useParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useGetVisitBillQuery } from '@/src/store/api';
 
+type ApiErrorLike = {
+  status?: number;
+};
+
 export default function VisitCheckoutEntryPage() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -16,7 +20,9 @@ export default function VisitCheckoutEntryPage() {
 
   const billQuery = useGetVisitBillQuery({ visitId }, { skip: !visitId });
   const bill = billQuery.data ?? null;
-  const billNotFound = (billQuery as any)?.error?.status === 404;
+
+  const billNotFound =
+    ((billQuery.error as unknown as ApiErrorLike | undefined)?.status ?? undefined) === 404;
 
   React.useEffect(() => {
     if (!visitId) return;

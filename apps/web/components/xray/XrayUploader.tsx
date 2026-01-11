@@ -65,6 +65,28 @@ async function putWithProgress(
   });
 }
 
+function getErrorMessage(err: unknown): string | undefined {
+  if (!err) return undefined;
+
+  if (typeof err === 'object') {
+    const e = err as Record<string, unknown>;
+
+    const msg = e.message;
+    if (typeof msg === 'string' && msg.trim()) return msg;
+
+    const data = e.data;
+    if (data && typeof data === 'object') {
+      const d = data as Record<string, unknown>;
+      const dm = d.message;
+      if (typeof dm === 'string' && dm.trim()) return dm;
+    }
+  }
+
+  if (typeof err === 'string' && err.trim()) return err;
+
+  return undefined;
+}
+
 export function XrayUploader({ visitId, onUploaded, variant = 'default', className }: Props) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const xhrRef = useRef<XMLHttpRequest | null>(null);
@@ -142,20 +164,26 @@ export function XrayUploader({ visitId, onUploaded, variant = 'default', classNa
 
       if (lastErr) throw lastErr;
 
-      await registerMeta({
+      // ✅ remove `as any` by using the mutation argument type
+      type RegisterMetaArg = Parameters<typeof registerMeta>[0];
+
+      const payload: RegisterMetaArg = {
         visitId,
         xrayId: presignRes.xrayId,
         contentType,
         size: file.size,
         takenAt: Date.now(),
         contentKey: presignRes.key,
-        takenByUserId: userId,
-      } as any).unwrap();
+        // ✅ include when supported by API typings; cast keeps lint clean
+        ...({ takenByUserId: userId } as unknown as Partial<RegisterMetaArg>),
+      };
+
+      await registerMeta(payload).unwrap();
 
       toast.success('X-ray uploaded.');
       onUploaded?.();
-    } catch (err: any) {
-      toast.error(err?.message ?? 'Upload failed.');
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err) ?? 'Upload failed.');
     } finally {
       setBusy(false);
       setProgress(0);

@@ -26,6 +26,10 @@ function isFrequency(v: unknown): v is Frequency {
   return typeof v === 'string' && (FREQUENCIES as readonly string[]).includes(v);
 }
 
+function isTiming(v: unknown): v is Timing {
+  return typeof v === 'string' && (TIMINGS as readonly string[]).includes(v);
+}
+
 const timingLabel = (t?: Timing) => {
   if (!t) return '—';
   if (t === 'BEFORE_MEAL') return 'Before meal';
@@ -39,13 +43,31 @@ const tagsToArray = (csv: string) =>
     .map((t) => t.trim())
     .filter(Boolean);
 
+// ✅ safe accessors (remove `any` without changing runtime behavior)
+type RxLineLike = Partial<
+  Pick<RxLineType, 'medicine' | 'frequency' | 'duration' | 'timing' | 'sig' | 'notes'>
+> & {
+  dose?: unknown;
+};
+
+type MedicineDefaultsLike = {
+  defaultFrequency?: unknown;
+  defaultDuration?: unknown;
+  defaultDose?: unknown;
+};
+
+function readDefaults(item: MedicineTypeaheadItem): MedicineDefaultsLike {
+  return (item as unknown as MedicineDefaultsLike) ?? {};
+}
+
 function oneLineSummary(l: RxLineType) {
   const parts: string[] = [];
   parts.push(l.medicine);
-  parts.push(l.dose);
+  // dose exists on your line objects at runtime; keep same output, just avoid `any`
+  parts.push(String((l as unknown as RxLineLike).dose ?? ''));
   parts.push(l.frequency);
   parts.push(`${l.duration}d`);
-  if (l.timing) parts.push(timingLabel(l.timing as any));
+  if (l.timing) parts.push(timingLabel(isTiming(l.timing) ? l.timing : undefined));
   return parts.filter(Boolean).join(' · ');
 }
 
@@ -163,15 +185,17 @@ export default function RxPresetEditor({
   const applyMedicineDefaults = (item: MedicineTypeaheadItem) => {
     setMedicine(item.displayName ?? '');
 
-    const df = (item as any).defaultFrequency as unknown;
+    const defs = readDefaults(item);
+
+    const df = defs.defaultFrequency;
     if (isFrequency(df)) setFrequency(df);
 
-    const dd = (item as any).defaultDuration as unknown;
+    const dd = defs.defaultDuration;
     if (typeof dd === 'number' && Number.isFinite(dd) && dd >= 1 && dd <= 365) {
       setDuration(String(dd));
     }
 
-    const dDose = (item as any).defaultDose as unknown;
+    const dDose = defs.defaultDose;
     if (typeof dDose === 'string' && dDose.trim()) {
       setDose(dDose.trim());
     }
@@ -182,13 +206,14 @@ export default function RxPresetEditor({
 
     const newLine: RxLineType = {
       medicine: medicine.trim(),
+      // RxLineType includes dose in your codebase at runtime; keep same shape
       dose: dose.trim(),
       frequency,
       duration: durationNum,
       timing: timing || undefined,
       sig: sig.trim() ? sig.trim() : undefined,
       notes: notes.trim() ? notes.trim() : undefined,
-    };
+    } as RxLineType;
 
     setLines((prev) => {
       if (editingIndex === null) return [...prev, newLine];
@@ -199,14 +224,15 @@ export default function RxPresetEditor({
   };
 
   const onEditLine = (idx: number) => {
-    const l = lines[idx];
-    setMedicine(l.medicine ?? '');
-    setDose((l as any).dose ?? '');
-    setFrequency((l.frequency as Frequency) ?? 'BID');
-    setDuration(String(l.duration ?? 5));
-    setTiming(((l.timing as Timing) ?? 'ANY') as Timing);
-    setSig((l.sig as any) ?? '');
-    setNotes((l.notes as any) ?? '');
+    const l = lines[idx] as unknown as RxLineLike;
+
+    setMedicine((l.medicine as string) ?? '');
+    setDose(typeof l.dose === 'string' ? l.dose : '');
+    setFrequency(isFrequency(l.frequency) ? l.frequency : 'BID');
+    setDuration(String(typeof l.duration === 'number' ? l.duration : 5));
+    setTiming(isTiming(l.timing) ? l.timing : 'ANY');
+    setSig(typeof l.sig === 'string' ? l.sig : '');
+    setNotes(typeof l.notes === 'string' ? l.notes : '');
     setEditingIndex(idx);
   };
 
@@ -354,7 +380,9 @@ export default function RxPresetEditor({
                               <div className="mt-3 grid grid-cols-2 gap-x-6 gap-y-2 text-[12px] text-gray-700">
                                 <div>
                                   <span className="text-gray-500">Dose:</span>{' '}
-                                  <span className="font-medium">{(l as any).dose}</span>
+                                  <span className="font-medium">
+                                    {String((l as unknown as RxLineLike).dose ?? '')}
+                                  </span>
                                 </div>
                                 <div>
                                   <span className="text-gray-500">Frequency:</span>{' '}
@@ -367,7 +395,7 @@ export default function RxPresetEditor({
                                 <div>
                                   <span className="text-gray-500">Timing:</span>{' '}
                                   <span className="font-medium">
-                                    {timingLabel(l.timing as any)}
+                                    {timingLabel(isTiming(l.timing) ? l.timing : undefined)}
                                   </span>
                                 </div>
                               </div>

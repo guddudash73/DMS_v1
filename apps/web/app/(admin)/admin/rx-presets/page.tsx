@@ -1,3 +1,4 @@
+// apps/web/app/(admin)/admin/rx-presets/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -43,6 +44,62 @@ function formatWhen(ts?: number) {
 
 type SourceLabel = 'INLINE_DOCTOR' | 'ADMIN_IMPORT';
 
+// ---- small safe helpers (avoid `any`) ----
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function getString(v: unknown): string | undefined {
+  return typeof v === 'string' ? v : undefined;
+}
+
+function getStringArray(v: unknown): string[] | undefined {
+  return Array.isArray(v) && v.every((x) => typeof x === 'string') ? (v as string[]) : undefined;
+}
+
+function getRecordArray(v: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter(isRecord) as Record<string, unknown>[];
+}
+
+function getNumber(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+function getIdFromDoctor(d: Record<string, unknown>): string | undefined {
+  return getString(d.userId) ?? getString(d.doctorId) ?? getString(d.id);
+}
+
+function getNameFromDoctor(d: Record<string, unknown>): string | undefined {
+  return (
+    getString(d.displayName) ?? getString(d.fullName) ?? getString(d.name) ?? getString(d.email)
+  );
+}
+
+// Minimal shape we need for this screen (keeps behavior same, avoids `any`)
+type RxPresetListItem = {
+  id?: string;
+  name?: string;
+  scope?: string;
+  createdByUserId?: string;
+  createdAt?: number;
+  tags?: string[];
+  lines?: unknown[]; // only `.length` is used here
+};
+
+function coercePresetItem(u: unknown): RxPresetListItem {
+  if (!isRecord(u)) return {};
+  return {
+    id: getString(u.id),
+    name: getString(u.name),
+    scope: getString(u.scope),
+    createdByUserId: getString(u.createdByUserId),
+    createdAt: getNumber(u.createdAt),
+    tags: getStringArray(u.tags),
+    lines: Array.isArray(u.lines) ? (u.lines as unknown[]) : undefined,
+  };
+}
+
 export default function AdminRxPresetsPage() {
   const auth = useAuth();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
@@ -76,12 +133,14 @@ export default function AdminRxPresetsPage() {
   const doctorsQ = useGetDoctorsQuery(undefined, { skip: !canUseApi });
   const doctorNameByUserId = useMemo(() => {
     const map = new Map<string, string>();
-    for (const d of doctorsQ.data ?? []) {
-      const id = (d as any).userId ?? (d as any).doctorId ?? (d as any).id;
-      const name =
-        (d as any).displayName ?? (d as any).fullName ?? (d as any).name ?? (d as any).email;
-      if (typeof id === 'string' && typeof name === 'string') map.set(id, name);
+
+    const doctors = getRecordArray(doctorsQ.data);
+    for (const d of doctors) {
+      const id = getIdFromDoctor(d);
+      const name = getNameFromDoctor(d);
+      if (id && name) map.set(id, name);
     }
+
     return map;
   }, [doctorsQ.data]);
 
@@ -94,24 +153,25 @@ export default function AdminRxPresetsPage() {
     return { createdBy: 'Admin', source: 'ADMIN_IMPORT' as SourceLabel };
   };
 
-  const rawItems = list.data?.items ?? [];
+  const rawItemsUnknown = (list.data?.items ?? []) as unknown[];
   const total = list.data?.total ?? 0;
   const nextCursor = list.data?.nextCursor ?? null;
 
   const items = useMemo(() => {
-    if (filter === 'ALL') return rawItems;
+    const raw = rawItemsUnknown.map(coercePresetItem);
 
-    return rawItems.filter((p: any) => {
-      const scope = p?.scope as string | undefined;
+    if (filter === 'ALL') return raw;
+
+    return raw.filter((p) => {
+      const scope = p.scope;
 
       if (filter === 'ADMIN') return scope === 'ADMIN';
       if (filter === 'PUBLIC') return scope === 'PUBLIC';
-      if (filter === 'MINE')
-        return Boolean(p?.createdByUserId) && p.createdByUserId === auth.userId;
+      if (filter === 'MINE') return Boolean(p.createdByUserId) && p.createdByUserId === auth.userId;
 
       return true;
     });
-  }, [rawItems, filter, auth.userId]);
+  }, [rawItemsUnknown, filter, auth.userId]);
 
   const showing = items.length;
 
@@ -261,24 +321,26 @@ export default function AdminRxPresetsPage() {
                 </tr>
               )}
 
-              {items.map((p: any) => {
+              {items.map((p) => {
+                const id = p.id ?? '';
+                const name = p.name ?? '';
                 const meta = resolveCreatedByAndSource(p.createdByUserId);
-                const scope = (p?.scope as string | undefined) ?? 'PRIVATE';
+                const scope = p.scope ?? 'PRIVATE';
+                const lineCount = p.lines?.length ?? 0;
+                const tagsText = (p.tags ?? []).length > 0 ? (p.tags ?? []).join(', ') : '—';
 
                 return (
-                  <tr key={p.id}>
+                  <tr key={id}>
                     <td className="px-5 py-4">
-                      <div className="font-medium text-gray-900">{p.name}</div>
-                      <div className="text-[11px] text-gray-500">ID: {p.id}</div>
+                      <div className="font-medium text-gray-900">{name}</div>
+                      <div className="text-[11px] text-gray-500">ID: {id}</div>
                     </td>
 
                     <td className="px-5 py-4 text-[11px] text-gray-700">{scope}</td>
 
-                    <td className="px-5 py-4 text-[11px] text-gray-700">{p.lines?.length ?? 0}</td>
+                    <td className="px-5 py-4 text-[11px] text-gray-700">{lineCount}</td>
 
-                    <td className="px-5 py-4 text-[11px] text-gray-700">
-                      {(p.tags ?? []).length > 0 ? (p.tags ?? []).join(', ') : '—'}
-                    </td>
+                    <td className="px-5 py-4 text-[11px] text-gray-700">{tagsText}</td>
 
                     <td className="px-5 py-4 text-[11px] text-gray-700">{meta.source}</td>
 
@@ -293,7 +355,7 @@ export default function AdminRxPresetsPage() {
                     <td className="px-5 py-4">
                       <div className="flex items-center justify-end gap-2">
                         <Button asChild variant="secondary" className="h-8 rounded-xl px-3 text-xs">
-                          <Link href={`/admin/rx-presets/${p.id}`}>
+                          <Link href={`/admin/rx-presets/${id}`}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit
                           </Link>
@@ -302,7 +364,7 @@ export default function AdminRxPresetsPage() {
                         <Button
                           variant="destructive"
                           className="h-8 rounded-xl px-3 text-xs"
-                          onClick={() => onDelete(p.id, p.name)}
+                          onClick={() => onDelete(id, name)}
                           disabled={deleteState.isLoading}
                         >
                           <Trash2 className="mr-2 h-4 w-4" />

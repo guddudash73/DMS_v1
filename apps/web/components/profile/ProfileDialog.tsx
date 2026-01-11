@@ -21,6 +21,14 @@ function initialsFromName(name: string) {
   return (parts[0]!.slice(0, 1) + parts[parts.length - 1]!.slice(0, 1)).toUpperCase();
 }
 
+type UpdateMeBody = {
+  displayName?: string;
+  doctorProfile?: {
+    fullName?: string;
+    contact?: string;
+  };
+};
+
 export default function ProfileDialog(props: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -55,14 +63,14 @@ export default function ProfileDialog(props: {
   async function onSave() {
     if (!me) return;
 
-    const body: any = {};
+    const body: UpdateMeBody = {};
 
     if (displayName.trim() !== (me.displayName ?? '')) {
       body.displayName = displayName.trim();
     }
 
     if (isDoctor) {
-      const dp: any = {};
+      const dp: UpdateMeBody['doctorProfile'] = {};
 
       if ((doctorFullName ?? '').trim() !== (me.doctorProfile?.fullName ?? '')) {
         if ((doctorFullName ?? '').trim().length > 0) dp.fullName = doctorFullName.trim();

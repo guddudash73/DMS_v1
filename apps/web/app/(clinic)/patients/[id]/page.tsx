@@ -152,23 +152,24 @@ function stageBadgeClass(status?: Visit['status']) {
   return 'bg-gray-100 text-gray-700 border-gray-200';
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
 // ✅ Backend may evolve — keep safe accessors
 function anchorIdFromVisit(v: Visit): string | undefined {
-  const anyV = v as any;
-  const raw =
-    (typeof anyV?.anchorVisitId === 'string' && anyV.anchorVisitId) ||
-    (typeof anyV?.anchorId === 'string' && anyV.anchorId) ||
-    undefined;
+  const rec: Record<string, unknown> = isRecord(v) ? (v as Record<string, unknown>) : {};
+  const a1 = rec['anchorVisitId'];
+  const a2 = rec['anchorId'];
+
+  const raw = (typeof a1 === 'string' && a1) || (typeof a2 === 'string' && a2) || undefined;
+
   return raw || undefined;
 }
 
 function isZeroBilledVisit(v: Visit): boolean {
-  const anyV = v as any;
-  return Boolean(anyV?.zeroBilled);
-}
-
-function isFollowupVisit(v: Visit): boolean {
-  return Boolean(anchorIdFromVisit(v));
+  const rec: Record<string, unknown> = isRecord(v) ? (v as Record<string, unknown>) : {};
+  return Boolean(rec['zeroBilled']);
 }
 
 function typeBadgeClass(kind: 'NEW' | 'FOLLOWUP') {

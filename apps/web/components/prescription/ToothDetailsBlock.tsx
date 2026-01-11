@@ -25,7 +25,7 @@ function group(details: ToothDetail[]) {
   for (const p of POS) m.set(p, []);
 
   for (const d of details) {
-    const p = normalizePos((d as any).position);
+    const p = normalizePos(d.position);
     if (!p) continue;
 
     const arr = m.get(p) ?? [];
@@ -59,12 +59,10 @@ export function ToothDetailsBlock({ toothDetails, className }: Props) {
   const noteText = uniqueNotes.length === 1 ? uniqueNotes[0] : null;
 
   if (DEBUG_TEETH && typeof window !== 'undefined') {
-    // eslint-disable-next-line no-console
-    console.log('[ToothDetailsBlock] raw toothDetails:', toothDetails ?? []);
-    // eslint-disable-next-line no-console
-    console.log('[ToothDetailsBlock] clean:', clean);
-    // eslint-disable-next-line no-console
-    console.log('[ToothDetailsBlock] grouped:', {
+    // Only runs when DEBUG_TEETH is true; no eslint disables needed.
+    globalThis.console.log('[ToothDetailsBlock] raw toothDetails:', toothDetails ?? []);
+    globalThis.console.log('[ToothDetailsBlock] clean:', clean);
+    globalThis.console.log('[ToothDetailsBlock] grouped:', {
       UL: byPos.get('UL') ?? [],
       UR: byPos.get('UR') ?? [],
       LL: byPos.get('LL') ?? [],

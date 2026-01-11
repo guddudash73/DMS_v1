@@ -4,6 +4,7 @@ import * as React from 'react';
 import { toast } from 'react-toastify';
 import { useForm, type SubmitErrorHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useRouter } from 'next/navigation';
 
 import { VisitCreate as VisitCreateSchema, type VisitCreate, type VisitTag } from '@dms/types';
 import { Button } from '@/components/ui/button';
@@ -45,6 +46,10 @@ type VisitSummaryItem = {
   tag?: string;
 };
 
+type PatientVisitsResponse = {
+  items?: VisitSummaryItem[];
+};
+
 function safeVisitLabel(v: VisitSummaryItem) {
   const date = v.visitDate ? String(v.visitDate) : '—';
   const idShort = v.visitId ? `#${String(v.visitId).slice(0, 8)}` : '';
@@ -54,6 +59,7 @@ function safeVisitLabel(v: VisitSummaryItem) {
 
 export default function RegisterVisitModal({ patientId, onClose }: Props) {
   const auth = useAuth();
+  const router = useRouter();
 
   const [mounted, setMounted] = React.useState(false);
   const [closing, setClosing] = React.useState(false);
@@ -63,28 +69,27 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
     return () => cancelAnimationFrame(r);
   }, []);
 
+  const handleClose = React.useCallback(() => {
+    if (closing) return;
+    setClosing(true);
+    window.setTimeout(() => onClose(), 180);
+  }, [closing, onClose]);
+
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') handleClose();
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const handleClose = () => {
-    if (closing) return;
-    setClosing(true);
-    window.setTimeout(() => onClose(), 180);
-  };
+  }, [handleClose]);
 
   const canUseApi = auth.status === 'authenticated';
 
-  const { data: patient } = useGetPatientByIdQuery(patientId as any, {
+  const { data: patient } = useGetPatientByIdQuery(patientId, {
     skip: !patientId || !canUseApi,
   });
 
-  const visitsQuery = useGetPatientVisitsQuery(patientId as any, {
+  const visitsQuery = useGetPatientVisitsQuery(patientId, {
     skip: !patientId || !canUseApi,
   });
 
@@ -100,37 +105,34 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
     resolver: zodResolver(VisitCreateSchema),
     mode: 'onBlur',
     defaultValues: {
-      patientId: patientId as any,
+      patientId,
       reason: '',
       tag: 'N',
       zeroBilled: false,
       anchorVisitId: undefined,
+      isOffline: false, // ✅ NEW
     },
   });
 
   React.useEffect(() => {
-    // keep patientId synced if modal reused
-    setValue('patientId', patientId as any, { shouldDirty: false, shouldValidate: false });
+    setValue('patientId', patientId, { shouldDirty: false, shouldValidate: false });
   }, [patientId, setValue]);
 
   const selectedTag = watch('tag');
   const zeroBilled = watch('zeroBilled');
+  const isOffline = watch('isOffline'); // ✅ NEW
 
   const anchorCandidates = React.useMemo(() => {
-    const items = (visitsQuery.data as any)?.items as VisitSummaryItem[] | undefined;
+    const data = visitsQuery.data as unknown as PatientVisitsResponse | undefined;
+    const items = data?.items;
     const list = Array.isArray(items) ? items : [];
 
-    // NOTE: If you have older data where "new visit" had no tag,
-    // you can expand this filter to (v.tag === 'N' || v.tag == null).
     return list
       .filter((v) => v && v.visitId && v.tag === 'N')
       .slice()
       .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   }, [visitsQuery.data]);
 
-  // Keep anchorVisitId consistent with tag:
-  // - clear when not F (prevents dirty payloads)
-  // - when switching to F, default to latest N visit
   React.useEffect(() => {
     if (selectedTag !== 'F') {
       setValue('anchorVisitId', undefined, { shouldDirty: true, shouldValidate: true });
@@ -142,7 +144,7 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
 
     const latest = anchorCandidates[0]?.visitId;
     if (latest) {
-      setValue('anchorVisitId', latest as any, { shouldDirty: true, shouldValidate: true });
+      setValue('anchorVisitId', latest, { shouldDirty: true, shouldValidate: true });
     }
   }, [selectedTag, anchorCandidates, setValue, watch]);
 
@@ -152,7 +154,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
       return;
     }
 
-    // Defensive UX (schema also enforces this)
     if (values.tag === 'F' && !values.anchorVisitId) {
       toast.error('Please select the New (N) visit this follow-up refers to.');
       return;
@@ -160,9 +161,9 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
 
     try {
       const resp = await createVisit(values).unwrap();
-
       toast.success('Visit created successfully.');
 
+      // ✅ Print token (same flow)
       try {
         const settings = loadPrintSettings();
         if (settings.autoPrintToken && settings.printerName) {
@@ -173,6 +174,11 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
       } catch (e) {
         console.error(e);
         toast.error('Visit created, but printing failed. Is QZ Tray running?');
+      }
+
+      // ✅ NEW: Offline visit redirects to *blank prescription page*
+      if (values.isOffline) {
+        router.push(`/visits/${resp.visit.visitId}/printing/prescription-blank`);
       }
 
       handleClose();
@@ -282,6 +288,23 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
                     }
                   />
                   Zero billed (Z)
+                </label>
+              </div>
+
+              {/* ✅ Offline checkbox */}
+              <div className="flex items-center justify-between gap-4 pb-1">
+                <label className="flex items-center gap-2 text-sm text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={!!isOffline}
+                    onChange={(e) =>
+                      setValue('isOffline', e.target.checked, {
+                        shouldDirty: true,
+                        shouldValidate: true,
+                      })
+                    }
+                  />
+                  Offline Rx (prints blank prescription)
                 </label>
               </div>
 

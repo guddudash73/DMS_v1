@@ -54,6 +54,18 @@ function safeVisitLabel(v: VisitSummaryItem) {
   return `${date} • ${opd}`;
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function getString(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v : undefined;
+}
+
+function getNumber(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
 export default function RegisterVisitPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -94,11 +106,28 @@ export default function RegisterVisitPage() {
   };
 
   const anchorCandidates = React.useMemo(() => {
-    const items = (visitsQuery.data as any)?.items as VisitSummaryItem[] | undefined;
-    const list = Array.isArray(items) ? items : [];
+    const rawItems: unknown =
+      visitsQuery.data && isRecord(visitsQuery.data) ? visitsQuery.data.items : undefined;
+    const arr = Array.isArray(rawItems) ? rawItems : [];
+
+    const list: VisitSummaryItem[] = arr
+      .map((x): VisitSummaryItem | null => {
+        if (!isRecord(x)) return null;
+        const visitId = getString(x.visitId);
+        if (!visitId) return null;
+
+        return {
+          visitId,
+          visitDate: getString(x.visitDate),
+          createdAt: getNumber(x.createdAt),
+          opdNo: getString(x.opdNo),
+          tag: getString(x.tag),
+        };
+      })
+      .filter((v): v is VisitSummaryItem => Boolean(v));
 
     return list
-      .filter((v) => v && v.visitId && v.tag === 'N')
+      .filter((v) => v.visitId && v.tag === 'N')
       .slice()
       .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   }, [visitsQuery.data]);
@@ -136,7 +165,9 @@ export default function RegisterVisitPage() {
       reason: reason.trim(),
       ...(tag ? { tag } : {}),
       ...(zeroBilled ? { zeroBilled: true } : {}),
-      ...(tag === 'F' && anchorVisitId ? { anchorVisitId: anchorVisitId as any } : {}),
+      ...(tag === 'F' && anchorVisitId
+        ? { anchorVisitId: anchorVisitId as unknown as VisitCreate['anchorVisitId'] }
+        : {}),
     };
 
     try {
@@ -161,6 +192,11 @@ export default function RegisterVisitPage() {
       </section>
     );
   }
+
+  const patientSdId =
+    patient && isRecord(patient) && 'sdId' in patient
+      ? getString((patient as Record<string, unknown>).sdId)
+      : undefined;
 
   return (
     <section className="relative h-full">
@@ -187,25 +223,27 @@ export default function RegisterVisitPage() {
                 <dl className="space-y-1">
                   <div className="flex gap-2">
                     <dt className="w-24 text-gray-500">Name</dt>
-                    <dd>{patient.name}</dd>
+                    <dd>{(patient as { name?: string }).name}</dd>
                   </div>
                   <div className="flex gap-2">
                     <dt className="w-24 text-gray-500">Contact No.</dt>
-                    <dd>{patient.phone ?? '—'}</dd>
+                    <dd>{(patient as { phone?: string }).phone ?? '—'}</dd>
                   </div>
                 </dl>
                 <dl className="space-y-1 md:justify-self-end">
                   <div className="flex gap-2">
                     <dt className="w-28 text-gray-500">Regd. Date</dt>
                     <dd>
-                      {patient.createdAt
-                        ? new Date(patient.createdAt).toLocaleDateString('en-GB')
+                      {(patient as { createdAt?: number }).createdAt
+                        ? new Date((patient as { createdAt: number }).createdAt).toLocaleDateString(
+                            'en-GB',
+                          )
                         : '—'}
                     </dd>
                   </div>
                   <div className="flex gap-2">
                     <dt className="w-28 text-gray-500">SD-ID</dt>
-                    <dd>{(patient as any)?.sdId ?? patient.patientId}</dd>
+                    <dd>{patientSdId ?? (patient as { patientId: string }).patientId}</dd>
                   </div>
                 </dl>
               </div>

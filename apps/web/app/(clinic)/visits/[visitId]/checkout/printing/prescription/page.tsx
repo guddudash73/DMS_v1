@@ -10,7 +10,7 @@ import { Card } from '@/components/ui/card';
 import { PrescriptionPreview } from '@/components/prescription/PrescriptionPreview';
 import { PrescriptionPrintSheet } from '@/components/prescription/PrescriptionPrintSheet';
 
-import type { Visit } from '@dms/types';
+import type { ToothDetail, Visit } from '@dms/types';
 
 import {
   useGetVisitByIdQuery,
@@ -21,6 +21,18 @@ import {
 } from '@/src/store/api';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function getString(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v : undefined;
+}
+
+function getNumber(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
 
 function toLocalISODate(d: Date): string {
   const y = d.getFullYear();
@@ -86,6 +98,24 @@ function looksLikeDoctorIdLabel(name?: string) {
   return false;
 }
 
+// ✅ minimal runtime guard so we can safely pass ToothDetail[]
+function isToothDetail(v: unknown): v is ToothDetail {
+  if (!isRecord(v)) return false;
+  const pos = v.position;
+  const nums = v.toothNumbers;
+
+  const posOk = pos === 'UL' || pos === 'UR' || pos === 'LL' || pos === 'LR';
+  const numsOk = Array.isArray(nums) && nums.every((n) => typeof n === 'string');
+  const notesOk = v.notes === undefined || typeof v.notes === 'string';
+
+  return posOk && numsOk && notesOk;
+}
+
+function toToothDetails(input: unknown): ToothDetail[] {
+  if (!Array.isArray(input)) return [];
+  return input.filter(isToothDetail);
+}
+
 export default function PrescriptionPrintPreviewPage() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -93,9 +123,11 @@ export default function PrescriptionPrintPreviewPage() {
   const visitId = String(params?.visitId ?? '');
 
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
-  const visit = visitQuery.data as any;
+  const visit = visitQuery.data as unknown;
 
-  const patientId = visit?.patientId as string | undefined;
+  const visitRec: Record<string, unknown> = isRecord(visit) ? visit : {};
+  const patientId = getString(visitRec.patientId);
+
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: !visitId });
@@ -109,43 +141,50 @@ export default function PrescriptionPrintPreviewPage() {
   const patientName = patientQuery.data?.name;
   const patientPhone = patientQuery.data?.phone;
 
-  const patientSdId = (patientQuery.data as any)?.sdId ?? visit?.sdId ?? undefined;
-  const opdNo = visit?.opdNo ?? visit?.opdId ?? visit?.opdNumber ?? undefined;
+  const patientRec: Record<string, unknown> = isRecord(patientQuery.data) ? patientQuery.data : {};
+
+  const patientSdId = getString(patientRec.sdId) ?? getString(visitRec.sdId) ?? undefined;
+
+  const opdNo =
+    getString(visitRec.opdNo) ??
+    getString(visitRec.opdId) ??
+    getString(visitRec.opdNumber) ??
+    undefined;
 
   const patientDobRaw =
-    (patientQuery.data as any)?.dob ??
-    (patientQuery.data as any)?.dateOfBirth ??
-    (patientQuery.data as any)?.birthDate ??
-    (patientQuery.data as any)?.dobIso ??
-    null;
+    patientRec.dob ?? patientRec.dateOfBirth ?? patientRec.birthDate ?? patientRec.dobIso ?? null;
 
-  const patientSexRaw =
-    (patientQuery.data as any)?.sex ??
-    (patientQuery.data as any)?.gender ??
-    (patientQuery.data as any)?.patientSex ??
-    null;
+  const patientSexRaw = patientRec.sex ?? patientRec.gender ?? patientRec.patientSex ?? null;
 
   const patientDob = safeParseDobToDate(patientDobRaw);
 
-  const visitCreatedAtMs = typeof visit?.createdAt === 'number' ? visit.createdAt : Date.now();
+  const visitCreatedAtMs = getNumber(visitRec.createdAt) ?? Date.now();
   const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
   const patientSex = normalizeSex(patientSexRaw);
 
-  const doctorId = visit?.doctorId as string | undefined;
+  const doctorId = getString(visitRec.doctorId);
 
   const doctorFromList = React.useMemo(() => {
-    const list = doctorsQuery.data ?? [];
+    const listUnknown = doctorsQuery.data ?? [];
     if (!doctorId) return null;
-    return (list as any[]).find((d) => d.doctorId === doctorId) ?? null;
+
+    const list = Array.isArray(listUnknown) ? (listUnknown as unknown[]) : [];
+    return (
+      list.find(
+        (d) => isRecord(d) && getString((d as Record<string, unknown>).doctorId) === doctorId,
+      ) ?? null
+    );
   }, [doctorsQuery.data, doctorId]);
 
+  const doctorRec: Record<string, unknown> = isRecord(doctorFromList) ? doctorFromList : {};
+
   const doctorNameResolved =
-    (doctorFromList as any)?.fullName ??
-    (doctorFromList as any)?.name ??
-    (doctorFromList as any)?.displayName ??
+    getString(doctorRec.fullName) ??
+    getString(doctorRec.name) ??
+    getString(doctorRec.displayName) ??
     undefined;
 
-  const doctorRegNoResolved = (doctorFromList as any)?.registrationNumber ?? undefined;
+  const doctorRegNoResolved = getString(doctorRec.registrationNumber) ?? undefined;
 
   const resolvedDoctorName = React.useMemo(() => {
     if (doctorNameResolved && !looksLikeDoctorIdLabel(doctorNameResolved))
@@ -174,10 +213,11 @@ export default function PrescriptionPrintPreviewPage() {
     const meta = new Map<string, Visit>();
 
     for (const v of allVisitsRaw) meta.set(v.visitId, v);
-    if (visit?.visitId) meta.set(visit.visitId, visit as Visit);
+    const visitIdFromData = isRecord(visit) ? getString(visitRec.visitId) : undefined;
+    if (visitIdFromData) meta.set(visitIdFromData, visit as Visit);
 
-    const tag = (visit as any)?.tag as string | undefined;
-    const anchorVisitId = (visit as any)?.anchorVisitId as string | undefined;
+    const tag = isRecord(visit) ? getString(visitRec.tag) : undefined;
+    const anchorVisitId = isRecord(visit) ? getString(visitRec.anchorVisitId) : undefined;
 
     const anchorId = tag === 'F' ? anchorVisitId : visitId;
     if (!anchorId) return { visitIds: [visitId], meta, currentVisitId: visitId };
@@ -189,7 +229,7 @@ export default function PrescriptionPrintPreviewPage() {
 
     const followups: Visit[] = [];
     for (const v of meta.values()) {
-      const aId = (v as any)?.anchorVisitId as string | undefined;
+      const aId = getString((v as unknown as Record<string, unknown>)?.anchorVisitId);
       if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
     }
 
@@ -198,7 +238,7 @@ export default function PrescriptionPrintPreviewPage() {
 
     if (!chain.some((v) => v.visitId === visitId)) {
       const cur = meta.get(visitId);
-      chain.push(cur ?? ({ visitId } as any));
+      chain.push(cur ?? ({ visitId } as Visit));
     }
 
     chain.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
@@ -217,14 +257,19 @@ export default function PrescriptionPrintPreviewPage() {
     const limitedIds = idx >= 0 ? chainIdsOrdered.slice(0, idx + 1) : [visitId];
 
     return { visitIds: limitedIds, meta, currentVisitId: visitId };
-  }, [allVisitsRaw, visit, visitId]);
+  }, [allVisitsRaw, visit, visitId, visitRec]);
 
-  // ✅ current visit tooth details (history tooth details fetched per-visit in Preview/PrintSheet blocks)
-  const currentToothDetails = (rx as any)?.toothDetails ?? [];
+  // ✅ correctly typed tooth details for components that expect ToothDetail[]
+  const currentToothDetails = React.useMemo(() => {
+    const rec: Record<string, unknown> = isRecord(rx)
+      ? (rx as unknown as Record<string, unknown>)
+      : {};
+    return toToothDetails(rec.toothDetails);
+  }, [rx]);
 
   // ✅ allow printing when either medicines OR tooth details exist
   const hasLines = (rx?.lines?.length ?? 0) > 0;
-  const hasTeeth = (currentToothDetails?.length ?? 0) > 0;
+  const hasTeeth = currentToothDetails.length > 0;
   const canPrint = hasLines || hasTeeth;
 
   const printPrescription = () => {

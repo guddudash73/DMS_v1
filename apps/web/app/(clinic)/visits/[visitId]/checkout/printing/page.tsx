@@ -24,6 +24,7 @@ import {
 import { useAuth } from '@/src/hooks/useAuth';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
+type FollowUpContact = 'CALL' | 'SMS' | 'WHATSAPP' | 'OTHER';
 
 function IconCheck(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -37,6 +38,18 @@ function IconCheck(props: React.SVGProps<SVGSVGElement>) {
       />
     </svg>
   );
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function getString(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v : undefined;
+}
+
+function getNumber(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }
 
 function toLocalISODate(d: Date): string {
@@ -111,6 +124,11 @@ function looksLikeDoctorIdLabel(name?: string) {
   return false;
 }
 
+function parseFollowUpContact(v: string): FollowUpContact {
+  if (v === 'CALL' || v === 'SMS' || v === 'WHATSAPP' || v === 'OTHER') return v;
+  return 'CALL';
+}
+
 export default function VisitCheckoutPrintingPage() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -144,47 +162,52 @@ export default function VisitCheckoutPrintingPage() {
   const patientName = patientQuery.data?.name;
   const patientPhone = patientQuery.data?.phone;
 
-  const patientSdId = (patientQuery.data as any)?.sdId ?? (visit as any)?.sdId ?? undefined;
+  const patientRec: Record<string, unknown> = isRecord(patientQuery.data) ? patientQuery.data : {};
+  const visitRec: Record<string, unknown> = isRecord(visit)
+    ? (visit as unknown as Record<string, unknown>)
+    : {};
+
+  const patientSdId = getString(patientRec.sdId) ?? getString(visitRec.sdId) ?? undefined;
 
   const opdNo =
-    (visit as any)?.opdNo ?? (visit as any)?.opdId ?? (visit as any)?.opdNumber ?? undefined;
+    getString(visitRec.opdNo) ??
+    getString(visitRec.opdId) ??
+    getString(visitRec.opdNumber) ??
+    undefined;
 
   const patientDobRaw =
-    (patientQuery.data as any)?.dob ??
-    (patientQuery.data as any)?.dateOfBirth ??
-    (patientQuery.data as any)?.birthDate ??
-    (patientQuery.data as any)?.dobIso ??
-    null;
+    patientRec.dob ?? patientRec.dateOfBirth ?? patientRec.birthDate ?? patientRec.dobIso ?? null;
 
-  const patientSexRaw =
-    (patientQuery.data as any)?.sex ??
-    (patientQuery.data as any)?.gender ??
-    (patientQuery.data as any)?.patientSex ??
-    null;
+  const patientSexRaw = patientRec.sex ?? patientRec.gender ?? patientRec.patientSex ?? null;
 
   const patientDob = safeParseDobToDate(patientDobRaw);
 
-  const visitCreatedAtMs =
-    typeof (visit as any)?.createdAt === 'number' ? (visit as any).createdAt : Date.now();
+  const visitCreatedAtMs = getNumber(visitRec.createdAt) ?? Date.now();
 
   const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
   const patientSex = normalizeSex(patientSexRaw);
 
-  const doctorId = (visit as any)?.doctorId as string | undefined;
+  const doctorId = getString(visitRec.doctorId);
 
   const doctorFromList = React.useMemo(() => {
-    const list = doctorsQuery.data ?? [];
+    const listUnknown: unknown = doctorsQuery.data ?? [];
+    const list = Array.isArray(listUnknown) ? listUnknown : [];
     if (!doctorId) return null;
-    return (list as any[]).find((d) => d.doctorId === doctorId) ?? null;
+
+    for (const item of list) {
+      const rec = isRecord(item) ? item : {};
+      if (getString(rec.doctorId) === doctorId) return rec;
+    }
+    return null;
   }, [doctorsQuery.data, doctorId]);
 
   const doctorNameResolved =
-    (doctorFromList as any)?.fullName ??
-    (doctorFromList as any)?.name ??
-    (doctorFromList as any)?.displayName ??
+    getString(doctorFromList?.fullName) ??
+    getString(doctorFromList?.name) ??
+    getString(doctorFromList?.displayName) ??
     undefined;
 
-  const doctorRegNoResolved = (doctorFromList as any)?.registrationNumber ?? undefined;
+  const doctorRegNoResolved = getString(doctorFromList?.registrationNumber) ?? undefined;
 
   const resolvedDoctorName = React.useMemo(() => {
     if (doctorNameResolved && !looksLikeDoctorIdLabel(doctorNameResolved))
@@ -197,9 +220,7 @@ export default function VisitCheckoutPrintingPage() {
 
   const resolvedDoctorRegdLabel = React.useMemo(() => {
     if (doctorRegNoResolved) return `B.D.S Regd. - ${doctorRegNoResolved}`;
-
     if (doctorsQuery.isLoading || doctorsQuery.isFetching) return undefined;
-
     return undefined;
   }, [doctorRegNoResolved, doctorsQuery.isLoading, doctorsQuery.isFetching]);
 
@@ -209,25 +230,9 @@ export default function VisitCheckoutPrintingPage() {
     ? `Visit: ${toLocalISODate(new Date(visitCreatedAtMs))}`
     : undefined;
 
-  const visitDateLabel = (visit as any)?.visitDate
-    ? `Visit: ${(visit as any).visitDate}`
+  const visitDateLabel = getString(visitRec.visitDate)
+    ? `Visit: ${String(visitRec.visitDate)}`
     : undefined;
-
-  const printRx = () => {
-    if (!rx) return;
-
-    const onAfterPrint = () => {
-      document.body.classList.remove('print-rx');
-      window.removeEventListener('afterprint', onAfterPrint);
-    };
-
-    window.addEventListener('afterprint', onAfterPrint);
-    document.body.classList.add('print-rx');
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => window.print());
-    });
-  };
 
   const onDone = () => {
     setDoneSuccess(true);
@@ -246,9 +251,7 @@ export default function VisitCheckoutPrintingPage() {
     d.setDate(d.getDate() + 7);
     return toLocalISODate(d);
   });
-  const [followUpContact, setFollowUpContact] = React.useState<
-    'CALL' | 'SMS' | 'WHATSAPP' | 'OTHER'
-  >('CALL');
+  const [followUpContact, setFollowUpContact] = React.useState<FollowUpContact>('CALL');
   const [followUpReason, setFollowUpReason] = React.useState('');
 
   const goToFollowups = (mode: 'add' | 'list') => {
@@ -266,7 +269,8 @@ export default function VisitCheckoutPrintingPage() {
     router.push(`/reminders?${qs.toString()}`);
   };
 
-  const RxSheetAny: any = PrescriptionPrintSheet;
+  type RxSheetProps = React.ComponentProps<typeof PrescriptionPrintSheet>;
+  const RxSheet = PrescriptionPrintSheet as React.ComponentType<RxSheetProps>;
 
   return (
     <section className="p-4 2xl:p-8">
@@ -287,8 +291,8 @@ export default function VisitCheckoutPrintingPage() {
         <div>
           <div className="text-lg font-semibold text-gray-900">Documents</div>
           <div className="text-xs text-gray-500">
-            Visit ID: {visitId} · Tag: {(visit as any)?.tag ?? '—'} · Status:{' '}
-            {(visit as any)?.status ?? '—'}
+            Visit ID: {visitId} · Tag: {getString(visitRec.tag) ?? '—'} · Status:{' '}
+            {getString(visitRec.status) ?? '—'}
           </div>
         </div>
 
@@ -474,7 +478,7 @@ export default function VisitCheckoutPrintingPage() {
                     <select
                       className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm"
                       value={followUpContact}
-                      onChange={(e) => setFollowUpContact(e.target.value as any)}
+                      onChange={(e) => setFollowUpContact(parseFollowUpContact(e.target.value))}
                     >
                       <option value="CALL">CALL</option>
                       <option value="SMS">SMS</option>
@@ -528,7 +532,7 @@ export default function VisitCheckoutPrintingPage() {
         </Card>
       </div>
 
-      <RxSheetAny
+      <RxSheet
         patientName={patientName}
         patientPhone={patientPhone}
         patientAge={patientAge}

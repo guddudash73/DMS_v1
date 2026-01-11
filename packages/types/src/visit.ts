@@ -38,6 +38,9 @@ export const Visit = z.object({
   // ✅ For F visits, points to an N visitId
   anchorVisitId: VisitId.optional(),
 
+  // ✅ NEW: offline visit (no rx in DB, can go QUEUED -> DONE)
+  isOffline: z.boolean().optional(),
+
   currentRxId: z.string().min(1).optional(),
   currentRxVersion: z.number().int().min(1).optional(),
 });
@@ -66,6 +69,9 @@ export const VisitCreate = z
 
     // ✅ required when tag === 'F'
     anchorVisitId: VisitId.optional(),
+
+    // ✅ NEW: offline visit creation
+    isOffline: z.boolean().optional(),
   })
   .superRefine((val, ctx) => {
     if (val.tag === 'F') {

@@ -1,7 +1,7 @@
 // apps/web/components/layout/DoctorShell.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import {
   LayoutDashboard,
@@ -11,7 +11,6 @@ import {
   Calendar,
   Clock,
   Users,
-  User,
   Layers,
   Pill,
 } from 'lucide-react';
@@ -19,7 +18,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
-import type { Patient, Visit } from '@dms/types';
+import type { Patient } from '@dms/types';
 import { useAuth } from '@/src/hooks/useAuth';
 import {
   useGetPatientsQuery,
@@ -126,8 +125,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);
   const [patients, setPatients] = useState<Patient[]>([]);
-  const [hasMore, setHasMore] = useState(false);
-  const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
 
   const resultsContainerRef = useRef<HTMLDivElement | null>(null);
@@ -139,8 +136,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
       setDebouncedTerm(trimmed);
       setCursor(undefined);
       setPatients([]);
-      setHasMore(false);
-      setNextCursor(null);
       setDropdownOpen(Boolean(trimmed));
     }, 300);
     return () => window.clearTimeout(handle);
@@ -149,7 +144,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
   const {
     data: searchData,
     isLoading: searchLoading,
-    isFetching: searchFetching,
     error: searchRawError,
   } = useGetPatientsQuery(
     { query: debouncedTerm || undefined, limit: 10, cursor },
@@ -165,9 +159,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
       for (const p of searchData.items) byId.set(p.patientId, p);
       return Array.from(byId.values());
     });
-
-    setHasMore(Boolean(searchData.nextCursor));
-    setNextCursor(searchData.nextCursor ?? null);
   }, [searchData]);
 
   const searchErrorMessage = (() => {
@@ -182,8 +173,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
     setDebouncedTerm('');
     setPatients([]);
     setCursor(undefined);
-    setHasMore(false);
-    setNextCursor(null);
   };
 
   const goToPatientProfile = (patientId: string) => {

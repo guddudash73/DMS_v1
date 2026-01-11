@@ -38,14 +38,38 @@ function getVisitLabel(v: PatientQueueItem): string {
   return name && name.length > 0 ? name : `Patient: ${v.patientId}`;
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function isOfflineQueueItem(v: PatientQueueItem): boolean {
+  const rec: unknown = v;
+  if (!isRecord(rec)) return false;
+  return rec.isOffline === true;
+}
+
+/** ✅ Smaller offline badge */
+function OfflineBadge() {
+  return (
+    <span
+      className="ml-1.5 inline-flex items-center rounded border border-gray-200 bg-gray-100 px-1.5 py-[1px] text-[9px] font-medium leading-none text-gray-600"
+      title="Offline visit"
+    >
+      OFF
+    </span>
+  );
+}
+
 function QueueItemRow({
   label,
   status,
   onClick,
+  isOffline,
 }: {
   label: string;
   status: VisitStatus;
   onClick: () => void;
+  isOffline?: boolean;
 }) {
   return (
     <button
@@ -54,7 +78,11 @@ function QueueItemRow({
       className="flex h-10 w-full cursor-pointer items-center justify-between rounded-xl bg-white px-3 text-left text-xs text-gray-800 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black/10"
       title="Open visit"
     >
-      <span className="truncate font-medium">{label}</span>
+      <span className="min-w-0 truncate font-medium">
+        {label}
+        {isOffline ? <OfflineBadge /> : null}
+      </span>
+
       <span
         className={`ml-2 inline-block h-2 w-2 shrink-0 rounded-full ${statusDotClass[status]}`}
       />
@@ -75,9 +103,7 @@ export default function DoctorQueueCard() {
 
   const todayIso = React.useMemo(() => clinicDateISO(new Date()), []);
 
-  // ✅ ONE request only
   const queueQ = useGetPatientQueueQuery({ date: todayIso }, { skip: !canUseApi });
-
   const allItems = (queueQ.data?.items ?? []) as PatientQueueItem[];
 
   const waiting = React.useMemo(() => allItems.filter((x) => x.status === 'QUEUED'), [allItems]);
@@ -151,6 +177,7 @@ export default function DoctorQueueCard() {
                           label={getVisitLabel(v)}
                           status={v.status}
                           onClick={() => openClinicVisit(v.visitId)}
+                          isOffline={isOfflineQueueItem(v)}
                         />
                       ))}
 

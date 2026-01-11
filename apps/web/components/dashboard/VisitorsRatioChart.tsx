@@ -71,9 +71,15 @@ function formatShortDate(value: unknown) {
   }).format(dt);
 }
 
+type TooltipPayloadItem = {
+  dataKey?: string | number;
+  color?: string;
+  payload?: Record<string, unknown>;
+};
+
 type TooltipProps = {
   active?: boolean;
-  payload?: any[];
+  payload?: TooltipPayloadItem[];
   label?: unknown;
 };
 
@@ -166,6 +172,11 @@ export type VisitorsRatioChartProps = {
   title?: string;
 };
 
+type ChartClickEvent = {
+  activePayload?: Array<{ payload?: { date?: unknown } }>;
+  activeLabel?: unknown;
+};
+
 export default function VisitorsRatioChart({
   onDateSelect,
   title = 'Visitors - Ratio',
@@ -255,7 +266,7 @@ export default function VisitorsRatioChart({
           >
             <AreaChart
               data={chartData}
-              onClick={(e: any) => {
+              onClick={(e: ChartClickEvent) => {
                 const dateFromPayload = e?.activePayload?.[0]?.payload?.date;
                 const dateFromLabel = e?.activeLabel;
                 const date = typeof dateFromPayload === 'string' ? dateFromPayload : dateFromLabel;

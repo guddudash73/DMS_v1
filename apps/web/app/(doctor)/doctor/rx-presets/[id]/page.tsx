@@ -1,9 +1,16 @@
+// apps/web/app/(doctor)/doctor/rx-presets/[id]/page.tsx
 'use client';
 
 import { useRouter, useParams } from 'next/navigation';
 import RxPresetEditor from '@/components/admin/rx-presets/RxPresetEditor';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useGetRxPresetByIdQuery, useUpdateRxPresetMutation } from '@/src/store/api';
+
+import type { RxLineType } from '@dms/types';
+
+function asRxLines(lines: unknown): RxLineType[] {
+  return Array.isArray(lines) ? (lines as RxLineType[]) : [];
+}
 
 export default function EditDoctorRxPresetPage() {
   const router = useRouter();
@@ -35,12 +42,12 @@ export default function EditDoctorRxPresetPage() {
           ? {
               name: data.name,
               tags: data.tags,
-              lines: data.lines as any,
+              lines: asRxLines(data.lines),
             }
           : undefined
       }
       onSubmit={async (payload) => {
-        await updatePreset({ id, patch: payload as any }).unwrap();
+        await updatePreset({ id, patch: payload }).unwrap();
         router.replace('/doctor/rx-presets');
       }}
     />

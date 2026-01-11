@@ -1,3 +1,4 @@
+// apps/web/app/(admin)/admin/rx-presets/[id]/page.tsx
 'use client';
 
 import { useParams, useRouter } from 'next/navigation';
@@ -5,6 +6,8 @@ import { useParams, useRouter } from 'next/navigation';
 import RxPresetEditor from '@/components/admin/rx-presets/RxPresetEditor';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useAdminGetRxPresetByIdQuery, useAdminUpdateRxPresetMutation } from '@/src/store/api';
+
+import type { RxLineType } from '@dms/types';
 
 export default function AdminRxPresetEditPage() {
   const auth = useAuth();
@@ -34,7 +37,7 @@ export default function AdminRxPresetEditPage() {
       initial={{
         name: presetQ.data?.name ?? '',
         tags: presetQ.data?.tags ?? [],
-        lines: (presetQ.data?.lines ?? []) as any,
+        lines: (presetQ.data?.lines ?? []) as RxLineType[],
       }}
       onSubmit={async (payload) => {
         if (!id) return;

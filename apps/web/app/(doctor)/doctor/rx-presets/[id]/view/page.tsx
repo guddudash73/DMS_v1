@@ -1,3 +1,4 @@
+// apps/web/app/(doctor)/doctor/rx-presets/[id]/view/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -11,6 +12,58 @@ import { Button } from '@/components/ui/button';
 
 import { useAuth } from '@/src/hooks/useAuth';
 import { useGetRxPresetByIdQuery, type ErrorResponse } from '@/src/store/api';
+
+type ApiError = { data?: unknown };
+
+type RxPresetScope = 'ADMIN' | 'PUBLIC' | 'PRIVATE';
+
+type RxLineLike = {
+  medicineName?: unknown;
+  displayName?: unknown;
+  medicine?: unknown;
+  drug?: unknown;
+  name?: unknown;
+  title?: unknown;
+
+  dose?: unknown;
+  strength?: unknown;
+  amount?: unknown;
+
+  frequency?: unknown;
+  freq?: unknown;
+
+  duration?: unknown;
+  days?: unknown;
+  durationDays?: unknown;
+
+  route?: unknown;
+
+  notes?: unknown;
+  note?: unknown;
+  instructions?: unknown;
+  sig?: unknown;
+};
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function asString(v: unknown): string {
+  return typeof v === 'string' ? v : v == null ? '' : String(v);
+}
+
+function asStringArray(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [];
+}
+
+function asLines(v: unknown): RxLineLike[] {
+  return Array.isArray(v) ? (v as RxLineLike[]) : [];
+}
+
+function asScope(v: unknown): RxPresetScope | undefined {
+  if (v === 'ADMIN' || v === 'PUBLIC' || v === 'PRIVATE') return v;
+  return undefined;
+}
 
 function scopeBadge(scope?: string) {
   if (scope === 'ADMIN') return <Badge className="rounded-full">Admin</Badge>;
@@ -44,31 +97,26 @@ function asErrorResponse(data: unknown): ErrorResponse | null {
   return null;
 }
 
-function formatLineText(line: any): string {
-  const name =
-    line?.medicineName ??
-    line?.displayName ??
-    line?.medicine ??
-    line?.drug ??
-    line?.name ??
-    line?.title ??
-    '';
+function formatLineText(line: unknown): string {
+  const l: RxLineLike = isRecord(line) ? (line as RxLineLike) : ({} as RxLineLike);
 
-  const dose = line?.dose ?? line?.strength ?? line?.amount ?? '';
-  const frequency = line?.frequency ?? line?.freq ?? '';
-  const duration = line?.duration ?? line?.days ?? line?.durationDays ?? '';
-  const route = line?.route ?? '';
-  const notes = line?.notes ?? line?.note ?? line?.instructions ?? line?.sig ?? '';
+  const name = l.medicineName ?? l.displayName ?? l.medicine ?? l.drug ?? l.name ?? l.title ?? '';
+
+  const dose = l.dose ?? l.strength ?? l.amount ?? '';
+  const frequency = l.frequency ?? l.freq ?? '';
+  const duration = l.duration ?? l.days ?? l.durationDays ?? '';
+  const route = l.route ?? '';
+  const notes = l.notes ?? l.note ?? l.instructions ?? l.sig ?? '';
 
   const parts: string[] = [];
-  if (name) parts.push(String(name).trim());
-  if (dose) parts.push(String(dose).trim());
-  if (frequency) parts.push(String(frequency).trim());
-  if (duration) parts.push(`${String(duration).trim()} days`);
-  if (route) parts.push(String(route).trim());
+  if (name) parts.push(asString(name).trim());
+  if (dose) parts.push(asString(dose).trim());
+  if (frequency) parts.push(asString(frequency).trim());
+  if (duration) parts.push(`${asString(duration).trim()} days`);
+  if (route) parts.push(asString(route).trim());
 
   const headline = parts.filter(Boolean).join(' · ').trim();
-  const tail = String(notes ?? '').trim();
+  const tail = asString(notes).trim();
 
   if (headline && tail) return `${headline} — ${tail}`;
   return headline || tail || 'Prescription line';
@@ -95,17 +143,11 @@ export default function DoctorRxPresetViewPage() {
     { skip: !canUseApi || !id },
   );
 
-  const scope = (data as any)?.scope as string | undefined;
+  const scope = useMemo(() => asScope(isRecord(data) ? data.scope : undefined), [data]);
 
-  const lines = useMemo(() => {
-    const raw = (data as any)?.lines as any[] | undefined;
-    return Array.isArray(raw) ? raw : [];
-  }, [data]);
+  const lines = useMemo(() => asLines(isRecord(data) ? data.lines : undefined), [data]);
 
-  const tags = useMemo(() => {
-    const t = (data as any)?.tags as string[] | undefined;
-    return Array.isArray(t) ? t : [];
-  }, [data]);
+  const tags = useMemo(() => asStringArray(isRecord(data) ? data.tags : undefined), [data]);
 
   const copyAllText = useMemo(() => {
     const title = data?.name ? `${data.name}\n` : '';
@@ -117,7 +159,7 @@ export default function DoctorRxPresetViewPage() {
   }, [data?.name, lines]);
 
   const errorMessage = useMemo(() => {
-    const e = error as any;
+    const e: ApiError | undefined = isRecord(error) ? (error as ApiError) : undefined;
     const maybe = asErrorResponse(e?.data);
     return maybe?.message ?? (typeof maybe?.error === 'string' ? maybe.error : null);
   }, [error]);
@@ -251,16 +293,12 @@ export default function DoctorRxPresetViewPage() {
                 {lines.map((line, idx) => {
                   const headline = formatLineText(line);
 
-                  const name =
-                    line?.medicineName ??
-                    line?.displayName ??
-                    line?.medicine ??
-                    line?.drug ??
-                    line?.name ??
-                    '';
+                  const l: RxLineLike = isRecord(line) ? (line as RxLineLike) : ({} as RxLineLike);
 
-                  const freq = line?.frequency ?? line?.freq ?? '';
-                  const dur = line?.duration ?? line?.days ?? line?.durationDays ?? '';
+                  const name =
+                    l.medicineName ?? l.displayName ?? l.medicine ?? l.drug ?? l.name ?? '';
+                  const freq = l.frequency ?? l.freq ?? '';
+                  const dur = l.duration ?? l.days ?? l.durationDays ?? '';
 
                   return (
                     <div
@@ -276,9 +314,9 @@ export default function DoctorRxPresetViewPage() {
                             <Badge variant="secondary" className="rounded-full">
                               #{idx + 1}
                             </Badge>
-                            {name ? (
+                            {asString(name).trim() ? (
                               <div className="truncate text-base font-semibold text-gray-900">
-                                {String(name)}
+                                {asString(name)}
                               </div>
                             ) : (
                               <div className="truncate text-base font-semibold text-gray-900">
@@ -291,16 +329,16 @@ export default function DoctorRxPresetViewPage() {
 
                           {/* compact metadata row */}
                           <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
-                            {freq ? (
+                            {asString(freq).trim() ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 px-2 py-1">
                                 <Clock className="h-3.5 w-3.5 text-gray-400" />
-                                {String(freq)}
+                                {asString(freq)}
                               </span>
                             ) : null}
-                            {dur ? (
+                            {asString(dur).trim() ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 px-2 py-1">
                                 <Clock className="h-3.5 w-3.5 text-gray-400" />
-                                {String(dur)} days
+                                {asString(dur)} days
                               </span>
                             ) : null}
                           </div>

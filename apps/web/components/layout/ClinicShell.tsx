@@ -14,6 +14,7 @@ import {
   Calendar,
   Clock,
   Settings,
+  Printer, // ✅ NEW
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -62,6 +63,9 @@ const mainNav: NavItem[] = [
   { label: 'New Patient', href: '/patients/new', icon: UserPlus },
   { label: 'Daily Report', href: '/reports', icon: FileText },
   { label: 'WBC/Reminder Call', href: '/reminders', icon: Headphones },
+
+  // ✅ NEW: Prescription Preset Print
+  { label: 'Preset Print', href: '/preset-print', icon: Printer },
 ];
 
 const moreNav: NavItem[] = [{ label: 'Settings', href: '/settings', icon: Settings }];
@@ -90,6 +94,7 @@ const deriveTitleFromPath = (pathname: string): string => {
   if (pathname.startsWith('/patients')) return 'Patients';
   if (pathname.startsWith('/reports')) return 'Daily Report';
   if (pathname.startsWith('/reminders')) return 'WBC/Reminder Call';
+  if (pathname.startsWith('/preset-print')) return 'Preset Print'; // ✅ NEW
   if (pathname.startsWith('/settings')) return 'Settings';
   return 'Dashboard';
 };

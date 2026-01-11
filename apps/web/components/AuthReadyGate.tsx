@@ -6,7 +6,7 @@ import { useDispatch } from 'react-redux';
 import type { AppDispatch } from '@/src/store';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useRefreshMutation } from '@/src/store/api';
-import { setChecking, setUnauthenticated } from '@/src/store/authSlice';
+import { setUnauthenticated } from '@/src/store/authSlice';
 
 const isPublicPath = (pathname: string) => pathname === '/login';
 

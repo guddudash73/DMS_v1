@@ -1,3 +1,4 @@
+// apps/web/app/(admin)/admin/users/page.tsx
 'use client';
 
 import { useMemo, useState } from 'react';
@@ -38,13 +39,39 @@ function roleBadge(role: Role) {
   );
 }
 
+// ---- small safe helpers (avoid `any`) ----
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function readCurrentUserId(auth: unknown): string | null {
+  if (!isRecord(auth)) return null;
+
+  const direct = auth.userId;
+  if (typeof direct === 'string') return direct;
+
+  const user = auth.user;
+  if (isRecord(user) && typeof user.userId === 'string') return user.userId;
+
+  return null;
+}
+
+function isRole(v: string): v is Role {
+  return ROLE_OPTIONS.some((r) => r.value === v);
+}
+
+type ActiveFilter = 'all' | 'active' | 'inactive';
+function isActiveFilter(v: string): v is ActiveFilter {
+  return v === 'all' || v === 'active' || v === 'inactive';
+}
+
 export default function AdminUsersPage() {
   const auth = useAuth();
-  const currentUserId = (auth as any)?.userId ?? (auth as any)?.user?.userId ?? null;
+  const currentUserId = readCurrentUserId(auth);
 
   const [query, setQuery] = useState('');
   const [role, setRole] = useState<Role | ''>('');
-  const [active, setActive] = useState<'all' | 'active' | 'inactive'>('all');
+  const [active, setActive] = useState<ActiveFilter>('all');
 
   const filters = useMemo(() => {
     return {
@@ -152,7 +179,10 @@ export default function AdminUsersPage() {
               <select
                 className="h-9 rounded-xl border border-input bg-background px-3 text-sm"
                 value={role}
-                onChange={(e) => setRole(e.target.value as any)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setRole(v === '' ? '' : isRole(v) ? v : '');
+                }}
               >
                 <option value="">All roles</option>
                 {ROLE_OPTIONS.map((r) => (
@@ -165,7 +195,10 @@ export default function AdminUsersPage() {
               <select
                 className="h-9 rounded-xl border border-input bg-background px-3 text-sm"
                 value={active}
-                onChange={(e) => setActive(e.target.value as any)}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (isActiveFilter(v)) setActive(v);
+                }}
               >
                 <option value="all">All</option>
                 <option value="active">Active</option>
@@ -333,7 +366,10 @@ export default function AdminUsersPage() {
                 <select
                   className="h-10 w-full rounded-xl border border-input bg-background px-3 text-sm"
                   value={createRole}
-                  onChange={(e) => setCreateRole(e.target.value as Role)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (isRole(v)) setCreateRole(v);
+                  }}
                 >
                   <option value="RECEPTION">Reception</option>
                   <option value="VIEWER">Viewer</option>

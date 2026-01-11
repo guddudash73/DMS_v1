@@ -1,4 +1,3 @@
-// apps/api/src/repositories/visitRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
@@ -102,14 +101,8 @@ export interface VisitRepository {
   getById(visitId: string): Promise<Visit | null>;
   listByPatientId(patientId: string): Promise<Visit[]>;
   updateStatus(visitId: string, nextStatus: VisitStatus): Promise<Visit | null>;
-
-  /**
-   * ✅ Clinic-wide queue (no doctorId)
-   */
   getPatientQueue(params: VisitQueueQuery): Promise<Visit[]>;
-
   listByDate(date: string): Promise<Visit[]>;
-
   setCurrentRxPointer(params: {
     visitId: string;
     patientId: string;
@@ -119,9 +112,13 @@ export interface VisitRepository {
 }
 
 export class DynamoDBVisitRepository implements VisitRepository {
-  private isValidTransition(from: VisitStatus, to: VisitStatus): boolean {
+  private isValidTransition(from: VisitStatus, to: VisitStatus, isOffline: boolean): boolean {
     if (from === 'QUEUED' && to === 'IN_PROGRESS') return true;
     if (from === 'IN_PROGRESS' && to === 'DONE') return true;
+
+    // ✅ NEW: offline visits can skip directly to DONE
+    if (isOffline && from === 'QUEUED' && to === 'DONE') return true;
+
     return false;
   }
 
@@ -133,17 +130,12 @@ export class DynamoDBVisitRepository implements VisitRepository {
     const status: VisitStatus = 'QUEUED';
     const tag: VisitTag | undefined = input.tag;
 
-    // ✅ Validate follow-up anchor (no assumptions; strictly enforced)
     if (tag === 'F') {
       const anchorId = input.anchorVisitId;
-      if (!anchorId) {
-        throw new Error('anchorVisitId is required when tag is F');
-      }
+      if (!anchorId) throw new Error('anchorVisitId is required when tag is F');
 
       const anchor = await this.getById(anchorId);
-      if (!anchor) {
-        throw new Error('anchorVisitId does not exist');
-      }
+      if (!anchor) throw new Error('anchorVisitId does not exist');
 
       if (anchor.patientId !== input.patientId) {
         throw new Error('anchorVisitId must belong to the same patient');
@@ -156,7 +148,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
 
     const dailySeq = await nextCounter(buildOpdDailyCounterKey(visitDate));
 
-    // ✅ Tag counter uses only N/F now
     const tagForCounter: VisitTag = tag ?? 'N';
     const tagSeq = await nextCounter(buildOpdTagCounterKey(visitDate, tagForCounter));
     const opdNo = formatOpdNo(visitDate, dailySeq, tagForCounter, tagSeq);
@@ -174,6 +165,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
       ...(tag ? { tag } : {}),
       ...(typeof input.zeroBilled === 'boolean' ? { zeroBilled: input.zeroBilled } : {}),
       ...(input.anchorVisitId ? { anchorVisitId: input.anchorVisitId } : {}),
+      ...(typeof input.isOffline === 'boolean' ? { isOffline: input.isOffline } : {}),
     };
 
     const patientItem = {
@@ -247,7 +239,10 @@ export class DynamoDBVisitRepository implements VisitRepository {
     const current = await this.getById(visitId);
     if (!current) return null;
 
-    if (!this.isValidTransition(current.status, nextStatus)) {
+    type VisitWithOffline = Visit & { isOffline?: boolean };
+    const isOffline = (current as VisitWithOffline).isOffline === true;
+
+    if (!this.isValidTransition(current.status, nextStatus, isOffline)) {
       throw new InvalidStatusTransitionError(
         `Invalid status transition ${current.status} -> ${nextStatus}`,
       );
@@ -297,10 +292,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
     return Attributes as Visit;
   }
 
-  /**
-   * ✅ Clinic-wide queue query by date (+ optional status)
-   * Uses GSI3 partitioned by DATE; status filter in-memory.
-   */
   async getPatientQueue(params: VisitQueueQuery): Promise<Visit[]> {
     const { date, status } = params;
 

@@ -36,10 +36,29 @@ import { clinicDateISO } from '@/src/lib/clinicTime';
 
 type ApiError = {
   status?: number;
-  data?: any;
+  data?: unknown;
 };
 
 type FollowupStatus = 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+
+type FollowupContactMethod = 'CALL' | 'SMS' | 'WHATSAPP' | 'OTHER';
+
+type FollowupItem = {
+  followupId: string;
+  visitId: string;
+  patientId: string;
+  patientName?: string;
+  patientPhone?: string | null;
+  reason?: string | null;
+  followUpDate: string;
+  contactMethod?: FollowupContactMethod | string | null;
+  status?: FollowupStatus | string | null;
+  [key: string]: unknown;
+};
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
 
 function parseISODateToLocalDate(iso: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
@@ -106,10 +125,10 @@ export default function RemindersPage() {
 
   const [localStatusById, setLocalStatusById] = useState<Record<string, FollowupStatus>>({});
   const [localOrder, setLocalOrder] = useState<string[]>([]);
-  const [localItemsById, setLocalItemsById] = useState<Record<string, any>>({});
+  const [localItemsById, setLocalItemsById] = useState<Record<string, FollowupItem>>({});
 
   useEffect(() => {
-    const fetched = followupsQuery.data?.items ?? [];
+    const fetched = (followupsQuery.data?.items ?? []) as FollowupItem[];
     if (fetched.length === 0) return;
 
     setLocalItemsById((prev) => {
@@ -132,7 +151,7 @@ export default function RemindersPage() {
   }, [followupsQuery.data?.items]);
 
   const items = useMemo(() => {
-    const fetched = followupsQuery.data?.items ?? [];
+    const fetched = (followupsQuery.data?.items ?? []) as FollowupItem[];
     const fetchedIds = new Set(fetched.map((x) => x.followupId));
 
     const base = [...fetched];
@@ -145,7 +164,7 @@ export default function RemindersPage() {
       base.push(it);
     }
 
-    return base.map((it: any) => {
+    return base.map((it) => {
       const local = localStatusById[it.followupId];
       return local ? { ...it, status: local } : it;
     });
@@ -196,12 +215,13 @@ export default function RemindersPage() {
 
     void (async () => {
       try {
-        const created = await createFollowup({
+        // ✅ avoid TS2352 by intentionally going through `unknown` first
+        const created = (await createFollowup({
           visitId,
           followUpDate: date,
           reason: reason?.trim() || undefined,
           contactMethod,
-        }).unwrap();
+        }).unwrap()) as unknown as FollowupItem;
 
         toast.success('Follow-up added');
 
@@ -220,8 +240,13 @@ export default function RemindersPage() {
 
         const qs = next.toString();
         router.replace(qs ? `/reminders?${qs}` : '/reminders');
-      } catch (e: any) {
-        toast.error(e?.data?.message ?? e?.message ?? 'Failed to add follow-up');
+      } catch (err: unknown) {
+        const e = err as ApiError;
+        const msg =
+          (isRecord(e.data) && typeof e.data.message === 'string' && e.data.message) ||
+          (isRecord(err) && typeof err.message === 'string' && err.message) ||
+          'Failed to add follow-up';
+        toast.error(msg);
       }
     })();
   }, [canUseApi, searchParams, createFollowup, router]);
@@ -242,13 +267,19 @@ export default function RemindersPage() {
         dateTag: selectedDateStr,
       }).unwrap();
       toast.success('Marked as completed');
-    } catch (e: any) {
+    } catch (err: unknown) {
       setLocalStatusById((prev) => {
         const next = { ...prev };
         delete next[followupId];
         return next;
       });
-      toast.error(e?.data?.message ?? e?.message ?? 'Failed to update');
+
+      const e = err as ApiError;
+      const msg =
+        (isRecord(e.data) && typeof e.data.message === 'string' && e.data.message) ||
+        (isRecord(err) && typeof err.message === 'string' && err.message) ||
+        'Failed to update';
+      toast.error(msg);
     }
   };
 
@@ -268,13 +299,19 @@ export default function RemindersPage() {
         dateTag: selectedDateStr,
       }).unwrap();
       toast.success('Cancelled');
-    } catch (e: any) {
+    } catch (err: unknown) {
       setLocalStatusById((prev) => {
         const next = { ...prev };
         delete next[followupId];
         return next;
       });
-      toast.error(e?.data?.message ?? e?.message ?? 'Failed to update');
+
+      const e = err as ApiError;
+      const msg =
+        (isRecord(e.data) && typeof e.data.message === 'string' && e.data.message) ||
+        (isRecord(err) && typeof err.message === 'string' && err.message) ||
+        'Failed to update';
+      toast.error(msg);
     }
   };
 
@@ -406,7 +443,7 @@ export default function RemindersPage() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    items.map((it: any) => {
+                    items.map((it) => {
                       const status: FollowupStatus = (it.status as FollowupStatus) || 'ACTIVE';
                       const isActive = status === 'ACTIVE';
 
@@ -429,7 +466,7 @@ export default function RemindersPage() {
                                   type="button"
                                   variant="ghost"
                                   size="icon"
-                                  onClick={() => safeCopy(it.patientPhone!)}
+                                  onClick={() => safeCopy(String(it.patientPhone))}
                                 >
                                   <Copy className="h-4 w-4" />
                                 </Button>
@@ -441,7 +478,9 @@ export default function RemindersPage() {
 
                           <TableCell>{it.reason ?? '—'}</TableCell>
                           <TableCell>{it.followUpDate}</TableCell>
-                          <TableCell>{prettyMethod(it.contactMethod)}</TableCell>
+                          <TableCell>
+                            {prettyMethod(it.contactMethod ? String(it.contactMethod) : '')}
+                          </TableCell>
 
                           <TableCell>
                             <StatusPill status={status} />

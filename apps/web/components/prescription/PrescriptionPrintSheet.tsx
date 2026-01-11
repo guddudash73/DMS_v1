@@ -92,17 +92,37 @@ function formatAgeSex(age?: number | string, sex?: PatientSex) {
   return ageStr || sexStr || '—';
 }
 
+/** ---------- Safe meta readers (remove `any` without changing behavior) ---------- */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function getMetaValue(v: unknown, key: string): unknown {
+  if (!isRecord(v)) return undefined;
+  return v[key];
+}
+
+function getFirstMetaValue(v: unknown, keys: string[]): unknown {
+  for (const k of keys) {
+    const val = getMetaValue(v, k);
+    if (val !== undefined) return val;
+  }
+  return undefined;
+}
+
+function getMetaString(v: unknown, key: string): string | undefined {
+  const val = getMetaValue(v, key);
+  if (val == null) return undefined;
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  return undefined;
+}
+/** ----------------------------------------------------------------------------- */
+
 function getVisitOpdNo(v?: Visit): string | undefined {
   if (!v) return undefined;
-  const anyV = v as any;
-  const raw =
-    anyV?.opdNo ??
-    anyV?.opdNumber ??
-    anyV?.opdId ??
-    anyV?.opd ??
-    anyV?.opd_no ??
-    anyV?.opd_no_str ??
-    undefined;
+
+  const raw = getFirstMetaValue(v, ['opdNo', 'opdNumber', 'opdId', 'opd', 'opd_no', 'opd_no_str']);
 
   if (raw == null) return undefined;
   const s = String(raw).trim();
@@ -138,8 +158,8 @@ function VisitRxBlock(props: {
   const lines = isCurrent ? currentLines : (rxQuery.data?.rx?.lines ?? []);
   const toothDetails = isCurrent ? currentToothDetails : (rxQuery.data?.rx?.toothDetails ?? []);
 
-  const visitDate = (visit as any)?.visitDate as string | undefined;
-  const reason = (visit as any)?.reason as string | undefined;
+  const visitDate = getMetaString(visit, 'visitDate');
+  const reason = getMetaString(visit, 'reason');
 
   const hasToothDetails = (toothDetails?.length ?? 0) > 0;
 

@@ -37,6 +37,26 @@ function formatClinicDateTime(ts: number | string) {
   }).format(d);
 }
 
+function getErrorMessage(err: unknown): string | undefined {
+  if (!err) return undefined;
+
+  // Handle RTK Query / fetch-ish errors: { data: { message } } or { message }
+  if (typeof err === 'object') {
+    const e = err as Record<string, unknown>;
+    const msg = e.message;
+    if (typeof msg === 'string' && msg.trim()) return msg;
+
+    const data = e.data;
+    if (data && typeof data === 'object') {
+      const d = data as Record<string, unknown>;
+      const dm = d.message;
+      if (typeof dm === 'string' && dm.trim()) return dm;
+    }
+  }
+
+  return undefined;
+}
+
 function Thumb({ xrayId }: { xrayId: string }) {
   const { data } = useGetXrayUrlQuery({ xrayId, size: 'thumb' });
   if (!data?.url) return <div className="h-18 w-18 rounded-xl bg-gray-100" />;
@@ -93,8 +113,8 @@ export function XrayGallery({ visitId, variant = 'standalone', canDelete = true 
       toast.success('X-ray deleted.');
       setConfirmOpen(false);
       setPendingDeleteId(null);
-    } catch (err: any) {
-      toast.error(err?.data?.message ?? err?.message ?? 'Failed to delete X-ray.');
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err) ?? 'Failed to delete X-ray.');
     }
   };
 

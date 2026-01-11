@@ -44,6 +44,15 @@ const router = express.Router();
 const handleValidationError = (req: Request, res: Response, issues: z.ZodError['issues']) =>
   sendZodValidationError(req, res, issues);
 
+function isOfflineVisit(v: unknown): boolean {
+  return (
+    typeof v === 'object' &&
+    v !== null &&
+    'isOffline' in v &&
+    (v as { isOffline?: boolean }).isOffline === true
+  );
+}
+
 const asyncHandler =
   (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
   (req: Request, res: Response, next: NextFunction) =>
@@ -99,6 +108,8 @@ router.post(
 
     void publishClinicQueueUpdated({ visitDate: visit.visitDate });
 
+    type VisitWithOffline = typeof visit & { isOffline?: boolean };
+
     return res.status(201).json({
       visit,
       tokenPrint: {
@@ -108,6 +119,7 @@ router.post(
         patientPhone: patient?.phone ?? undefined,
         reason: visit.reason,
         tag: visit.tag,
+        isOffline: (visit as VisitWithOffline).isOffline === true, // ✅ NEW
         visitNumberForPatient,
         createdAt: visit.createdAt,
         visitDate: visit.visitDate,
@@ -319,6 +331,9 @@ const RxCreateBody = z
   .object({
     lines: z.array(RxLine).optional().default([]),
     toothDetails: z.array(ToothDetail).optional().default([]),
+
+    // ✅ NEW: doctor notes for reception only
+    doctorNotes: z.string().max(2000).optional(),
   })
   .superRefine((val, ctx) => {
     const hasLines = (val.lines?.length ?? 0) > 0;
@@ -350,6 +365,13 @@ router.post(
       return res.status(404).json({ error: 'NOT_FOUND', message: 'Visit not found' });
     }
 
+    if (isOfflineVisit(visit)) {
+      return res.status(409).json({
+        error: 'OFFLINE_VISIT_RX_NOT_ALLOWED',
+        message: 'Offline visits do not support prescriptions in the database.',
+      });
+    }
+
     const patient = await patientRepository.getById(visit.patientId);
     if (!patient || patient.isDeleted) {
       return res
@@ -364,17 +386,17 @@ router.post(
       });
     }
 
-    const { lines, toothDetails } = parsedBody.data;
+    const { lines, toothDetails, doctorNotes } = parsedBody.data;
     const now = Date.now();
-    const jsonKey = `rx/${visit.visitId}/${randomUUID()}.json`;
+    const jsonKey = `rx/${visit.visitId}/draft.json`;
 
-    // ✅ store toothDetails even if lines are empty
-    const jsonPayload = {
+    const jsonPayload: Record<string, unknown> = {
       visitId: visit.visitId,
       lines,
       toothDetails,
       createdAt: now,
       updatedAt: now,
+      ...(doctorNotes !== undefined ? { doctorNotes } : {}),
     };
 
     try {
@@ -406,6 +428,7 @@ router.post(
       lines,
       jsonKey,
       toothDetails: toothDetails?.length ? toothDetails : [],
+      doctorNotes, // ✅ NEW
     });
 
     return res.status(201).json({
@@ -724,6 +747,13 @@ router.post(
     const visit = await visitRepository.getById(id.data);
     if (!visit) return res.status(404).json({ error: 'NOT_FOUND', message: 'Visit not found' });
 
+    if (isOfflineVisit(visit)) {
+      return res.status(409).json({
+        error: 'OFFLINE_VISIT_RX_NOT_ALLOWED',
+        message: 'Offline visits do not support prescription revisions.',
+      });
+    }
+
     if (visit.status !== 'DONE') {
       return res.status(409).json({
         error: 'RX_REVISION_NOT_ALLOWED',
@@ -739,14 +769,15 @@ router.post(
     }
 
     const now = Date.now();
-    const jsonKey = `rx/${visit.visitId}/${randomUUID()}.json`;
+    const jsonKey = `rx/${visit.visitId}/revisions/${randomUUID()}.json`;
 
-    const jsonPayload = {
+    const jsonPayload: Record<string, unknown> = {
       visitId: visit.visitId,
       lines: current.lines ?? [],
-      toothDetails: current.toothDetails ?? undefined, // ✅ COPY
+      toothDetails: current.toothDetails ?? undefined,
       createdAt: now,
       updatedAt: now,
+      ...(current.doctorNotes !== undefined ? { doctorNotes: current.doctorNotes } : {}),
     };
 
     try {
@@ -777,7 +808,8 @@ router.post(
       visit,
       lines: current.lines ?? [],
       jsonKey,
-      toothDetails: current.toothDetails, // ✅ COPY
+      toothDetails: current.toothDetails,
+      doctorNotes: current.doctorNotes, // ✅ COPY
     });
 
     return res.status(201).json({

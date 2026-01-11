@@ -140,7 +140,9 @@ export default function NewPatientModal({ onClose }: Props) {
         address: values.address?.trim() ? values.address.trim() : undefined,
       };
 
-      const patient = await createPatient(payload as any).unwrap();
+      type CreatePatientArg = Parameters<typeof createPatient>[0];
+      const patient = await createPatient(payload as CreatePatientArg).unwrap();
+
       toast.success('Patient created successfully.');
       handleClose();
       router.push(`/patients/${patient.patientId}`);
@@ -275,7 +277,7 @@ export default function NewPatientModal({ onClose }: Props) {
                           value={selectedDob ?? undefined}
                           onChange={(d) => {
                             if (!d) return;
-                            setValue('dob' as any, toIsoDate(d), {
+                            setValue('dob', toIsoDate(d), {
                               shouldDirty: true,
                               shouldTouch: true,
                               shouldValidate: true,

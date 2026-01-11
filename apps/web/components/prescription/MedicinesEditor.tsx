@@ -52,6 +52,10 @@ function isTimingUi(v: string): v is TimingUI {
   return (TIMING_UI as readonly string[]).includes(v);
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
 export function MedicinesEditor({ lines, onChange }: Props) {
   const [medicine, setMedicine] = useState('');
   const [dose, setDose] = useState('');
@@ -82,31 +86,35 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     requestAnimationFrame(() => el?.focus());
   };
 
-  // ✅ NEW: apply medicine defaults from the typeahead item (if present)
-  const applyMedicineDefaults = (picked: any) => {
-    const defaults = picked?.defaults ?? picked?.default ?? picked?.presetDefaults;
-    if (!defaults) return;
+  // ✅ apply medicine defaults from the typeahead item (if present)
+  const applyMedicineDefaults = (picked: unknown) => {
+    if (!isRecord(picked)) return;
+
+    const defaultsRaw = picked.defaults ?? picked.default ?? picked.presetDefaults;
+    if (!isRecord(defaultsRaw)) return;
 
     // dose
     const d =
-      defaults.dose ??
-      defaults.doseText ??
-      defaults.dosage ??
-      defaults.strength ??
-      defaults.defaultDose;
+      defaultsRaw.dose ??
+      defaultsRaw.doseText ??
+      defaultsRaw.dosage ??
+      defaultsRaw.strength ??
+      defaultsRaw.defaultDose;
+
     if (typeof d === 'string' && d.trim()) setDose(d.trim());
 
     // frequency
-    const f = defaults.frequency ?? defaults.freq ?? defaults.defaultFrequency;
+    const f = defaultsRaw.frequency ?? defaultsRaw.freq ?? defaultsRaw.defaultFrequency;
     if (typeof f === 'string' && isFrequency(f)) setFrequency(f);
 
     // duration
     const dur =
-      defaults.duration ??
-      defaults.dur ??
-      defaults.days ??
-      defaults.durationDays ??
-      defaults.defaultDuration;
+      defaultsRaw.duration ??
+      defaultsRaw.dur ??
+      defaultsRaw.days ??
+      defaultsRaw.durationDays ??
+      defaultsRaw.defaultDuration;
+
     if (typeof dur === 'number' && Number.isFinite(dur) && dur > 0) setDurationDays(String(dur));
     if (typeof dur === 'string' && dur.trim() && Number.isFinite(Number(dur))) {
       const n = Number(dur);
@@ -114,15 +122,15 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     }
 
     // timing
-    const t = defaults.timing ?? defaults.time ?? defaults.defaultTiming;
+    const t = defaultsRaw.timing ?? defaultsRaw.time ?? defaultsRaw.defaultTiming;
     if (typeof t === 'string') {
       if (t === 'BEFORE_MEAL') setTimingUi('BE_MEAL');
-      else if (t === 'AFTER_MEAL' || t === 'AFTER_MEAL') setTimingUi('AF_MEAL');
+      else if (t === 'AFTER_MEAL') setTimingUi('AF_MEAL');
       else if (t === 'ANY') setTimingUi('ANY');
     }
 
     // notes (optional)
-    const n = defaults.notes ?? defaults.note;
+    const n = defaultsRaw.notes ?? defaultsRaw.note;
     if (typeof n === 'string' && n.trim()) {
       setNotes(n.trim());
       setNotesOpen(true);
@@ -247,7 +255,10 @@ export function MedicinesEditor({ lines, onChange }: Props) {
               onPick={(m) => {
                 setMedicine(m.displayName);
 
-                // ✅ APPLY DEFAULTS FROM MEDICINE PRESET
+                // ✅ APPLY DEFAULTS FROM MEDICINE PRESET (if backend provides them)
+                applyMedicineDefaults(m);
+
+                // ✅ existing direct defaults
                 if (m.defaultFrequency && isFrequency(m.defaultFrequency)) {
                   setFrequency(m.defaultFrequency);
                 }

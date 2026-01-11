@@ -29,6 +29,7 @@ import {
 } from '@/src/store/api';
 
 const FREQUENCIES = ['QD', 'BID', 'TID', 'QID', 'HS', 'PRN'] as const;
+type Frequency = (typeof FREQUENCIES)[number];
 
 const MEDICINE_FORMS: MedicineForm[] = [
   'TABLET',
@@ -44,7 +45,7 @@ const MEDICINE_FORMS: MedicineForm[] = [
 type FormState = {
   displayName: string;
   defaultDose?: string;
-  defaultFrequency?: (typeof FREQUENCIES)[number] | '';
+  defaultFrequency?: Frequency | '';
   defaultDuration?: number;
   form?: MedicineForm | '';
 };
@@ -63,6 +64,13 @@ const toNumberOrUndef = (v: string) => {
   const n = Number(t);
   return Number.isFinite(n) ? n : undefined;
 };
+
+// ✅ type guards to remove `any` without changing behavior
+const isFrequency = (v: unknown): v is Frequency =>
+  typeof v === 'string' && (FREQUENCIES as readonly string[]).includes(v);
+
+const isMedicineForm = (v: unknown): v is MedicineForm =>
+  typeof v === 'string' && (MEDICINE_FORMS as readonly string[]).includes(v);
 
 function SelectLike({
   value,
@@ -94,6 +102,13 @@ const formatDefaults = (m: MedicinePreset) => {
   return { dose, freq, dur };
 };
 
+// ✅ minimal shape for the list query args (removes `as any` at the callsite)
+type MedicinesCatalogListArgs = {
+  query?: string;
+  limit: number;
+  cursor?: string;
+};
+
 export default function DoctorMedicinesPage() {
   const meQ = useGetMeQuery();
   const myUserId = meQ.data?.userId ?? '';
@@ -112,14 +127,13 @@ export default function DoctorMedicinesPage() {
     setCursorStack([]);
   }, [debounced]);
 
-  const listQ = useListMedicinesCatalogQuery(
-    {
-      query: debounced || undefined,
-      limit: 12,
-      cursor: cursor || undefined,
-    } as any,
-    { refetchOnMountOrArgChange: true },
-  );
+  const listArgs: MedicinesCatalogListArgs = {
+    query: debounced || undefined,
+    limit: 12,
+    cursor: cursor || undefined,
+  };
+
+  const listQ = useListMedicinesCatalogQuery(listArgs, { refetchOnMountOrArgChange: true });
 
   const items = listQ.data?.items ?? [];
   const nextCursor = listQ.data?.nextCursor ?? null;
@@ -160,12 +174,17 @@ export default function DoctorMedicinesPage() {
 
   const openEdit = (m: MedicinePreset) => {
     setEditTarget(m);
+
+    const freq =
+      m.defaultFrequency && isFrequency(m.defaultFrequency) ? m.defaultFrequency : ('' as const);
+    const form = m.form && isMedicineForm(m.form) ? m.form : ('' as const);
+
     setEditForm({
       displayName: m.displayName ?? '',
       defaultDose: m.defaultDose ?? '',
-      defaultFrequency: (m.defaultFrequency as any) ?? '',
+      defaultFrequency: freq,
       defaultDuration: m.defaultDuration,
-      form: (m.form as any) ?? '',
+      form,
     });
     setEditOpen(true);
   };
@@ -179,7 +198,7 @@ export default function DoctorMedicinesPage() {
       defaultDose: addForm.defaultDose?.trim() || undefined,
       defaultFrequency: addForm.defaultFrequency?.trim() || undefined,
       defaultDuration: addForm.defaultDuration,
-      form: (addForm.form || undefined) as any,
+      form: addForm.form && isMedicineForm(addForm.form) ? addForm.form : undefined,
     }).unwrap();
 
     setAddOpen(false);
@@ -200,7 +219,7 @@ export default function DoctorMedicinesPage() {
         defaultDose: editForm.defaultDose?.trim() || undefined,
         defaultFrequency: editForm.defaultFrequency?.trim() || undefined,
         defaultDuration: editForm.defaultDuration,
-        form: (editForm.form || undefined) as any,
+        form: editForm.form && isMedicineForm(editForm.form) ? editForm.form : undefined,
       },
     }).unwrap();
 
@@ -402,7 +421,9 @@ export default function DoctorMedicinesPage() {
                 <Label className="text-xs">Frequency</Label>
                 <SelectLike
                   value={addForm.defaultFrequency ?? ''}
-                  onChange={(v) => setAddForm((p) => ({ ...p, defaultFrequency: v as any }))}
+                  onChange={(v) =>
+                    setAddForm((p) => ({ ...p, defaultFrequency: isFrequency(v) ? v : '' }))
+                  }
                   placeholder="Select…"
                 >
                   {FREQUENCIES.map((f) => (
@@ -435,7 +456,7 @@ export default function DoctorMedicinesPage() {
               <Label className="text-xs">Form (optional)</Label>
               <SelectLike
                 value={addForm.form ?? ''}
-                onChange={(v) => setAddForm((p) => ({ ...p, form: v as any }))}
+                onChange={(v) => setAddForm((p) => ({ ...p, form: isMedicineForm(v) ? v : '' }))}
                 placeholder="Select…"
               >
                 {MEDICINE_FORMS.map((f) => (
@@ -490,7 +511,9 @@ export default function DoctorMedicinesPage() {
                 <Label className="text-xs">Frequency</Label>
                 <SelectLike
                   value={editForm.defaultFrequency ?? ''}
-                  onChange={(v) => setEditForm((p) => ({ ...p, defaultFrequency: v as any }))}
+                  onChange={(v) =>
+                    setEditForm((p) => ({ ...p, defaultFrequency: isFrequency(v) ? v : '' }))
+                  }
                   placeholder="Select…"
                 >
                   {FREQUENCIES.map((f) => (
@@ -522,7 +545,7 @@ export default function DoctorMedicinesPage() {
               <Label className="text-xs">Form (optional)</Label>
               <SelectLike
                 value={editForm.form ?? ''}
-                onChange={(v) => setEditForm((p) => ({ ...p, form: v as any }))}
+                onChange={(v) => setEditForm((p) => ({ ...p, form: isMedicineForm(v) ? v : '' }))}
                 placeholder="Select…"
               >
                 {MEDICINE_FORMS.map((f) => (

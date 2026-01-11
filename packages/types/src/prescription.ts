@@ -14,7 +14,6 @@ export type ToothPosition = z.infer<typeof ToothPosition>;
  * - Trim, keep length bounded.
  */
 export const ToothNumber = z.string().min(1).max(20);
-
 export type ToothNumber = z.infer<typeof ToothNumber>;
 
 export const ToothDetail = z.object({
@@ -51,7 +50,19 @@ export const Prescription = z.object({
   jsonKey: z.string().min(1),
 
   toothDetails: z.array(ToothDetail).optional(),
+
+  /**
+   * ✅ NEW: internal note from doctor to reception
+   * - NOT printed
+   * - Only shown in reception visit panel
+   */
+  doctorNotes: z.string().max(2000).optional(),
+
+  /**
+   * Existing: shown/printed as reception notes
+   */
   receptionNotes: z.string().max(2000).optional(),
+
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 });

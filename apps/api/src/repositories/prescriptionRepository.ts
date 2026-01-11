@@ -1,4 +1,3 @@
-// apps/api/src/repositories/prescriptionRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
@@ -8,7 +7,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 import {
-  Prescription as PrescriptionSchema, // ✅ zod schema
+  Prescription as PrescriptionSchema,
   type Visit,
   type Prescription,
   type RxId,
@@ -44,36 +43,30 @@ export interface PrescriptionRepository {
     visit: Visit;
     lines: RxLineType[];
     jsonKey: string;
-
-    /**
-     * ✅ NEW: visit-specific tooth details stored on prescription
-     * (optional so existing callers don’t break)
-     */
     toothDetails?: Prescription['toothDetails'];
+
+    // ✅ NEW
+    doctorNotes?: Prescription['doctorNotes'];
   }): Promise<Prescription>;
 
   createNewVersionForVisit(params: {
     visit: Visit;
     lines: RxLineType[];
     jsonKey: string;
-
-    /**
-     * ✅ NEW: tooth details can be copied to the new version
-     * (optional so callers can omit)
-     */
     toothDetails?: Prescription['toothDetails'];
+
+    // ✅ NEW
+    doctorNotes?: Prescription['doctorNotes'];
   }): Promise<Prescription>;
 
   updateById(params: {
     rxId: RxId;
     lines: RxLineType[];
     jsonKey: string;
-
-    /**
-     * ✅ NEW: if provided, updates toothDetails as well
-     * If omitted (undefined), toothDetails is left unchanged.
-     */
     toothDetails?: Prescription['toothDetails'];
+
+    // ✅ NEW
+    doctorNotes?: Prescription['doctorNotes'];
   }): Promise<Prescription | null>;
 
   updateReceptionNotesById(params: {
@@ -146,8 +139,9 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     lines: RxLineType[];
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
+    doctorNotes?: Prescription['doctorNotes'];
   }) {
-    const { visit, lines, jsonKey, toothDetails } = params;
+    const { visit, lines, jsonKey, toothDetails, doctorNotes } = params;
 
     const { Item: visitMeta } = await docClient.send(
       new GetCommand({
@@ -159,9 +153,14 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
 
     const currentRxId = getStringProp(visitMeta, 'currentRxId');
 
-    // If draft exists, update it (optionally includes toothDetails)
     if (currentRxId) {
-      const updated = await this.updateById({ rxId: currentRxId, lines, jsonKey, toothDetails });
+      const updated = await this.updateById({
+        rxId: currentRxId,
+        lines,
+        jsonKey,
+        toothDetails,
+        doctorNotes,
+      });
       if (updated) return updated;
     }
 
@@ -176,8 +175,8 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       version,
       jsonKey,
 
-      // ✅ NEW
       ...(toothDetails !== undefined ? { toothDetails } : {}),
+      ...(doctorNotes !== undefined ? { doctorNotes } : {}),
 
       receptionNotes: undefined,
       createdAt: now,
@@ -215,8 +214,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
             Update: {
               TableName: TABLE_NAME,
               Key: buildVisitMetaKey(visit.visitId),
-              // ✅ Update works even if META doesn't exist (DDB will create it).
-              // ✅ Also set createdAt once.
               UpdateExpression:
                 'SET #currentRxId = :rxId, #currentRxVersion = :v, #updatedAt = :u, #createdAt = if_not_exists(#createdAt, :u)',
               ExpressionAttributeNames: {
@@ -230,7 +227,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
                 ':v': version,
                 ':u': now,
               },
-              // ✅ remove ConditionExpression entirely
             },
           },
         ],
@@ -245,8 +241,9 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     lines: RxLineType[];
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
+    doctorNotes?: Prescription['doctorNotes'];
   }) {
-    const { visit, lines, jsonKey, toothDetails } = params;
+    const { visit, lines, jsonKey, toothDetails, doctorNotes } = params;
 
     const existing = await this.listByVisit(visit.visitId);
     const maxVersion = existing.reduce((m, p) => (p.version > m ? p.version : m), 0);
@@ -262,8 +259,8 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       version,
       jsonKey,
 
-      // ✅ NEW
       ...(toothDetails !== undefined ? { toothDetails } : {}),
+      ...(doctorNotes !== undefined ? { doctorNotes } : {}),
 
       receptionNotes: undefined,
       createdAt: now,
@@ -314,7 +311,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
                 ':v': version,
                 ':u': now,
               },
-              // ✅ remove ConditionExpression
             },
           },
         ],
@@ -329,8 +325,9 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     lines: RxLineType[];
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
+    doctorNotes?: Prescription['doctorNotes'];
   }) {
-    const { rxId, lines, jsonKey, toothDetails } = params;
+    const { rxId, lines, jsonKey, toothDetails, doctorNotes } = params;
 
     const existing = await this.getById(rxId);
     if (!existing) return null;
@@ -338,32 +335,42 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     const now = Date.now();
 
     const hasToothDetails = toothDetails !== undefined;
+    const hasDoctorNotes = doctorNotes !== undefined;
 
     const next: Prescription = {
       ...existing,
       lines,
       jsonKey,
       ...(hasToothDetails ? { toothDetails } : {}),
+      ...(hasDoctorNotes ? { doctorNotes } : {}),
       updatedAt: now,
     };
 
-    const updateExpression = hasToothDetails
-      ? 'SET #lines = :l, #jsonKey = :j, #toothDetails = :t, #updatedAt = :u'
-      : 'SET #lines = :l, #jsonKey = :j, #updatedAt = :u';
-
-    const expressionAttributeNames: Record<string, string> = {
+    const setParts: string[] = ['#lines = :l', '#jsonKey = :j', '#updatedAt = :u'];
+    const names: Record<string, string> = {
       '#lines': 'lines',
       '#jsonKey': 'jsonKey',
       '#updatedAt': 'updatedAt',
-      ...(hasToothDetails ? { '#toothDetails': 'toothDetails' } : {}),
     };
-
-    const expressionAttributeValues: Record<string, unknown> = {
+    const values: Record<string, unknown> = {
       ':l': lines,
       ':j': jsonKey,
       ':u': now,
-      ...(hasToothDetails ? { ':t': toothDetails } : {}),
     };
+
+    if (hasToothDetails) {
+      setParts.push('#toothDetails = :t');
+      names['#toothDetails'] = 'toothDetails';
+      values[':t'] = toothDetails;
+    }
+
+    if (hasDoctorNotes) {
+      setParts.push('#doctorNotes = :dn');
+      names['#doctorNotes'] = 'doctorNotes';
+      values[':dn'] = doctorNotes;
+    }
+
+    const updateExpression = `SET ${setParts.join(', ')}`;
 
     await docClient.send(
       new TransactWriteCommand({
@@ -373,8 +380,8 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
               TableName: TABLE_NAME,
               Key: buildRxMetaKey(rxId),
               UpdateExpression: updateExpression,
-              ExpressionAttributeNames: expressionAttributeNames,
-              ExpressionAttributeValues: expressionAttributeValues,
+              ExpressionAttributeNames: names,
+              ExpressionAttributeValues: values,
               ConditionExpression: 'attribute_exists(PK)',
             },
           },
@@ -383,8 +390,8 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
               TableName: TABLE_NAME,
               Key: buildVisitRxKey(existing.visitId, rxId),
               UpdateExpression: updateExpression,
-              ExpressionAttributeNames: expressionAttributeNames,
-              ExpressionAttributeValues: expressionAttributeValues,
+              ExpressionAttributeNames: names,
+              ExpressionAttributeValues: values,
               ConditionExpression: 'attribute_exists(PK)',
             },
           },

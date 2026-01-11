@@ -154,7 +154,7 @@ export function MedicineCombobox({
           }}
         >
           <CommandInput
-            ref={inputRef as any}
+            ref={inputRef as React.Ref<HTMLInputElement>}
             placeholder="Search medicine..."
             value={query}
             onValueChange={setQuery}

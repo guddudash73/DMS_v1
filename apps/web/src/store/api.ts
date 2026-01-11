@@ -163,10 +163,8 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
 ) => {
   let result = await rawBaseQuery(args, api, extraOptions);
 
-  // Only handle 401 here
   if (result.error?.status !== 401) return result;
 
-  // Single refresh mutex shared across all requests
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
       const refreshResult = await rawBaseQuery(
@@ -180,14 +178,12 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
         return true;
       }
 
-      // ✅ Only logout if refresh is definitively invalid
       const status = (refreshResult.error as any)?.status;
       if (status === 401 || status === 403) {
         api.dispatch(setUnauthenticated());
         api.dispatch(apiSlice.util.resetApiState());
       }
 
-      // ✅ 500 / network error / timeout: DO NOT logout
       return false;
     })().finally(() => {
       refreshInFlight = null;
@@ -197,10 +193,8 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
   const ok = await refreshInFlight;
   if (!ok) return result;
 
-  // retry original request after refresh
   result = await rawBaseQuery(args, api, extraOptions);
 
-  // if still 401 after refresh, then logout (token truly bad)
   if (result.error?.status === 401) {
     api.dispatch(setUnauthenticated());
     api.dispatch(apiSlice.util.resetApiState());
@@ -223,7 +217,6 @@ function isSocketUsable(sock: WebSocket | null) {
   return sock.readyState === WebSocket.OPEN || sock.readyState === WebSocket.CONNECTING;
 }
 
-// ✅ simple reconnect backoff
 let sharedEverOpened = false;
 let reconnectAttempt = 0;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -238,7 +231,7 @@ function scheduleReconnect(args: { dispatch: any; getState: () => unknown }) {
   if (document.visibilityState !== 'visible') return;
   if (sharedRefCount <= 0) return;
 
-  const base = Math.min(30_000, 500 * Math.pow(2, reconnectAttempt)); // cap 30s
+  const base = Math.min(30_000, 500 * Math.pow(2, reconnectAttempt));
   const jitter = Math.floor(Math.random() * 250);
   const delay = base + jitter;
   reconnectAttempt += 1;
@@ -250,13 +243,8 @@ function scheduleReconnect(args: { dispatch: any; getState: () => unknown }) {
 }
 
 const HEARTBEAT_MS = 4 * 60 * 1000;
-
-// your design choice: close after inactivity
 const IDLE_CLOSE_MS = 10 * 60 * 1000;
-
-// avoid 2 hour hard disconnect surprises
 const MAX_CONN_AGE_MS = 110 * 60 * 1000;
-
 const EXPIRY_SKEW_MS = 30_000;
 
 let recycleTimer: ReturnType<typeof setTimeout> | null = null;
@@ -270,40 +258,13 @@ function getTodayIsoSafe() {
   return clinicDateISO(new Date());
 }
 
-// ✅ On reconnect, refetch caches immediately (otherwise UI can stay stale until next event)
 function invalidateQueueOnly(dispatch: any, dateIso: string) {
   dispatch(apiSlice.util.invalidateTags([{ type: 'ClinicQueue' as const, id: dateIso }]));
 }
 
-const heavyInvalidateTimers = new Map<string, ReturnType<typeof setTimeout>>();
-
-function scheduleHeavyInvalidate(dispatch: any, dateIso: string) {
-  const existing = heavyInvalidateTimers.get(dateIso);
-  if (existing) clearTimeout(existing);
-
-  heavyInvalidateTimers.set(
-    dateIso,
-    setTimeout(() => {
-      heavyInvalidateTimers.delete(dateIso);
-
-      dispatch(
-        apiSlice.util.invalidateTags([
-          { type: 'DailyReport' as const, id: dateIso },
-          { type: 'DailyPatientSummary' as const, id: dateIso },
-          { type: 'DailyVisitsBreakdown' as const, id: dateIso },
-          { type: 'RecentCompleted' as const, id: dateIso },
-          { type: 'DailyPatientSummary' as const, id: 'SERIES' },
-        ]),
-      );
-    }, 1500),
-  );
-}
-
-// ✅ On reconnect, refetch caches immediately (otherwise UI can stay stale until next event)
 function invalidateRealtimeDrivenCaches(args: { dispatch: any }) {
   const today = getTodayIsoSafe();
   invalidateQueueOnly(args.dispatch, today);
-  // scheduleHeavyInvalidate(args.dispatch, today);
 }
 
 function sharedStopTimers() {
@@ -335,7 +296,6 @@ async function refreshAccessTokenShared(args: {
   dispatch: any;
   getState: () => unknown;
 }): Promise<string | null> {
-  // ✅ reuse the SAME refresh mutex used by HTTP baseQuery
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
       const refreshResult = await rawBaseQuery(
@@ -349,14 +309,12 @@ async function refreshAccessTokenShared(args: {
         return true;
       }
 
-      // ✅ Only logout if refresh token is definitely invalid/expired
       const status = (refreshResult.error as any)?.status;
       if (status === 401 || status === 403) {
         args.dispatch(setUnauthenticated());
         args.dispatch(apiSlice.util.resetApiState());
       }
 
-      // ✅ 500/network: keep user logged in; we'll retry later
       return false;
     })().finally(() => {
       refreshInFlight = null;
@@ -380,12 +338,10 @@ async function ensureFreshAccessTokenForWs(args: {
 
   if (!token || !expiresAt) return null;
 
-  // ✅ still valid
   if (Date.now() < expiresAt - EXPIRY_SKEW_MS) {
     return token;
   }
 
-  // ✅ expired → refresh via shared mutex
   return await refreshAccessTokenShared(args);
 }
 
@@ -396,11 +352,10 @@ async function sharedOpenSocketIfNeeded(
   if (typeof window === 'undefined') return;
   if (document.visibilityState !== 'visible') return;
 
-  // ✅ KEY FIX: socket exists but CLOSED/CLOSING should be treated as absent
   if (!opts?.force && isSocketUsable(sharedSocket)) return;
 
   if (sharedSocket && !isSocketUsable(sharedSocket)) {
-    sharedSafeClose(); // clears timers + nulls socket
+    sharedSafeClose();
   }
 
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
@@ -424,7 +379,6 @@ async function sharedOpenSocketIfNeeded(
 
       clearRecycleTimer();
       recycleTimer = setTimeout(() => {
-        // recycle to avoid 2 hour max duration disconnects
         sharedSafeClose();
         void sharedOpenSocketIfNeeded(args, { force: true });
       }, MAX_CONN_AGE_MS);
@@ -442,7 +396,6 @@ async function sharedOpenSocketIfNeeded(
     },
 
     onClose: () => {
-      // don’t call sharedSocket.close() here — it already closed
       sharedSocket = null;
       sharedStopTimers();
       scheduleReconnect(args);
@@ -470,7 +423,6 @@ async function sharedOpenSocketIfNeeded(
 function sharedMarkActivity(args: { dispatch: any; getState: () => unknown }) {
   sharedResetIdleTimer();
 
-  // ✅ force reopen if socket is stale (CLOSED/CLOSING) or missing
   if (!isSocketUsable(sharedSocket) && sharedRefCount > 0) {
     void sharedOpenSocketIfNeeded(args, { force: true });
   }
@@ -494,7 +446,6 @@ function subscribeSharedRealtime(args: {
       if (document.visibilityState === 'visible') sharedMarkActivity(args);
     };
 
-    // ✅ wakes after minimize/sleep + back/forward cache restore
     const focusHandler = () => sharedMarkActivity(args);
     const pageShowHandler = () => sharedMarkActivity(args);
 
@@ -532,7 +483,6 @@ function subscribeSharedRealtime(args: {
           | (() => void)
           | undefined;
 
-        // ✅ NEW: wake/reconnect helpers
         const focusHandler = (window as any).__dms_ws_focusHandler as (() => void) | undefined;
         const pageShowHandler = (window as any).__dms_ws_pageShowHandler as
           | (() => void)
@@ -540,33 +490,19 @@ function subscribeSharedRealtime(args: {
 
         const onlineHandler = (window as any).__dms_ws_onlineHandler as (() => void) | undefined;
 
-        if (activityHandler) {
+        if (activityHandler)
           activityEvents.forEach((e) => window.removeEventListener(e, activityHandler));
-        }
-        if (visibilityHandler) {
-          document.removeEventListener('visibilitychange', visibilityHandler);
-        }
-
-        // ✅ NEW: remove focus/pageshow listeners
-        if (focusHandler) {
-          window.removeEventListener('focus', focusHandler);
-        }
-        if (pageShowHandler) {
-          window.removeEventListener('pageshow', pageShowHandler);
-        }
-
+        if (visibilityHandler) document.removeEventListener('visibilitychange', visibilityHandler);
+        if (focusHandler) window.removeEventListener('focus', focusHandler);
+        if (pageShowHandler) window.removeEventListener('pageshow', pageShowHandler);
         if (onlineHandler) window.removeEventListener('online', onlineHandler);
 
         delete (window as any).__dms_ws_activityHandler;
         delete (window as any).__dms_ws_visibilityHandler;
-
-        // ✅ NEW: cleanup stored handlers
         delete (window as any).__dms_ws_focusHandler;
         delete (window as any).__dms_ws_pageShowHandler;
-
         delete (window as any).__dms_ws_onlineHandler;
 
-        // ✅ NEW: if you added a reconnect timer, clear it too
         clearReconnectTimer();
       }
 
@@ -598,7 +534,6 @@ export const apiSlice = createApi({
 
             const msgDate = normalizeIsoDate(data.payload.visitDate);
             invalidateQueueOnly(dispatch, msgDate);
-            // scheduleHeavyInvalidate(dispatch, msgDate);
           },
         });
 
@@ -1165,14 +1100,15 @@ export const apiSlice = createApi({
 
     upsertVisitRx: builder.mutation<
       { rxId: string; visitId: string; version: number; createdAt: number; updatedAt: number },
-      { visitId: string; lines: RxLineType[]; toothDetails?: ToothDetail[] }
+      { visitId: string; lines: RxLineType[]; toothDetails?: ToothDetail[]; doctorNotes?: string }
     >({
-      query: ({ visitId, lines, toothDetails }) => ({
+      query: ({ visitId, lines, toothDetails, doctorNotes }) => ({
         url: `/visits/${visitId}/rx`,
         method: 'POST',
         body: {
           lines: lines ?? [],
           ...(toothDetails !== undefined ? { toothDetails } : {}),
+          ...(doctorNotes !== undefined ? { doctorNotes } : {}),
         },
       }),
       invalidatesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
@@ -1206,6 +1142,19 @@ export const apiSlice = createApi({
       invalidatesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
     }),
 
+    // ✅ NEW: Doctor notes (for reception only, not printed)
+    updateVisitRxDoctorNotes: builder.mutation<
+      { rx: Prescription },
+      { visitId: string; doctorNotes: string }
+    >({
+      query: ({ visitId, doctorNotes }) => ({
+        url: `/visits/${visitId}/rx/doctor-notes`,
+        method: 'PATCH',
+        body: { doctorNotes },
+      }),
+      invalidatesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
+    }),
+
     startVisitRxRevision: builder.mutation<
       { rxId: string; visitId: string; version: number; createdAt: number; updatedAt: number },
       { visitId: string }
@@ -1219,14 +1168,15 @@ export const apiSlice = createApi({
 
     updateRxById: builder.mutation<
       { rxId: string; visitId: string; version: number; createdAt: number; updatedAt: number },
-      { rxId: string; lines: RxLineType[]; toothDetails?: ToothDetail[] }
+      { rxId: string; lines: RxLineType[]; toothDetails?: ToothDetail[]; doctorNotes?: string }
     >({
-      query: ({ rxId, lines, toothDetails }) => ({
+      query: ({ rxId, lines, toothDetails, doctorNotes }) => ({
         url: `/rx/${rxId}`,
         method: 'PUT',
         body: {
           lines: lines ?? [],
           ...(toothDetails !== undefined ? { toothDetails } : {}),
+          ...(doctorNotes !== undefined ? { doctorNotes } : {}),
         },
       }),
     }),
@@ -1472,6 +1422,7 @@ export const {
   useGetVisitByIdQuery,
   useGetVisitRxQuery,
   useUpdateVisitRxReceptionNotesMutation,
+  useUpdateVisitRxDoctorNotesMutation,
   useStartVisitRxRevisionMutation,
   useUpdateRxByIdMutation,
 

@@ -41,38 +41,94 @@ function scopeBadge(scope?: string) {
   return { label: 'Private', className: 'bg-slate-100 text-slate-700 border border-slate-200' };
 }
 
-/** Normalize preset lines into RxLineType used by MedicinesEditor */
-function normalizePresetLines(lines: any[]): RxLineType[] {
+/** ---------- Safe helpers (replace `any` with `unknown` without changing behavior) ---------- */
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function getValue(obj: unknown, key: string): unknown {
+  if (!isRecord(obj)) return undefined;
+  return obj[key];
+}
+
+function getString(obj: unknown, key: string): string | undefined {
+  const val = getValue(obj, key);
+  if (val == null) return undefined;
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  return undefined;
+}
+
+function getNumberLike(obj: unknown, key: string): number | undefined {
+  const val = getValue(obj, key);
+  if (typeof val === 'number' && Number.isFinite(val)) return val;
+  if (typeof val === 'string' && Number.isFinite(Number(val))) return Number(val);
+  return undefined;
+}
+
+function getStringArray(obj: unknown, key: string): string[] | undefined {
+  const val = getValue(obj, key);
+  if (!Array.isArray(val)) return undefined;
+  const out = val.filter((x) => typeof x === 'string') as string[];
+  return out.length ? out : undefined;
+}
+/** ----------------------------------------------------------------------------------------- */
+
+/**
+ * Normalize preset lines into RxLineType used by MedicinesEditor
+ *
+ * IMPORTANT:
+ * In this repo, RxLineType appears to have required fields: medicine, dose, frequency, duration.
+ * So we always provide safe defaults for those fields to satisfy typing and keep imports stable.
+ */
+function normalizePresetLines(lines: unknown[]): RxLineType[] {
   return (lines ?? [])
-    .map((l) => {
-      const medicine = (l?.medicine ?? l?.medicineName ?? '').toString().trim();
-      const dose = (l?.dose ?? '').toString().trim();
-      const frequency = l?.frequency ?? undefined;
-
-      const duration =
-        typeof l?.duration === 'number'
-          ? l.duration
-          : Number.isFinite(Number(l?.duration))
-            ? Number(l.duration)
-            : undefined;
-
-      const timing = l?.timing ?? undefined;
-      const notes = (l?.notes ?? '').toString().trim();
+    .map((lUnknown) => {
+      const medicine = (
+        getString(lUnknown, 'medicine') ??
+        getString(lUnknown, 'medicineName') ??
+        ''
+      )
+        .toString()
+        .trim();
 
       if (!medicine) return null;
 
+      const dose = (getString(lUnknown, 'dose') ?? '').toString().trim();
+
+      const frequencyRaw = getValue(lUnknown, 'frequency');
+      const frequency: RxLineType['frequency'] =
+        (typeof frequencyRaw === 'string' &&
+          ['QD', 'BID', 'TID', 'QID', 'HS', 'PRN'].includes(frequencyRaw)) ||
+        (typeof frequencyRaw === 'string' &&
+          ['QD', 'BID', 'TID', 'QID', 'HS', 'PRN'].includes(frequencyRaw.toUpperCase()))
+          ? ((typeof frequencyRaw === 'string'
+              ? frequencyRaw.toUpperCase()
+              : frequencyRaw) as RxLineType['frequency'])
+          : 'QD';
+
+      const duration = getNumberLike(lUnknown, 'duration') ?? 0;
+
+      const timingRaw = getValue(lUnknown, 'timing');
+      const timing: RxLineType['timing'] | undefined =
+        typeof timingRaw === 'string' && ['BEFORE_MEAL', 'AFTER_MEAL', 'ANY'].includes(timingRaw)
+          ? (timingRaw as RxLineType['timing'])
+          : undefined;
+
+      const notes = (getString(lUnknown, 'notes') ?? '').toString().trim();
+
       const out: RxLineType = {
         medicine,
-        ...(dose ? { dose } : {}),
-        ...(frequency ? { frequency } : {}),
-        ...(typeof duration === 'number' ? { duration } : {}),
+        dose,
+        frequency,
+        duration,
         ...(timing ? { timing } : {}),
         ...(notes ? { notes } : {}),
-      } as any;
+      };
 
       return out;
     })
-    .filter(Boolean) as RxLineType[];
+    .filter((x): x is RxLineType => Boolean(x));
 }
 
 export function RxPresetImportDialog({
@@ -86,7 +142,6 @@ export function RxPresetImportDialog({
   const [query, setQuery] = React.useState('');
   const [debouncedQuery, setDebouncedQuery] = React.useState('');
 
-  // ✅ FIX: correct state tuple
   const [filter, setFilter] = React.useState<RxPresetFilter>('ALL');
 
   React.useEffect(() => {
@@ -121,7 +176,7 @@ export function RxPresetImportDialog({
 
   const doImport = () => {
     if (!selectedPreset) return;
-    const normalized = normalizePresetLines(selectedPreset.lines as any[]);
+    const normalized = normalizePresetLines((selectedPreset.lines ?? []) as unknown[]);
     if (!normalized.length) return;
     onImport(normalized);
     onOpenChange(false);
@@ -205,7 +260,12 @@ export function RxPresetImportDialog({
                   <div className="space-y-2">
                     {items.map((p) => {
                       const isSelected = selectedId === p.id;
-                      const b = scopeBadge((p as any)?.scope);
+
+                      const scope = getString(p, 'scope');
+                      const tags = getStringArray(p, 'tags');
+
+                      const b = scopeBadge(scope);
+
                       return (
                         <button
                           key={p.id}
@@ -230,7 +290,7 @@ export function RxPresetImportDialog({
                               <div className="mt-1 text-xs text-gray-500">
                                 {p.lines?.length ?? 0} medicine
                                 {(p.lines?.length ?? 0) === 1 ? '' : 's'}
-                                {(p as any)?.tags?.length ? ` · ${(p as any).tags.join(', ')}` : ''}
+                                {tags?.length ? ` · ${tags.join(', ')}` : ''}
                               </div>
                             </div>
 
@@ -268,29 +328,40 @@ export function RxPresetImportDialog({
                     </div>
 
                     <div className="mt-4 space-y-2">
-                      {(selectedPreset.lines ?? []).map((l: any, idx: number) => (
-                        <div
-                          key={idx}
-                          className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2"
-                        >
-                          <div className="text-sm font-medium text-gray-900">
-                            {l?.medicine ?? l?.medicineName ?? '—'}
+                      {(selectedPreset.lines ?? []).map((lUnknown, idx: number) => {
+                        const medicine =
+                          getString(lUnknown, 'medicine') ??
+                          getString(lUnknown, 'medicineName') ??
+                          '—';
+
+                        const dose = getString(lUnknown, 'dose');
+                        const frequency = getString(lUnknown, 'frequency');
+                        const duration = getString(lUnknown, 'duration');
+                        const timing = getString(lUnknown, 'timing');
+                        const notes = getString(lUnknown, 'notes');
+
+                        return (
+                          <div
+                            key={idx}
+                            className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2"
+                          >
+                            <div className="text-sm font-medium text-gray-900">{medicine}</div>
+                            <div className="mt-0.5 text-xs text-gray-600">
+                              {[
+                                dose ? `Dose: ${dose}` : null,
+                                frequency ? `Freq: ${frequency}` : null,
+                                duration ? `Days: ${duration}` : null,
+                                timing ? `Timing: ${timing}` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(' · ') || '—'}
+                            </div>
+                            {notes ? (
+                              <div className="mt-1 text-xs text-gray-500">Notes: {notes}</div>
+                            ) : null}
                           </div>
-                          <div className="mt-0.5 text-xs text-gray-600">
-                            {[
-                              l?.dose ? `Dose: ${l.dose}` : null,
-                              l?.frequency ? `Freq: ${l.frequency}` : null,
-                              l?.duration ? `Days: ${l.duration}` : null,
-                              l?.timing ? `Timing: ${l.timing}` : null,
-                            ]
-                              .filter(Boolean)
-                              .join(' · ') || '—'}
-                          </div>
-                          {l?.notes ? (
-                            <div className="mt-1 text-xs text-gray-500">Notes: {l.notes}</div>
-                          ) : null}
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 )}

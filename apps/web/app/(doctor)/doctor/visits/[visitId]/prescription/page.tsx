@@ -1,3 +1,4 @@
+// apps/web/app/(doctor)/doctor/visits/[visitId]/prescription/page.tsx
 'use client';
 
 import { useMemo, useState } from 'react';
@@ -13,11 +14,28 @@ import {
   useUpdateVisitStatusMutation,
 } from '@/src/store/api';
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function getErrorMessage(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+
+  if (isRecord(err)) {
+    const data = err.data;
+    if (isRecord(data) && typeof data.message === 'string' && data.message.trim())
+      return data.message;
+    if (typeof err.message === 'string' && err.message.trim()) return err.message;
+  }
+
+  return 'Failed to end session.';
+}
+
 export default function DoctorVisitHandlingPage() {
-  const params = useParams();
+  const params = useParams<{ visitId: string }>();
   const router = useRouter();
 
-  const visitId = useMemo(() => String(params.visitId ?? ''), [params.visitId]);
+  const visitId = useMemo(() => String(params?.visitId ?? ''), [params?.visitId]);
 
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
   const patientId = visitQuery.data?.patientId;
@@ -50,8 +68,8 @@ export default function DoctorVisitHandlingPage() {
 
       toast.success('Session ended. Visit marked as DONE.');
       router.push('/doctor');
-    } catch (err: any) {
-      toast.error(err?.data?.message ?? err?.message ?? 'Failed to end session.');
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err));
     }
   };
 
@@ -59,6 +77,13 @@ export default function DoctorVisitHandlingPage() {
     setIsRevisionMode(false);
     toast.success('Revision ended.');
   };
+
+  const opdNo = useMemo(() => {
+    const v: unknown = visitQuery.data;
+    if (!isRecord(v)) return undefined;
+    const raw = v.opdNo;
+    return typeof raw === 'string' ? raw : undefined;
+  }, [visitQuery.data]);
 
   return (
     <div className="p-4 2xl:p-8">
@@ -88,7 +113,7 @@ export default function DoctorVisitHandlingPage() {
         patientName={patientQuery.data?.name}
         patientPhone={patientQuery.data?.phone}
         patientSdId={patientQuery.data?.sdId}
-        opdNo={(visitQuery.data as any)?.opdNo}
+        opdNo={opdNo}
         visitStatus={visitStatus}
         onRevisionModeChange={setIsRevisionMode}
       />

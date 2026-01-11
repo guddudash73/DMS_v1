@@ -102,13 +102,20 @@ type LegacyBreakdownResponse = {
   doctors: LegacyBreakdownDoctor[];
 };
 
-function hasItemsPayload(x: unknown): x is NewBreakdownResponse {
-  return !!x && typeof x === 'object' && 'items' in (x as any) && Array.isArray((x as any).items);
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
 }
+
+function hasItemsPayload(x: unknown): x is NewBreakdownResponse {
+  if (!isRecord(x)) return false;
+  const items = x.items;
+  return Array.isArray(items);
+}
+
 function hasDoctorsPayload(x: unknown): x is LegacyBreakdownResponse {
-  return (
-    !!x && typeof x === 'object' && 'doctors' in (x as any) && Array.isArray((x as any).doctors)
-  );
+  if (!isRecord(x)) return false;
+  const doctors = x.doctors;
+  return Array.isArray(doctors);
 }
 
 export default function VisitsByDayPage() {

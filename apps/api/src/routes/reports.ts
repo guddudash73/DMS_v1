@@ -211,7 +211,8 @@ router.get(
           visitDate: v.visitDate,
           status: v.status,
           tag: v.tag,
-          zeroBilled: (v as any).zeroBilled === true ? true : undefined,
+          zeroBilled:
+            (v as typeof v & { zeroBilled?: boolean }).zeroBilled === true ? true : undefined,
           reason: v.reason,
           billingAmount: v.billingAmount,
           createdAt: v.createdAt,

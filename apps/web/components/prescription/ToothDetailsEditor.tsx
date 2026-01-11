@@ -84,7 +84,6 @@ export function ToothDetailsEditor({ value, onChange, disabled }: Props) {
     setLl(joinTokens(byPos.LL));
     setLr(joinTokens(byPos.LR));
     setNotes(note);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [JSON.stringify(value ?? [])]);
 
   const nextValue = useMemo(() => {

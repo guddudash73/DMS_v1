@@ -50,6 +50,24 @@ const deriveTitleFromPath = (pathname: string): string => {
   return 'Admin';
 };
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function getAuthDisplayName(auth: unknown): string {
+  if (!isRecord(auth)) return 'Admin';
+  const user = auth['user'];
+  if (!isRecord(user)) return 'Admin';
+
+  const fullName = user['fullName'];
+  if (typeof fullName === 'string' && fullName.trim()) return fullName;
+
+  const name = user['name'];
+  if (typeof name === 'string' && name.trim()) return name;
+
+  return 'Admin';
+}
+
 export default function AdminShell({ children }: AdminShellProps) {
   const pathname = usePathname();
   const router = useRouter();
@@ -73,7 +91,7 @@ export default function AdminShell({ children }: AdminShellProps) {
     if (next === 'ADMIN') router.replace('/admin');
   };
 
-  const displayName = (auth as any)?.user?.fullName ?? (auth as any)?.user?.name ?? 'Admin';
+  const displayName = getAuthDisplayName(auth);
   const avatarFallback = String(displayName).slice(0, 1).toUpperCase();
 
   return (

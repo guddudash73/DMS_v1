@@ -1,4 +1,3 @@
-// apps/api/src/routes/rx.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { RxId } from '@dms/types';
@@ -46,6 +45,9 @@ const RxUpdateBody = z
     lines: z.array(RxLine).optional().default([]),
     jsonKey: z.string().min(1).optional(),
     toothDetails: z.array(ToothDetail).optional(),
+
+    // ✅ NEW
+    doctorNotes: z.string().max(2000).optional(),
   })
   .superRefine((val, ctx) => {
     const hasLines = (val.lines?.length ?? 0) > 0;
@@ -174,6 +176,7 @@ router.put(
       lines: nextLines,
       jsonKey: nextJsonKey,
       toothDetails: body.data.toothDetails, // undefined => no change
+      doctorNotes: body.data.doctorNotes, // undefined => no change
     });
 
     if (!updated) {

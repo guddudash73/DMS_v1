@@ -1,4 +1,3 @@
-// apps/web/components/prescription/PrescriptionWorkspace.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -8,7 +7,6 @@ import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { PrescriptionPreview } from './PrescriptionPreview';
-import { PrescriptionPrintSheet } from './PrescriptionPrintSheet';
 import { MedicinesEditor } from './MedicinesEditor';
 import { XrayUploader } from '@/components/xray/XrayUploader';
 import { XrayGallery } from '@/components/xray/XrayGallery';
@@ -73,6 +71,10 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
 
+function getString(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim() ? v : undefined;
+}
+
 function safeParseDate(input: unknown): Date | null {
   if (!input) return null;
   if (input instanceof Date) return Number.isFinite(input.getTime()) ? input : null;
@@ -111,7 +113,9 @@ function looksLikeDoctorIdLabel(name?: string) {
 }
 
 function lineToText(line: RxLineType): string {
-  const rec: Record<string, unknown> = isRecord(line) ? line : {};
+  const rec: Record<string, unknown> = isRecord(line)
+    ? (line as unknown as Record<string, unknown>)
+    : {};
 
   const med =
     (typeof rec.medicineName === 'string' && rec.medicineName.trim()) ||
@@ -145,7 +149,9 @@ function MedicinesReadOnly({ lines }: { lines: RxLineType[] }) {
         </TableHeader>
         <TableBody>
           {lines.map((l, idx) => {
-            const rec: Record<string, unknown> = isRecord(l) ? l : {};
+            const rec: Record<string, unknown> = isRecord(l)
+              ? (l as unknown as Record<string, unknown>)
+              : {};
             const idVal = rec['id'];
             const rxLineIdVal = rec['rxLineId'];
 
@@ -217,7 +223,8 @@ function VisitPrescriptionQuickLookDialog(props: {
 
   // current visit meta/date label
   const visitCreatedAtDate = useMemo(() => {
-    const createdAt = isRecord(visitQuery.data) ? (visitQuery.data as any).createdAt : undefined;
+    const dUnknown: unknown = visitQuery.data;
+    const createdAt = isRecord(dUnknown) ? dUnknown.createdAt : undefined;
     return safeParseDate(createdAt);
   }, [visitQuery.data]);
 
@@ -228,9 +235,12 @@ function VisitPrescriptionQuickLookDialog(props: {
 
   // Patient sex/age from fetched patient record (fallbacks remain)
   const patientSex = useMemo(() => {
-    const p = patientQuery.data;
-    const rec: Record<string, unknown> = isRecord(p) ? p : {};
-    const raw = (rec.sex ?? rec.gender ?? rec.patientSex ?? '').toString().trim().toUpperCase();
+    const pUnknown: unknown = patientQuery.data;
+    const rec: Record<string, unknown> = isRecord(pUnknown) ? pUnknown : {};
+    const raw = String(rec.sex ?? rec.gender ?? rec.patientSex ?? '')
+      .trim()
+      .toUpperCase();
+
     if (raw === 'M' || raw === 'F' || raw === 'O' || raw === 'U') return raw as PatientSex;
     if (raw === 'MALE') return 'M';
     if (raw === 'FEMALE') return 'F';
@@ -239,8 +249,8 @@ function VisitPrescriptionQuickLookDialog(props: {
   }, [patientQuery.data]);
 
   const patientAge = useMemo(() => {
-    const p = patientQuery.data;
-    const rec: Record<string, unknown> = isRecord(p) ? p : {};
+    const pUnknown: unknown = patientQuery.data;
+    const rec: Record<string, unknown> = isRecord(pUnknown) ? pUnknown : {};
     const dobRaw = rec.dob ?? rec.dateOfBirth ?? rec.birthDate ?? rec.dobIso ?? null;
 
     const dob = safeParseDate(dobRaw);
@@ -251,7 +261,12 @@ function VisitPrescriptionQuickLookDialog(props: {
 
   // ✅ current visit (selected) rx lines + teeth
   const currentLines = rxQuery.data?.rx?.lines ?? [];
-  const currentToothDetails = ((rxQuery.data?.rx as any)?.toothDetails ?? []) as ToothDetail[];
+  const currentToothDetails = useMemo<ToothDetail[]>(() => {
+    const rUnknown: unknown = rxQuery.data?.rx;
+    if (!rUnknown || !isRecord(rUnknown)) return [];
+    const td = rUnknown.toothDetails;
+    return Array.isArray(td) ? (td as ToothDetail[]) : [];
+  }, [rxQuery.data]);
 
   // ✅ LIMITED chain: anchor + followups up to selected visit (inclusive)
   const rxChain = useMemo(() => {
@@ -259,13 +274,19 @@ function VisitPrescriptionQuickLookDialog(props: {
     const meta = new Map<string, Visit>();
 
     for (const v of allVisitsRaw) meta.set(v.visitId, v);
-    if ((visitQuery.data as any)?.visitId)
-      meta.set((visitQuery.data as any).visitId, visitQuery.data as any);
 
-    const vSelected = meta.get(selectedId) ?? (visitQuery.data as any as Visit | undefined);
+    const vqUnknown: unknown = visitQuery.data;
+    if (isRecord(vqUnknown) && typeof vqUnknown.visitId === 'string') {
+      meta.set(vqUnknown.visitId, vqUnknown as unknown as Visit);
+    }
 
-    const tag = (vSelected as any)?.tag as string | undefined;
-    const anchorVisitId = (vSelected as any)?.anchorVisitId as string | undefined;
+    const vSelected = meta.get(selectedId) ?? (vqUnknown as unknown as Visit | undefined);
+
+    const selRec: Record<string, unknown> = isRecord(vSelected)
+      ? (vSelected as unknown as Record<string, unknown>)
+      : {};
+    const tag = getString(selRec.tag);
+    const anchorVisitId = getString(selRec.anchorVisitId);
 
     const anchorId = tag === 'F' ? anchorVisitId : selectedId;
     if (!anchorId)
@@ -280,7 +301,10 @@ function VisitPrescriptionQuickLookDialog(props: {
     // followups for anchor
     const followups: Visit[] = [];
     for (const v of meta.values()) {
-      const aId = (v as any)?.anchorVisitId as string | undefined;
+      const vRec: Record<string, unknown> = isRecord(v)
+        ? (v as unknown as Record<string, unknown>)
+        : {};
+      const aId = getString(vRec.anchorVisitId);
       if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
     }
     followups.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
@@ -289,7 +313,7 @@ function VisitPrescriptionQuickLookDialog(props: {
     // ensure selected exists
     if (selectedId && !chain.some((x) => x.visitId === selectedId)) {
       const cur = meta.get(selectedId);
-      chain.push(cur ?? ({ visitId: selectedId } as any));
+      chain.push(cur ?? ({ visitId: selectedId } as Visit));
     }
 
     // sort overall old->new
@@ -315,12 +339,14 @@ function VisitPrescriptionQuickLookDialog(props: {
 
   // use selected visit OPD if available (header will prefer anchor OPD from meta anyway)
   const selectedVisitOpdNo = useMemo(() => {
-    const v = visitQuery.data as any;
-    const raw =
-      v?.opdNo ?? v?.opdNumber ?? v?.opdId ?? v?.opd ?? v?.opd_no ?? v?.opd_no_str ?? undefined;
+    const vUnknown: unknown = visitQuery.data;
+    const v = isRecord(vUnknown) ? vUnknown : {};
+    const raw = v.opdNo ?? v.opdNumber ?? v.opdId ?? v.opd ?? v.opd_no ?? v.opd_no_str ?? undefined;
     const s = raw == null ? '' : String(raw).trim();
     return s || undefined;
   }, [visitQuery.data]);
+
+  type PreviewProps = React.ComponentProps<typeof PrescriptionPreview>;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -340,12 +366,12 @@ function VisitPrescriptionQuickLookDialog(props: {
               patientPhone={patientQuery.data?.phone ?? patientPhone}
               patientAge={patientAge}
               patientSex={patientSex}
-              sdId={(patientQuery.data as any)?.sdId ?? patientSdId}
+              sdId={patientQuery.data?.sdId ?? patientSdId}
               opdNo={selectedVisitOpdNo ?? opdNo}
               doctorName={doctorName}
               doctorRegdLabel={doctorRegdLabel}
               visitDateLabel={visitDateLabelComputed}
-              lines={currentLines}
+              lines={currentLines as PreviewProps['lines']}
               // ✅ teeth (even when no medicines)
               toothDetails={currentToothDetails}
               // ✅ history up to selected visit
@@ -382,17 +408,13 @@ function VisitXrayQuickLookDialog(props: {
 
 // Grouping helpers
 function anchorIdFromVisit(v: Visit): string | undefined {
-  const anyV = v as any;
-  const raw =
-    (typeof anyV?.anchorVisitId === 'string' && anyV.anchorVisitId) ||
-    (typeof anyV?.anchorId === 'string' && anyV.anchorId) ||
-    undefined;
-  return raw || undefined;
+  const rec: Record<string, unknown> = isRecord(v) ? (v as unknown as Record<string, unknown>) : {};
+  return getString(rec.anchorVisitId) ?? getString(rec.anchorId) ?? undefined;
 }
 
 function isZeroBilledVisit(v: Visit): boolean {
-  const anyV = v as any;
-  return Boolean(anyV?.zeroBilled);
+  const rec: Record<string, unknown> = isRecord(v) ? (v as unknown as Record<string, unknown>) : {};
+  return Boolean(rec.zeroBilled);
 }
 
 function typeBadgeClass(kind: 'NEW' | 'FOLLOWUP') {
@@ -458,7 +480,8 @@ export function PrescriptionWorkspace(props: Props) {
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
   const visitCreatedAtDate = useMemo(() => {
-    const createdAt = isRecord(visitQuery.data) ? (visitQuery.data as any).createdAt : undefined;
+    const vUnknown: unknown = visitQuery.data;
+    const createdAt = isRecord(vUnknown) ? vUnknown.createdAt : undefined;
     return safeParseDate(createdAt);
   }, [visitQuery.data]);
 
@@ -468,9 +491,12 @@ export function PrescriptionWorkspace(props: Props) {
   }, [visitCreatedAtDate, visitDateLabelFromParent]);
 
   const patientSex = useMemo(() => {
-    const p = patientQuery.data;
-    const rec: Record<string, unknown> = isRecord(p) ? p : {};
-    const raw = (rec.sex ?? rec.gender ?? rec.patientSex ?? '').toString().trim().toUpperCase();
+    const pUnknown: unknown = patientQuery.data;
+    const rec: Record<string, unknown> = isRecord(pUnknown) ? pUnknown : {};
+    const raw = String(rec.sex ?? rec.gender ?? rec.patientSex ?? '')
+      .trim()
+      .toUpperCase();
+
     if (raw === 'M' || raw === 'F' || raw === 'O' || raw === 'U') return raw as PatientSex;
     if (raw === 'MALE') return 'M';
     if (raw === 'FEMALE') return 'F';
@@ -479,8 +505,8 @@ export function PrescriptionWorkspace(props: Props) {
   }, [patientQuery.data]);
 
   const patientAge = useMemo(() => {
-    const p = patientQuery.data;
-    const rec: Record<string, unknown> = isRecord(p) ? p : {};
+    const pUnknown: unknown = patientQuery.data;
+    const rec: Record<string, unknown> = isRecord(pUnknown) ? pUnknown : {};
     const dobRaw = rec.dob ?? rec.dateOfBirth ?? rec.birthDate ?? rec.dobIso ?? null;
 
     const dob = safeParseDate(dobRaw);
@@ -492,6 +518,10 @@ export function PrescriptionWorkspace(props: Props) {
   // Prescription editor state
   const [lines, setLines] = useState<RxLineType[]>([]);
   const [toothDetails, setToothDetails] = useState<ToothDetail[]>([]);
+
+  // ✅ NEW: doctorNotes (internal for reception)
+  const [doctorNotes, setDoctorNotes] = useState<string>('');
+
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   const [activeRxId, setActiveRxId] = useState<string | null>(null);
@@ -527,26 +557,39 @@ export function PrescriptionWorkspace(props: Props) {
     if (!rxQuery.isSuccess) return;
 
     const rx = rxQuery.data?.rx ?? null;
+
+    const rxRec: Record<string, unknown> = isRecord(rx) ? rx : {};
+    const td = rxRec.toothDetails;
+    const dn = rxRec.doctorNotes;
+
     if (rx) {
       setLines(rx.lines ?? []);
-      setToothDetails((rx as any).toothDetails ?? []);
+      setToothDetails(Array.isArray(td) ? (td as ToothDetail[]) : []);
+      setDoctorNotes(typeof dn === 'string' ? dn : ''); // ✅ hydrate
       setActiveRxId(rx.rxId);
+
       lastHash.current = JSON.stringify({
         lines: rx.lines ?? [],
-        toothDetails: (rx as any).toothDetails ?? [],
+        toothDetails: Array.isArray(td) ? td : [],
+        doctorNotes: typeof dn === 'string' ? dn : '',
       });
     } else {
       setLines([]);
       setToothDetails([]);
+      setDoctorNotes('');
       setActiveRxId(null);
-      lastHash.current = JSON.stringify({ lines: [], toothDetails: [] });
+
+      lastHash.current = JSON.stringify({ lines: [], toothDetails: [], doctorNotes: '' });
     }
 
     hydratedRef.current = true;
     setState('idle');
   }, [rxQuery.isSuccess, rxQuery.data]);
 
-  const hash = useMemo(() => JSON.stringify({ lines, toothDetails }), [lines, toothDetails]);
+  const hash = useMemo(
+    () => JSON.stringify({ lines, toothDetails, doctorNotes }),
+    [lines, toothDetails, doctorNotes],
+  );
 
   const hasAnyRxData = lines.length > 0 || toothDetails.length > 0;
 
@@ -569,9 +612,9 @@ export function PrescriptionWorkspace(props: Props) {
             setState('error');
             return;
           }
-          await updateRxById({ rxId: activeRxId, lines, toothDetails }).unwrap();
+          await updateRxById({ rxId: activeRxId, lines, toothDetails, doctorNotes }).unwrap();
         } else {
-          const res = await upsert({ visitId, lines, toothDetails }).unwrap();
+          const res = await upsert({ visitId, lines, toothDetails, doctorNotes }).unwrap();
           setActiveRxId(res.rxId);
         }
 
@@ -585,7 +628,19 @@ export function PrescriptionWorkspace(props: Props) {
     return () => {
       if (debounce.current) clearTimeout(debounce.current);
     };
-  }, [canAutosave, hash, lines, visitId, visitStatus, activeRxId, upsert, updateRxById, canEdit]);
+  }, [
+    canAutosave,
+    hash,
+    lines,
+    toothDetails,
+    doctorNotes,
+    visitId,
+    visitStatus,
+    activeRxId,
+    upsert,
+    updateRxById,
+    canEdit,
+  ]);
 
   const statusText =
     state === 'saving'
@@ -607,9 +662,9 @@ export function PrescriptionWorkspace(props: Props) {
     try {
       if (visitStatus === 'DONE') {
         if (!activeRxId) throw new Error('Missing rxId');
-        await updateRxById({ rxId: activeRxId, lines, toothDetails }).unwrap();
+        await updateRxById({ rxId: activeRxId, lines, toothDetails, doctorNotes }).unwrap();
       } else {
-        const res = await upsert({ visitId, lines, toothDetails }).unwrap();
+        const res = await upsert({ visitId, lines, toothDetails, doctorNotes }).unwrap();
         setActiveRxId(res.rxId);
       }
 
@@ -637,8 +692,11 @@ export function PrescriptionWorkspace(props: Props) {
     for (const v of allVisitsRaw) meta.set(v.visitId, v);
     if (currentVisit) meta.set(currentVisit.visitId, currentVisit);
 
-    const tag = (currentVisit as any)?.tag as string | undefined;
-    const anchorVisitId = (currentVisit as any)?.anchorVisitId as string | undefined;
+    const curRec: Record<string, unknown> = isRecord(currentVisit)
+      ? (currentVisit as unknown as Record<string, unknown>)
+      : {};
+    const tag = getString(curRec.tag);
+    const anchorVisitId = getString(curRec.anchorVisitId);
 
     const anchorId = tag === 'F' ? anchorVisitId : visitId;
 
@@ -652,14 +710,17 @@ export function PrescriptionWorkspace(props: Props) {
     if (anchor) chain.push(anchor);
 
     for (const v of meta.values()) {
-      const aId = (v as any)?.anchorVisitId as string | undefined;
+      const vRec: Record<string, unknown> = isRecord(v)
+        ? (v as unknown as Record<string, unknown>)
+        : {};
+      const aId = getString(vRec.anchorVisitId);
       if (aId && aId === anchorId && v.visitId !== anchorId) chain.push(v);
     }
 
     if (!chain.some((v) => v.visitId === visitId)) {
       const cur = meta.get(visitId);
       if (cur) chain.push(cur);
-      else chain.push({ visitId } as any);
+      else chain.push({ visitId } as Visit);
     }
 
     chain.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
@@ -815,6 +876,8 @@ export function PrescriptionWorkspace(props: Props) {
 
   const hasRows = pageAnchors.length > 0 || groups.orphanGroups.length > 0;
 
+  type PreviewProps = React.ComponentProps<typeof PrescriptionPreview>;
+
   return (
     <div className="relative w-full min-w-0">
       <div className="grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-10">
@@ -862,6 +925,22 @@ export function PrescriptionWorkspace(props: Props) {
             </div>
           </div>
 
+          {/* ✅ NEW: Doctor Notes */}
+          <div className="mt-4 rounded-2xl border bg-white p-4">
+            <div className="text-base font-semibold text-gray-900">Doctor Notes</div>
+            <div className="mt-1 text-sm text-gray-500">
+              Internal note from doctor for reception. This will NOT print.
+            </div>
+
+            <textarea
+              className="mt-3 w-full min-h-[90px] rounded-2xl border bg-gray-50 p-3 text-sm outline-none focus:bg-white"
+              placeholder="—"
+              value={doctorNotes}
+              onChange={(e) => setDoctorNotes(e.target.value)}
+              disabled={!canEdit}
+            />
+          </div>
+
           <div className="mt-3 min-w-0 overflow-x-hidden">
             <PrescriptionPreview
               patientName={patientName}
@@ -873,7 +952,7 @@ export function PrescriptionWorkspace(props: Props) {
               doctorName={resolvedDoctorName}
               doctorRegdLabel={resolvedDoctorRegdLabel}
               visitDateLabel={computedVisitDateLabel}
-              lines={lines}
+              lines={lines as PreviewProps['lines']}
               currentVisitId={printChain.currentVisitId}
               chainVisitIds={printChain.visitIds}
               visitMetaMap={printChain.meta}

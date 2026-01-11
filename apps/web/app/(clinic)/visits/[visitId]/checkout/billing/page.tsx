@@ -17,6 +17,9 @@ import {
   useGetPatientByIdQuery,
   useGetVisitBillQuery,
   useCheckoutVisitMutation,
+
+  // ✅ FIX: this exists in api.ts
+  useUpdateVisitStatusMutation,
 } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
 
@@ -26,6 +29,24 @@ const money = (n: unknown) => {
   const v = typeof n === 'number' ? n : Number(n);
   return Number.isFinite(v) ? v : 0;
 };
+
+// ✅ helpers to avoid `any`
+type UnknownRecord = Record<string, unknown>;
+const isRecord = (v: unknown): v is UnknownRecord => typeof v === 'object' && v !== null;
+
+const getStr = (obj: unknown, key: string): string | undefined => {
+  if (!isRecord(obj)) return undefined;
+  const v = obj[key];
+  return typeof v === 'string' ? v : undefined;
+};
+
+const getBool = (obj: unknown, key: string): boolean | undefined => {
+  if (!isRecord(obj)) return undefined;
+  const v = obj[key];
+  return typeof v === 'boolean' ? v : undefined;
+};
+
+type ApiError = { status?: number; data?: unknown };
 
 function IconPlus(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -67,12 +88,21 @@ export default function VisitCheckoutBillingPage() {
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
   const visit = visitQuery.data;
 
+  const isOfflineVisit = getBool(visit, 'isOffline') === true;
+
   const patientId = visit?.patientId;
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
   const billQuery = useGetVisitBillQuery({ visitId }, { skip: !visitId });
   const bill = billQuery.data ?? null;
-  const billNotFound = (billQuery as any)?.error?.status === 404;
+
+  // ✅ no `any`: read error status safely from RTK Query error union
+  const billNotFound = (() => {
+    if (!('error' in billQuery)) return false;
+    const err = billQuery.error;
+    if (isRecord(err) && typeof err.status === 'number') return err.status === 404;
+    return false;
+  })();
 
   React.useEffect(() => {
     if (!visitId) return;
@@ -82,19 +112,20 @@ export default function VisitCheckoutBillingPage() {
     }
   }, [bill, isAdmin, visitId, router, billQuery.isLoading, billQuery.isFetching]);
 
-  // ✅ zero-billed is boolean now
   const isZeroBilled = visit?.zeroBilled === true;
-
-  // ✅ Default: zero-billed visits have billing muted unless user enables
   const [billingEnabledForZero, setBillingEnabledForZero] = React.useState(false);
 
   React.useEffect(() => {
     setBillingEnabledForZero(false);
   }, [visitId]);
 
-  const canCheckout = !!visitId && !!visit && visit.status === 'DONE';
+  // ✅ offline can save even if not DONE (we will mark DONE first on Save)
+  const canCheckout = !!visitId && !!visit && (visit.status === 'DONE' || isOfflineVisit);
 
   const [checkoutVisit, checkoutState] = useCheckoutVisitMutation();
+
+  // ✅ FIX
+  const [updateVisitStatus, updateVisitStatusState] = useUpdateVisitStatusMutation();
 
   const [lines, setLines] = React.useState<LineDraft[]>([]);
   const [discountAmount, setDiscountAmount] = React.useState(0);
@@ -149,13 +180,10 @@ export default function VisitCheckoutBillingPage() {
   const patientPhone = patientQuery.data?.phone;
 
   const legacyDoctorId =
-    (visit as any)?.doctorId ??
-    (visit as any)?.providerId ??
-    (visit as any)?.assignedDoctorId ??
-    undefined;
+    getStr(visit, 'doctorId') ?? getStr(visit, 'providerId') ?? getStr(visit, 'assignedDoctorId');
 
   const doctorLabel = legacyDoctorId ? `Doctor (${legacyDoctorId})` : 'Doctor';
-  const visitDateLabel = visit?.visitDate ? visit.visitDate : '—';
+  const visitDateLabel = getStr(visit, 'visitDate') ?? '—';
 
   const serviceRef = React.useRef<HTMLInputElement | null>(null);
   const amountRef = React.useRef<HTMLInputElement | null>(null);
@@ -237,13 +265,28 @@ export default function VisitCheckoutBillingPage() {
   const onSave = async () => {
     if (!visit) return;
 
-    if (visit.status !== 'DONE') {
+    // ✅ OFFLINE: if not DONE, mark DONE first
+    if (isOfflineVisit && visit.status !== 'DONE') {
+      try {
+        await updateVisitStatus({ visitId, status: 'DONE' }).unwrap();
+        await visitQuery.refetch();
+      } catch (err: unknown) {
+        const e = err as ApiError;
+        const msg =
+          (isRecord(e.data) && typeof e.data.message === 'string' && e.data.message) ||
+          (isRecord(err) && typeof err.message === 'string' && err.message) ||
+          'Failed to mark visit DONE.';
+        toast.error(msg);
+        return;
+      }
+    }
+
+    // ✅ normal rule still applies for non-offline
+    if (!isOfflineVisit && visit.status !== 'DONE') {
       toast.error('Checkout is only allowed when visit is DONE.');
       return;
     }
 
-    // ✅ If visit is zero-billed and billing is NOT enabled,
-    // Save should still work and create a 0 bill, then proceed to printing.
     const payload: BillingCheckoutInput = billingMuted
       ? {
           items: [{ description: 'Zero billed', quantity: 1, unitAmount: 0 }],
@@ -258,7 +301,13 @@ export default function VisitCheckoutBillingPage() {
                 quantity: 1,
                 unitAmount: l.unitAmount,
               }))
-            : [{ description: 'Consultation', quantity: 1, unitAmount: 0 }],
+            : [
+                {
+                  description: isOfflineVisit ? 'Offline Rx' : 'Consultation',
+                  quantity: 1,
+                  unitAmount: 0,
+                },
+              ],
           discountAmount: computed.discount,
           taxAmount: computed.tax,
           ...(isZeroBilled ? { allowZeroBilled: true } : {}),
@@ -268,9 +317,15 @@ export default function VisitCheckoutBillingPage() {
       await checkoutVisit({ visitId, input: payload }).unwrap();
       toast.success(bill ? 'Bill updated.' : 'Checkout saved.');
       router.replace(`/visits/${visitId}/checkout/printing`);
-    } catch (err: any) {
-      const code = err?.data?.error;
-      const msg = err?.data?.message ?? err?.message ?? 'Checkout failed.';
+    } catch (err: unknown) {
+      const e = err as ApiError;
+      const code =
+        isRecord(e.data) && typeof e.data.error === 'string' ? (e.data.error as string) : undefined;
+      const msg =
+        (isRecord(e.data) && typeof e.data.message === 'string' && e.data.message) ||
+        (isRecord(err) && typeof err.message === 'string' && err.message) ||
+        'Checkout failed.';
+
       if (code === 'VISIT_NOT_DONE') toast.error('Visit must be DONE before checkout.');
       else if (code === 'DUPLICATE_CHECKOUT') toast.error('This visit is already checked out.');
       else toast.error(msg);
@@ -279,8 +334,7 @@ export default function VisitCheckoutBillingPage() {
 
   if (bill && !isAdmin) return <div className="p-6 text-sm text-gray-600">Redirecting…</div>;
 
-  // ✅ Save should be enabled even when zero-billed & muted (it will create 0 bill)
-  const saveDisabled = !canCheckout || checkoutState.isLoading;
+  const saveDisabled = !canCheckout || checkoutState.isLoading || updateVisitStatusState.isLoading;
 
   return (
     <section className="p-4 2xl:p-8">
@@ -290,8 +344,9 @@ export default function VisitCheckoutBillingPage() {
             {bill ? 'Edit Bill' : 'Billing'}
           </div>
           <div className="text-xs text-gray-500">
-            Visit ID: {visitId} · Tag: {visit?.tag ?? '—'} · Zero billed:{' '}
+            Visit ID: {visitId} · Tag: {getStr(visit, 'tag') ?? '—'} · Zero billed:{' '}
             {isZeroBilled ? 'Yes' : 'No'} · Status: {visit?.status ?? '—'}
+            {isOfflineVisit ? ' · Offline: Yes' : ''}
           </div>
         </div>
 
@@ -312,7 +367,11 @@ export default function VisitCheckoutBillingPage() {
             onClick={() => void onSave()}
             disabled={saveDisabled}
           >
-            {checkoutState.isLoading ? 'Saving…' : bill ? 'Save changes' : 'Save'}
+            {checkoutState.isLoading || updateVisitStatusState.isLoading
+              ? 'Saving…'
+              : bill
+                ? 'Save changes'
+                : 'Save'}
           </Button>
         </div>
       </div>
@@ -324,8 +383,7 @@ export default function VisitCheckoutBillingPage() {
               <div className="font-semibold text-gray-900">Zero-billed (Z) visit</div>
               <div className="mt-1 text-xs text-gray-600">
                 Billing is <span className="font-semibold">disabled by default</span>. Click “Save”
-                to continue with a ₹0 bill (normal flow). If you really want to add charges, click
-                “Enable billing”.
+                to continue with a ₹0 bill. If you want to add charges, click “Enable billing”.
               </div>
             </div>
 

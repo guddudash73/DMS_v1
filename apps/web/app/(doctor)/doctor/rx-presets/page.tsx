@@ -1,3 +1,4 @@
+// apps/web/app/(doctor)/doctor/rx-presets/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -23,6 +24,26 @@ import {
   useUpdateRxPresetMutation,
 } from '@/src/store/api';
 import type { PrescriptionPreset, RxPresetFilter } from '@dms/types';
+
+type RxPresetScope = 'ADMIN' | 'PUBLIC' | 'PRIVATE';
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function getScopeFromPreset(p: PrescriptionPreset): string | undefined {
+  const u = p as unknown;
+  if (!isRecord(u)) return undefined;
+  const s = u.scope;
+  return typeof s === 'string' ? s : undefined;
+}
+
+function getCreatedAtFromPreset(p: PrescriptionPreset): number | undefined {
+  const u = p as unknown;
+  if (!isRecord(u)) return undefined;
+  const v = u.createdAt;
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
 
 function scopeBadge(scope?: string) {
   if (scope === 'ADMIN') return <Badge className="rounded-full">Admin</Badge>;
@@ -216,7 +237,7 @@ export default function DoctorRxPresetsPage() {
               )}
 
               {items.map((p) => {
-                const scope = (p as any).scope as string | undefined;
+                const scope = getScopeFromPreset(p) as RxPresetScope | string | undefined;
                 const isAdminPreset = scope === 'ADMIN';
                 const isOwner = p.createdByUserId === myUserId;
 
@@ -251,7 +272,7 @@ export default function DoctorRxPresetsPage() {
                     </td>
 
                     <td className="px-5 py-4 text-[11px] text-gray-700">
-                      {formatWhen((p as any).createdAt)}
+                      {formatWhen(getCreatedAtFromPreset(p))}
                     </td>
 
                     <td className="px-5 py-4">
