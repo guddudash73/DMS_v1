@@ -2,7 +2,7 @@ FROM node:20 AS pruner
 WORKDIR /repo
 COPY . .
 
-ARG TURBO_SCOPE=@dms/api
+ARG TURBO_SCOPE=@dcm/api
 RUN npx turbo prune --scope=$TURBO_SCOPE --docker
 
 FROM node:20 AS installer
@@ -24,7 +24,7 @@ FROM node:20 AS builder
 WORKDIR /repo
 COPY --from=installer /repo ./
 
-RUN npx turbo run build --filter=@dms/api...
+RUN npx turbo run build --filter=@dcm/api...
 
 FROM node:20 AS proddeps
 WORKDIR /repo

@@ -16,7 +16,6 @@ import {
   useUpsertVisitRxMutation,
   useGetVisitRxQuery,
   useStartVisitRxRevisionMutation,
-  useUpdateRxByIdMutation,
   useGetPatientVisitsQuery,
   useGetVisitByIdQuery,
   useGetPatientByIdQuery,
@@ -450,7 +449,7 @@ export function PrescriptionWorkspace(props: Props) {
     opdNo,
     doctorName,
     visitDateLabel: visitDateLabelFromParent,
-    visitStatus,
+    visitStatus: visitStatusFromProps,
     onRevisionModeChange,
   } = props;
 
@@ -478,6 +477,9 @@ export function PrescriptionWorkspace(props: Props) {
   // Fetch visit + patient for createdAt + dob/sex
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
+
+  const resolvedVisitStatus =
+    (visitQuery.data as Visit | undefined)?.status ?? visitStatusFromProps;
 
   const visitCreatedAtDate = useMemo(() => {
     const vUnknown: unknown = visitQuery.data;
@@ -533,10 +535,9 @@ export function PrescriptionWorkspace(props: Props) {
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: !visitId });
   const [upsert] = useUpsertVisitRxMutation();
   const [startRevision, startRevisionState] = useStartVisitRxRevisionMutation();
-  const [updateRxById] = useUpdateRxByIdMutation();
 
   const [isRevisionMode, setIsRevisionMode] = useState(false);
-  const isDone = visitStatus === 'DONE';
+  const isDone = resolvedVisitStatus === 'DONE';
   const canEdit = !isDone || isRevisionMode;
 
   const setRevisionMode = (enabled: boolean) => {
@@ -593,12 +594,7 @@ export function PrescriptionWorkspace(props: Props) {
 
   const hasAnyRxData = lines.length > 0 || toothDetails.length > 0;
 
-  const canAutosave =
-    canEdit &&
-    hydratedRef.current &&
-    hasAnyRxData &&
-    hash !== lastHash.current &&
-    (visitStatus !== 'DONE' || !!activeRxId);
+  const canAutosave = canEdit && hydratedRef.current && hasAnyRxData && hash !== lastHash.current;
 
   useEffect(() => {
     if (!canAutosave) return;
@@ -607,16 +603,9 @@ export function PrescriptionWorkspace(props: Props) {
     debounce.current = setTimeout(async () => {
       setState('saving');
       try {
-        if (visitStatus === 'DONE') {
-          if (!activeRxId) {
-            setState('error');
-            return;
-          }
-          await updateRxById({ rxId: activeRxId, lines, toothDetails, doctorNotes }).unwrap();
-        } else {
-          const res = await upsert({ visitId, lines, toothDetails, doctorNotes }).unwrap();
-          setActiveRxId(res.rxId);
-        }
+        // ✅ Option 2: ALWAYS save via /visits/:visitId/rx
+        const res = await upsert({ visitId, lines, toothDetails, doctorNotes }).unwrap();
+        setActiveRxId(res.rxId);
 
         lastHash.current = hash;
         setState('saved');
@@ -628,19 +617,7 @@ export function PrescriptionWorkspace(props: Props) {
     return () => {
       if (debounce.current) clearTimeout(debounce.current);
     };
-  }, [
-    canAutosave,
-    hash,
-    lines,
-    toothDetails,
-    doctorNotes,
-    visitId,
-    visitStatus,
-    activeRxId,
-    upsert,
-    updateRxById,
-    canEdit,
-  ]);
+  }, [canAutosave, hash, lines, toothDetails, doctorNotes, visitId, upsert]);
 
   const statusText =
     state === 'saving'
@@ -652,6 +629,7 @@ export function PrescriptionWorkspace(props: Props) {
           : '';
 
   const showStartRevision = isDone && !isRevisionMode;
+
   const canManualSave =
     canEdit && hydratedRef.current && (lines.length > 0 || toothDetails.length > 0);
 
@@ -660,13 +638,9 @@ export function PrescriptionWorkspace(props: Props) {
 
     setState('saving');
     try {
-      if (visitStatus === 'DONE') {
-        if (!activeRxId) throw new Error('Missing rxId');
-        await updateRxById({ rxId: activeRxId, lines, toothDetails, doctorNotes }).unwrap();
-      } else {
-        const res = await upsert({ visitId, lines, toothDetails, doctorNotes }).unwrap();
-        setActiveRxId(res.rxId);
-      }
+      // ✅ Option 2: ALWAYS save via /visits/:visitId/rx
+      const res = await upsert({ visitId, lines, toothDetails, doctorNotes }).unwrap();
+      setActiveRxId(res.rxId);
 
       lastHash.current = hash;
       setState('saved');

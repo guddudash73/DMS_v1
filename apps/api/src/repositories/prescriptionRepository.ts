@@ -1,3 +1,4 @@
+// apps/api/src/repositories/prescriptionRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
@@ -38,34 +39,27 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'obj
 const getStringProp = (v: unknown, key: string): string | undefined =>
   isObject(v) && typeof v[key] === 'string' ? (v[key] as string) : undefined;
 
+const getNumberProp = (v: unknown, key: string): number | undefined =>
+  isObject(v) && typeof v[key] === 'number' ? (v[key] as number) : undefined;
+
 export interface PrescriptionRepository {
+  /** Option 2: draft stays version=1 and is overwritten (stable jsonKey) */
   upsertDraftForVisit(params: {
     visit: Visit;
     lines: RxLineType[];
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
-
-    // ✅ NEW
     doctorNotes?: Prescription['doctorNotes'];
   }): Promise<Prescription>;
 
-  createNewVersionForVisit(params: {
-    visit: Visit;
-    lines: RxLineType[];
-    jsonKey: string;
-    toothDetails?: Prescription['toothDetails'];
-
-    // ✅ NEW
-    doctorNotes?: Prescription['doctorNotes'];
-  }): Promise<Prescription>;
+  /** Option 2: create revision ONCE (version=2) and then overwrite it */
+  ensureRevisionForVisit(params: { visit: Visit; jsonKey: string }): Promise<Prescription>;
 
   updateById(params: {
     rxId: RxId;
     lines: RxLineType[];
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
-
-    // ✅ NEW
     doctorNotes?: Prescription['doctorNotes'];
   }): Promise<Prescription | null>;
 
@@ -77,6 +71,14 @@ export interface PrescriptionRepository {
   getById(rxId: RxId): Promise<Prescription | null>;
   listByVisit(visitId: string): Promise<Prescription[]>;
   getCurrentForVisit(visitId: string): Promise<Prescription | null>;
+
+  /** NEW: fetch a specific version (for dropdown selection) */
+  getByVisitAndVersion(visitId: string, version: number): Promise<Prescription | null>;
+
+  /** NEW: used by visits route to decide draft vs revision */
+  getCurrentMetaForVisit(
+    visitId: string,
+  ): Promise<{ currentRxId: string | null; currentRxVersion: number | null }>;
 }
 
 export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
@@ -119,7 +121,12 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     return parsed.slice().sort((a, b) => a.version - b.version);
   }
 
-  async getCurrentForVisit(visitId: string): Promise<Prescription | null> {
+  async getByVisitAndVersion(visitId: string, version: number): Promise<Prescription | null> {
+    const all = await this.listByVisit(visitId);
+    return all.find((p) => p.version === version) ?? null;
+  }
+
+  async getCurrentMetaForVisit(visitId: string) {
     const { Item } = await docClient.send(
       new GetCommand({
         TableName: TABLE_NAME,
@@ -128,9 +135,15 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       }),
     );
 
-    const currentRxId = getStringProp(Item, 'currentRxId');
-    if (!currentRxId) return null;
+    const currentRxId = getStringProp(Item, 'currentRxId') ?? null;
+    const currentRxVersion = getNumberProp(Item, 'currentRxVersion') ?? null;
 
+    return { currentRxId, currentRxVersion };
+  }
+
+  async getCurrentForVisit(visitId: string): Promise<Prescription | null> {
+    const { currentRxId } = await this.getCurrentMetaForVisit(visitId);
+    if (!currentRxId) return null;
     return this.getById(currentRxId);
   }
 
@@ -143,17 +156,10 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
   }) {
     const { visit, lines, jsonKey, toothDetails, doctorNotes } = params;
 
-    const { Item: visitMeta } = await docClient.send(
-      new GetCommand({
-        TableName: TABLE_NAME,
-        Key: buildVisitMetaKey(visit.visitId),
-        ConsistentRead: true,
-      }),
-    );
+    const { currentRxId, currentRxVersion } = await this.getCurrentMetaForVisit(visit.visitId);
 
-    const currentRxId = getStringProp(visitMeta, 'currentRxId');
-
-    if (currentRxId) {
+    // ✅ Option 2: if we already have a draft (version 1), overwrite it (never creates v2 here)
+    if (currentRxId && currentRxVersion === 1) {
       const updated = await this.updateById({
         rxId: currentRxId,
         lines,
@@ -164,6 +170,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       if (updated) return updated;
     }
 
+    // ✅ Otherwise: create FIRST version only
     const now = Date.now();
     const rxId = randomUUID();
     const version = 1;
@@ -174,10 +181,8 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       lines,
       version,
       jsonKey,
-
       ...(toothDetails !== undefined ? { toothDetails } : {}),
       ...(doctorNotes !== undefined ? { doctorNotes } : {}),
-
       receptionNotes: undefined,
       createdAt: now,
       updatedAt: now,
@@ -236,33 +241,29 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     return base;
   }
 
-  async createNewVersionForVisit(params: {
-    visit: Visit;
-    lines: RxLineType[];
-    jsonKey: string;
-    toothDetails?: Prescription['toothDetails'];
-    doctorNotes?: Prescription['doctorNotes'];
-  }) {
-    const { visit, lines, jsonKey, toothDetails, doctorNotes } = params;
+  async ensureRevisionForVisit(params: { visit: Visit; jsonKey: string }) {
+    const { visit, jsonKey } = params;
 
     const existing = await this.listByVisit(visit.visitId);
-    const maxVersion = existing.reduce((m, p) => (p.version > m ? p.version : m), 0);
-    const version = maxVersion + 1;
+    const v2 = existing.find((p) => p.version === 2);
+    if (v2) return v2;
 
     const now = Date.now();
     const rxId = randomUUID();
+    const version = 2;
+
+    // ✅ copy from current (prefer version 1 if present)
+    const v1 = existing.find((p) => p.version === 1);
 
     const base: Prescription = {
       rxId,
       visitId: visit.visitId,
-      lines,
+      lines: v1?.lines ?? [],
       version,
       jsonKey,
-
-      ...(toothDetails !== undefined ? { toothDetails } : {}),
-      ...(doctorNotes !== undefined ? { doctorNotes } : {}),
-
-      receptionNotes: undefined,
+      ...(v1?.toothDetails !== undefined ? { toothDetails: v1.toothDetails } : {}),
+      ...(v1?.doctorNotes !== undefined ? { doctorNotes: v1.doctorNotes } : {}),
+      receptionNotes: v1?.receptionNotes,
       createdAt: now,
       updatedAt: now,
     };

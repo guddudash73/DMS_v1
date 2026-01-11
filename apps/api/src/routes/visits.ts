@@ -62,6 +62,9 @@ const RxReceptionNotesBody = z.object({
   receptionNotes: z.string().max(2000),
 });
 
+const draftRxJsonKey = (visitId: string) => `rx/${visitId}/draft.json`;
+const revisionRxJsonKey = (visitId: string) => `rx/${visitId}/revision.json`;
+
 async function withRetry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 100): Promise<T> {
   let lastError: unknown;
   for (let i = 0; i < attempts; i++) {
@@ -379,16 +382,15 @@ router.post(
         .json({ error: 'PATIENT_NOT_FOUND', message: 'Patient missing/deleted' });
     }
 
-    if (visit.status === 'DONE') {
-      return res.status(409).json({
-        error: 'RX_REVISION_REQUIRED',
-        message: 'Visit is DONE. Start a revision to edit prescription.',
-      });
-    }
-
     const { lines, toothDetails, doctorNotes } = parsedBody.data;
     const now = Date.now();
-    const jsonKey = `rx/${visit.visitId}/draft.json`;
+
+    const isDone = visit.status === 'DONE';
+
+    // ✅ Option 2:
+    // - before DONE: always write draft.json and keep version 1
+    // - after DONE: always write revision.json and keep version 2 (create once)
+    const jsonKey = isDone ? revisionRxJsonKey(visit.visitId) : draftRxJsonKey(visit.visitId);
 
     const jsonPayload: Record<string, unknown> = {
       visitId: visit.visitId,
@@ -423,13 +425,28 @@ router.post(
       throw new PrescriptionStorageError();
     }
 
-    const prescription = await prescriptionRepository.upsertDraftForVisit({
-      visit,
-      lines,
-      jsonKey,
-      toothDetails: toothDetails?.length ? toothDetails : [],
-      doctorNotes, // ✅ NEW
-    });
+    // ✅ Persist metadata
+    let prescription;
+    if (!isDone) {
+      prescription = await prescriptionRepository.upsertDraftForVisit({
+        visit,
+        lines,
+        jsonKey,
+        toothDetails: toothDetails?.length ? toothDetails : [],
+        doctorNotes,
+      });
+    } else {
+      // ensure revision exists (version 2) once, then overwrite it
+      const revision = await prescriptionRepository.ensureRevisionForVisit({ visit, jsonKey });
+      prescription =
+        (await prescriptionRepository.updateById({
+          rxId: revision.rxId,
+          lines,
+          jsonKey,
+          toothDetails: toothDetails?.length ? toothDetails : [],
+          doctorNotes,
+        })) ?? revision;
+    }
 
     return res.status(201).json({
       rxId: prescription.rxId,
@@ -691,6 +708,15 @@ router.get(
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) return handleValidationError(req, res, id.error.issues);
 
+    // ✅ NEW: support ?version=2 or ?rxId=<uuid>
+    const RxQuery = z.object({
+      version: z.coerce.number().int().positive().optional(),
+      rxId: z.string().uuid().optional(),
+    });
+
+    const q = RxQuery.safeParse(req.query);
+    if (!q.success) return handleValidationError(req, res, q.error.issues);
+
     const visit = await visitRepository.getById(id.data);
     if (!visit) {
       return res
@@ -707,10 +733,32 @@ router.get(
       });
     }
 
-    const rx = await prescriptionRepository.getCurrentForVisit(visit.visitId);
-    if (!rx) {
-      return res.status(200).json({ rx: null });
+    // Priority:
+    // 1) rxId (exact)
+    // 2) version (specific)
+    // 3) current (existing behavior)
+    let rx = null as any;
+
+    if (q.data.rxId) {
+      rx = await prescriptionRepository.getById(q.data.rxId as any);
+      // If rxId doesn't exist, keep compatibility: return { rx: null }
+      if (!rx) return res.status(200).json({ rx: null });
+      // Extra safety: ensure it belongs to the same visit
+      if (rx.visitId !== visit.visitId) return res.status(200).json({ rx: null });
+      return res.status(200).json({ rx });
     }
+
+    if (typeof q.data.version === 'number') {
+      const picked = await prescriptionRepository.getByVisitAndVersion(
+        visit.visitId,
+        q.data.version,
+      );
+      // Keep compatibility: if version missing, return { rx: null } (no breaking change)
+      return res.status(200).json({ rx: picked ?? null });
+    }
+
+    rx = await prescriptionRepository.getCurrentForVisit(visit.visitId);
+    if (!rx) return res.status(200).json({ rx: null });
 
     return res.status(200).json({ rx });
   }),
@@ -761,23 +809,21 @@ router.post(
       });
     }
 
-    const current = await prescriptionRepository.getCurrentForVisit(visit.visitId);
-    if (!current) {
-      return res
-        .status(409)
-        .json({ error: 'RX_MISSING', message: 'No existing prescription found' });
-    }
+    // ✅ Option 2: stable key, idempotent creation
+    const jsonKey = revisionRxJsonKey(visit.visitId);
 
+    // create (if needed) from v1
+    const revision = await prescriptionRepository.ensureRevisionForVisit({ visit, jsonKey });
+
+    // ensure the JSON exists (overwrite is safe)
     const now = Date.now();
-    const jsonKey = `rx/${visit.visitId}/revisions/${randomUUID()}.json`;
-
     const jsonPayload: Record<string, unknown> = {
       visitId: visit.visitId,
-      lines: current.lines ?? [],
-      toothDetails: current.toothDetails ?? undefined,
+      lines: revision.lines ?? [],
+      toothDetails: revision.toothDetails ?? undefined,
       createdAt: now,
       updatedAt: now,
-      ...(current.doctorNotes !== undefined ? { doctorNotes: current.doctorNotes } : {}),
+      ...(revision.doctorNotes !== undefined ? { doctorNotes: revision.doctorNotes } : {}),
     };
 
     try {
@@ -804,20 +850,12 @@ router.post(
       throw new PrescriptionStorageError();
     }
 
-    const created = await prescriptionRepository.createNewVersionForVisit({
-      visit,
-      lines: current.lines ?? [],
-      jsonKey,
-      toothDetails: current.toothDetails,
-      doctorNotes: current.doctorNotes, // ✅ COPY
-    });
-
     return res.status(201).json({
-      rxId: created.rxId,
-      visitId: created.visitId,
-      version: created.version,
-      createdAt: created.createdAt,
-      updatedAt: created.updatedAt,
+      rxId: revision.rxId,
+      visitId: revision.visitId,
+      version: revision.version,
+      createdAt: revision.createdAt,
+      updatedAt: revision.updatedAt,
     });
   }),
 );

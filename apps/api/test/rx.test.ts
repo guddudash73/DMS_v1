@@ -1,3 +1,4 @@
+// apps/api/test/rx.test.ts
 import { afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -9,29 +10,19 @@ import { deletePatientCompletely } from './helpers/patients';
 const app = createApp();
 
 const createdPatients: string[] = [];
-const registerPatient = (id: string) => {
-  createdPatients.push(id);
-};
+const registerPatient = (id: string) => createdPatients.push(id);
 
 afterEach(async () => {
   const ids = [...createdPatients];
   createdPatients.length = 0;
-
-  for (const id of ids) {
-    await deletePatientCompletely(id);
-  }
+  for (const id of ids) await deletePatientCompletely(id);
 });
 
 async function createPatient(name: string, phone: string) {
   const res = await request(app)
     .post('/patients')
     .set('Authorization', asReception())
-    .send({
-      name,
-      dob: '1990-01-01',
-      gender: 'female',
-      phone,
-    })
+    .send({ name, dob: '1990-01-01', gender: 'female', phone })
     .expect(201);
 
   const patientId = res.body.patientId as string;
@@ -43,17 +34,21 @@ async function createVisit(patientId: string, doctorId: string, reason: string) 
   const res = await request(app)
     .post('/visits')
     .set('Authorization', asReception())
-    .send({
-      patientId,
-      doctorId,
-      reason,
-    })
+    .send({ patientId, doctorId, reason })
     .expect(201);
 
   return res.body as { visitId: string; visitDate: string; patientId: string };
 }
 
-describe('Prescription API', () => {
+async function markVisitDone(visitId: string) {
+  await request(app)
+    .patch(`/visits/${visitId}/status`)
+    .set('Authorization', asReception())
+    .send({ status: 'DONE' })
+    .expect(200);
+}
+
+describe('Prescription API (Option 2: stable draft + single revision)', () => {
   it('creates a first prescription version for a visit and persists metadata', async () => {
     const patientId = await createPatient('Rx Test Patient 1', '+910000000201');
     const visit = await createVisit(patientId, 'DOCTOR#RX1', 'Rx test visit 1');
@@ -62,14 +57,7 @@ describe('Prescription API', () => {
       .post(`/visits/${visit.visitId}/rx`)
       .set('Authorization', asDoctor())
       .send({
-        lines: [
-          {
-            medicine: 'Amoxicillin 500mg',
-            dose: '500mg',
-            frequency: 'BID',
-            duration: 5,
-          },
-        ],
+        lines: [{ medicine: 'Amoxicillin 500mg', dose: '500mg', frequency: 'BID', duration: 5 }],
       })
       .expect(201);
 
@@ -85,45 +73,49 @@ describe('Prescription API', () => {
     expect(meta!.version).toBe(1);
   });
 
-  it('creates multiple prescription versions for the same visit and keeps older versions unchanged', async () => {
+  it('overwrites draft (v1) before DONE; creates exactly one revision (v2) after DONE', async () => {
     const patientId = await createPatient('Rx Versioning Patient', '+910000000202');
     const visit = await createVisit(patientId, 'DOCTOR#RX2', 'Rx versioning visit');
 
+    // v1 create
     const v1Res = await request(app)
       .post(`/visits/${visit.visitId}/rx`)
       .set('Authorization', asDoctor())
       .send({
-        lines: [
-          {
-            medicine: 'Ibuprofen 400mg',
-            dose: '400mg',
-            frequency: 'TID',
-            duration: 3,
-          },
-        ],
+        lines: [{ medicine: 'Ibuprofen 400mg', dose: '400mg', frequency: 'TID', duration: 3 }],
       })
       .expect(201);
 
     const v1Id = v1Res.body.rxId as string;
     expect(v1Res.body.version).toBe(1);
 
+    // overwrite draft (still v1, same rxId)
+    const v1OverwriteRes = await request(app)
+      .post(`/visits/${visit.visitId}/rx`)
+      .set('Authorization', asDoctor())
+      .send({
+        lines: [
+          { medicine: 'Ibuprofen 400mg', dose: '400mg', frequency: 'TID', duration: 3 },
+          { medicine: 'Pantoprazole 40mg', dose: '40mg', frequency: 'QD', duration: 5 },
+        ],
+      })
+      .expect(201);
+
+    expect(v1OverwriteRes.body.version).toBe(1);
+    expect(v1OverwriteRes.body.rxId).toBe(v1Id);
+
+    // now mark DONE
+    await markVisitDone(visit.visitId);
+
+    // first save after DONE => creates revision v2 (new rxId)
     const v2Res = await request(app)
       .post(`/visits/${visit.visitId}/rx`)
       .set('Authorization', asDoctor())
       .send({
         lines: [
-          {
-            medicine: 'Ibuprofen 400mg',
-            dose: '400mg',
-            frequency: 'TID',
-            duration: 3,
-          },
-          {
-            medicine: 'Pantoprazole 40mg',
-            dose: '40mg',
-            frequency: 'QD',
-            duration: 5,
-          },
+          { medicine: 'Ibuprofen 400mg', dose: '400mg', frequency: 'TID', duration: 3 },
+          { medicine: 'Pantoprazole 40mg', dose: '40mg', frequency: 'QD', duration: 5 },
+          { medicine: 'Mouthwash', dose: '10ml', frequency: 'BID', duration: 7 },
         ],
       })
       .expect(201);
@@ -132,6 +124,19 @@ describe('Prescription API', () => {
     expect(v2Res.body.version).toBe(2);
     expect(v2Id).not.toBe(v1Id);
 
+    // another save after DONE => still v2 and same rxId
+    const v2OverwriteRes = await request(app)
+      .post(`/visits/${visit.visitId}/rx`)
+      .set('Authorization', asDoctor())
+      .send({
+        lines: [{ medicine: 'Mouthwash', dose: '10ml', frequency: 'BID', duration: 7 }],
+      })
+      .expect(201);
+
+    expect(v2OverwriteRes.body.version).toBe(2);
+    expect(v2OverwriteRes.body.rxId).toBe(v2Id);
+
+    // repository versions: only v1 and v2
     const versions = await prescriptionRepository.listByVisit(visit.visitId);
     expect(versions.length).toBe(2);
 
@@ -141,10 +146,14 @@ describe('Prescription API', () => {
     expect(v1Meta).toBeDefined();
     expect(v2Meta).toBeDefined();
 
-    expect(v1Meta!.lines.length).toBe(1);
-    expect(v1Meta!.lines[0].medicine).toBe('Ibuprofen 400mg');
+    expect(v1Meta!.rxId).toBe(v1Id);
+    expect(v2Meta!.rxId).toBe(v2Id);
 
-    expect(v2Meta!.lines.length).toBe(2);
+    // v1 stayed with 2 lines (from overwrite before DONE)
+    expect(v1Meta!.lines.length).toBe(2);
+
+    // v2 now reflects latest overwrite after DONE (1 line)
+    expect(v2Meta!.lines.length).toBe(1);
   });
 
   it('returns a signed URL for prescription JSON via GET /rx/:id/json-url', async () => {
@@ -155,14 +164,7 @@ describe('Prescription API', () => {
       .post(`/visits/${visit.visitId}/rx`)
       .set('Authorization', asDoctor())
       .send({
-        lines: [
-          {
-            medicine: 'Paracetamol 500mg',
-            dose: '500mg',
-            frequency: 'QID',
-            duration: 2,
-          },
-        ],
+        lines: [{ medicine: 'Paracetamol 500mg', dose: '500mg', frequency: 'QID', duration: 2 }],
       })
       .expect(201);
 
@@ -193,9 +195,7 @@ describe('Prescription API', () => {
     const res2 = await request(app)
       .post(`/visits/${visit.visitId}/rx`)
       .set('Authorization', asDoctor())
-      .send({
-        lines: [],
-      })
+      .send({ lines: [] })
       .expect(400);
 
     expect(res2.body.error).toBe('VALIDATION_ERROR');
@@ -204,14 +204,7 @@ describe('Prescription API', () => {
       .post(`/visits/${visit.visitId}/rx`)
       .set('Authorization', asDoctor())
       .send({
-        lines: [
-          {
-            medicine: '',
-            dose: '',
-            frequency: 'BID',
-            duration: 5,
-          },
-        ],
+        lines: [{ medicine: '', dose: '', frequency: 'BID', duration: 5 }],
       })
       .expect(400);
 

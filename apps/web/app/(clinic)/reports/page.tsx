@@ -100,6 +100,11 @@ export default function ReportsPage() {
   const zeroBilledVisits = safeNum(summary?.zeroBilledVisits);
   const totalVisitors = safeNum(summary?.totalPatients);
 
+  // ✅ NEW: received totals
+  const onlineReceived = safeNum(report?.onlineReceivedTotal);
+  const offlineReceived = safeNum(report?.offlineReceivedTotal);
+  const receivedTotal = onlineReceived + offlineReceived;
+
   const procedureRows = React.useMemo(() => {
     const pc = report?.procedureCounts ?? {};
     return Object.entries(pc)
@@ -161,12 +166,13 @@ export default function ReportsPage() {
 
         {/* Top stats */}
         <div className="grid grid-cols-1 gap-6 2xl:gap-10 sm:grid-cols-2 lg:grid-cols-4">
+          {/* ✅ REPLACED: Total visits card -> Payments received */}
           <StatCard
-            label="Total visits"
-            value={totalVisits}
+            label="Payments received"
+            value={<span className="tabular-nums">{currencyINR(receivedTotal)}</span>}
             sub={
               <span>
-                {queued} queued · {onChair} on-chair · {done} done
+                Online {currencyINR(onlineReceived)} · Offline {currencyINR(offlineReceived)}
               </span>
             }
             loading={reportLoading}

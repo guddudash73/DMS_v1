@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/visits/[visitId]/checkout/billing/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -138,6 +137,10 @@ export default function VisitCheckoutBillingPage() {
   const [editService, setEditService] = React.useState('');
   const [editAmount, setEditAmount] = React.useState('');
 
+  // ✅ NEW: payment received flags (mutually exclusive)
+  const [receivedOnline, setReceivedOnline] = React.useState(false);
+  const [receivedOffline, setReceivedOffline] = React.useState(false);
+
   const hydratedRef = React.useRef(false);
   React.useEffect(() => {
     if (!bill) return;
@@ -152,6 +155,10 @@ export default function VisitCheckoutBillingPage() {
     );
     setDiscountAmount(bill.discountAmount ?? 0);
     setTaxAmount(bill.taxAmount ?? 0);
+
+    // ✅ hydrate flags from bill
+    setReceivedOnline(bill.receivedOnline === true);
+    setReceivedOffline(bill.receivedOffline === true);
   }, [bill]);
 
   const billingMuted = isZeroBilled && !billingEnabledForZero;
@@ -274,7 +281,7 @@ export default function VisitCheckoutBillingPage() {
         const e = err as ApiError;
         const msg =
           (isRecord(e.data) && typeof e.data.message === 'string' && e.data.message) ||
-          (isRecord(err) && typeof err.message === 'string' && err.message) ||
+          (isRecord(err) && typeof (err as any).message === 'string' && (err as any).message) ||
           'Failed to mark visit DONE.';
         toast.error(msg);
         return;
@@ -293,6 +300,8 @@ export default function VisitCheckoutBillingPage() {
           discountAmount: 0,
           taxAmount: 0,
           allowZeroBilled: true,
+          receivedOnline,
+          receivedOffline,
         }
       : {
           items: computed.safeLines.length
@@ -311,6 +320,8 @@ export default function VisitCheckoutBillingPage() {
           discountAmount: computed.discount,
           taxAmount: computed.tax,
           ...(isZeroBilled ? { allowZeroBilled: true } : {}),
+          receivedOnline,
+          receivedOffline,
         };
 
     try {
@@ -323,7 +334,7 @@ export default function VisitCheckoutBillingPage() {
         isRecord(e.data) && typeof e.data.error === 'string' ? (e.data.error as string) : undefined;
       const msg =
         (isRecord(e.data) && typeof e.data.message === 'string' && e.data.message) ||
-        (isRecord(err) && typeof err.message === 'string' && err.message) ||
+        (isRecord(err) && typeof (err as any).message === 'string' && (err as any).message) ||
         'Checkout failed.';
 
       if (code === 'VISIT_NOT_DONE') toast.error('Visit must be DONE before checkout.');
@@ -445,6 +456,41 @@ export default function VisitCheckoutBillingPage() {
             <div className="mt-1 text-xs text-gray-500">
               Subtotal {computed.subtotal.toFixed(2)} · Discount {computed.discount.toFixed(2)} ·
               Tax {computed.tax.toFixed(2)}
+            </div>
+
+            {/* ✅ NEW: payment received flags */}
+            <div className="mt-4 flex flex-wrap items-center gap-4">
+              <label className="flex items-center gap-2 text-sm text-gray-800">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={receivedOnline}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setReceivedOnline(next);
+                    if (next) setReceivedOffline(false);
+                  }}
+                />
+                Received online
+              </label>
+
+              <label className="flex items-center gap-2 text-sm text-gray-800">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={receivedOffline}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setReceivedOffline(next);
+                    if (next) setReceivedOnline(false);
+                  }}
+                />
+                Received offline
+              </label>
+
+              {receivedOnline && receivedOffline ? (
+                <span className="text-xs text-red-600">Choose only one</span>
+              ) : null}
             </div>
           </div>
 

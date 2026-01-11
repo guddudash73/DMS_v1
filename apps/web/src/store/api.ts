@@ -1122,9 +1122,18 @@ export const apiSlice = createApi({
       providesTags: (_result, _error, visitId) => [{ type: 'Visit' as const, id: visitId }],
     }),
 
-    getVisitRx: builder.query<{ rx: Prescription | null }, { visitId: string }>({
-      query: ({ visitId }) => ({
+    getVisitRx: builder.query<{ rx: Prescription | null }, { visitId: string; version?: number }>({
+      query: ({ visitId, version }) => ({
         url: `/visits/${visitId}/rx`,
+        method: 'GET',
+        params: typeof version === 'number' ? { version } : undefined,
+      }),
+      providesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
+    }),
+
+    getVisitRxVersions: builder.query<{ versions: number[] }, { visitId: string }>({
+      query: ({ visitId }) => ({
+        url: `/visits/${visitId}/rx/versions`,
         method: 'GET',
       }),
       providesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
@@ -1421,6 +1430,7 @@ export const {
   useUpsertVisitRxMutation,
   useGetVisitByIdQuery,
   useGetVisitRxQuery,
+  useGetVisitRxVersionsQuery,
   useUpdateVisitRxReceptionNotesMutation,
   useUpdateVisitRxDoctorNotesMutation,
   useStartVisitRxRevisionMutation,

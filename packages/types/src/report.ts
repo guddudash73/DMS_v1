@@ -17,6 +17,14 @@ export const DailyReport = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   visitCountsByStatus: DailyVisitStatusCounts,
   totalRevenue: z.number().nonnegative(),
+
+  /**
+   * ✅ NEW: Payment received totals for the day
+   * These come from stored billing flags + billing.total
+   */
+  onlineReceivedTotal: z.number().nonnegative(),
+  offlineReceivedTotal: z.number().nonnegative(),
+
   procedureCounts: z.record(z.string(), z.number().int().nonnegative()),
 });
 export type DailyReport = z.infer<typeof DailyReport>;
@@ -74,9 +82,6 @@ export const DailyVisitsBreakdownResponse = z.object({
 });
 export type DailyVisitsBreakdownResponse = z.infer<typeof DailyVisitsBreakdownResponse>;
 
-/**
- * ✅ Clinic-wide "recent completed visits"
- */
 export const RecentCompletedQuery = z.object({
   date: z
     .string()

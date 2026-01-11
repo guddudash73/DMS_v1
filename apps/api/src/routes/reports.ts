@@ -1,4 +1,3 @@
-// apps/api/src/routes/reports.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import {
   DailyReportQuery,
@@ -119,6 +118,11 @@ router.get(
     };
 
     let totalRevenue = 0;
+
+    // ✅ NEW: online/offline received totals
+    let onlineReceivedTotal = 0;
+    let offlineReceivedTotal = 0;
+
     const procedureCounts: Record<string, number> = {};
 
     for (let i = 0; i < filteredVisits.length; i++) {
@@ -133,16 +137,31 @@ router.get(
         totalRevenue += visit.billingAmount;
       }
 
-      if (billing && Array.isArray(billing.items)) {
-        for (const line of billing.items) {
-          const key = line.code ?? line.description;
-          if (!key) continue;
-          procedureCounts[key] = (procedureCounts[key] ?? 0) + line.quantity;
+      // ✅ Payment received aggregation uses billing flags + billing.total
+      if (billing) {
+        const amt = typeof billing.total === 'number' && billing.total >= 0 ? billing.total : 0;
+
+        if (billing.receivedOnline === true) onlineReceivedTotal += amt;
+        if (billing.receivedOffline === true) offlineReceivedTotal += amt;
+
+        if (Array.isArray(billing.items)) {
+          for (const line of billing.items) {
+            const key = line.code ?? line.description;
+            if (!key) continue;
+            procedureCounts[key] = (procedureCounts[key] ?? 0) + line.quantity;
+          }
         }
       }
     }
 
-    return res.status(200).json({ date, visitCountsByStatus, totalRevenue, procedureCounts });
+    return res.status(200).json({
+      date,
+      visitCountsByStatus,
+      totalRevenue,
+      onlineReceivedTotal,
+      offlineReceivedTotal,
+      procedureCounts,
+    });
   }),
 );
 

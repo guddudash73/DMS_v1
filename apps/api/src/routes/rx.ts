@@ -1,3 +1,4 @@
+// apps/api/src/routes/rx.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { RxId } from '@dms/types';
@@ -9,12 +10,13 @@ import { patientRepository } from '../repositories/patientRepository';
 import { sendZodValidationError } from '../lib/validation';
 import { logError } from '../lib/logger';
 import { RxLine, ToothDetail } from '@dms/types';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
+import { s3Client } from '../config/aws';
 
 const router = express.Router();
 
-const handleValidationError = (req: Request, res: Response, issues: z.ZodError['issues']) => {
-  return sendZodValidationError(req, res, issues);
-};
+const handleValidationError = (req: Request, res: Response, issues: z.ZodError['issues']) =>
+  sendZodValidationError(req, res, issues);
 
 const asyncHandler =
   (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>) =>
@@ -35,9 +37,7 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 100): 
   throw lastError;
 }
 
-const RxIdParam = z.object({
-  rxId: RxId,
-});
+const RxIdParam = z.object({ rxId: RxId });
 type RxIdParam = z.infer<typeof RxIdParam>;
 
 const RxUpdateBody = z
@@ -45,8 +45,6 @@ const RxUpdateBody = z
     lines: z.array(RxLine).optional().default([]),
     jsonKey: z.string().min(1).optional(),
     toothDetails: z.array(ToothDetail).optional(),
-
-    // ✅ NEW
     doctorNotes: z.string().max(2000).optional(),
   })
   .superRefine((val, ctx) => {
@@ -68,9 +66,7 @@ router.get(
     const env = getEnv();
 
     const parsedId = RxIdParam.safeParse(req.params);
-    if (!parsedId.success) {
-      return handleValidationError(req, res, parsedId.error.issues);
-    }
+    if (!parsedId.success) return handleValidationError(req, res, parsedId.error.issues);
 
     const { rxId } = parsedId.data;
 
@@ -143,17 +139,19 @@ router.get(
 
 router.get(
   '/:rxId/pdf-url',
-  asyncHandler(async (_req, res) => {
-    return res.status(200).json({
+  asyncHandler(async (_req, res) =>
+    res.status(200).json({
       status: 'NOT_IMPLEMENTED',
       message: 'PDF generation for prescriptions is not implemented yet.',
-    });
-  }),
+    }),
+  ),
 );
 
 router.put(
   '/:rxId',
   asyncHandler(async (req, res) => {
+    const env = getEnv();
+
     const parsedId = RxIdParam.safeParse(req.params);
     if (!parsedId.success) return handleValidationError(req, res, parsedId.error.issues);
 
@@ -163,13 +161,59 @@ router.put(
     const rxId = parsedId.data.rxId;
     const existing = await prescriptionRepository.getById(rxId);
     if (!existing) {
-      return res
-        .status(404)
-        .json({ error: 'RX_NOT_FOUND', message: 'Prescription not found', traceId: req.requestId });
+      return res.status(404).json({
+        error: 'RX_NOT_FOUND',
+        message: 'Prescription not found',
+        traceId: req.requestId,
+      });
     }
 
     const nextLines = body.data.lines ?? existing.lines ?? [];
     const nextJsonKey = body.data.jsonKey ?? existing.jsonKey;
+
+    // ✅ Keep S3 JSON consistent with Dynamo metadata
+    const now = Date.now();
+    const jsonPayload: Record<string, unknown> = {
+      visitId: existing.visitId,
+      lines: nextLines,
+      toothDetails: body.data.toothDetails ?? existing.toothDetails ?? undefined,
+      createdAt: existing.createdAt,
+      updatedAt: now,
+      ...(body.data.doctorNotes !== undefined
+        ? { doctorNotes: body.data.doctorNotes }
+        : existing.doctorNotes !== undefined
+          ? { doctorNotes: existing.doctorNotes }
+          : {}),
+    };
+
+    try {
+      await withRetry(() =>
+        s3Client.send(
+          new PutObjectCommand({
+            Bucket: env.XRAY_BUCKET_NAME,
+            Key: nextJsonKey,
+            Body: JSON.stringify(jsonPayload),
+            ContentType: 'application/json',
+            ServerSideEncryption: 'AES256',
+          }),
+        ),
+      );
+    } catch (err) {
+      logError('rx_put_s3_failed', {
+        reqId: req.requestId,
+        rxId,
+        visitId: existing.visitId,
+        error:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      });
+      return res.status(503).json({
+        error: 'RX_UPLOAD_FAILED',
+        message: 'Unable to store prescription JSON, please retry.',
+        traceId: req.requestId,
+      });
+    }
 
     const updated = await prescriptionRepository.updateById({
       rxId,
@@ -180,9 +224,11 @@ router.put(
     });
 
     if (!updated) {
-      return res
-        .status(404)
-        .json({ error: 'RX_NOT_FOUND', message: 'Prescription not found', traceId: req.requestId });
+      return res.status(404).json({
+        error: 'RX_NOT_FOUND',
+        message: 'Prescription not found',
+        traceId: req.requestId,
+      });
     }
 
     return res.status(200).json({

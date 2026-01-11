@@ -1,4 +1,3 @@
-// apps/api/src/repositories/billingRepository.ts
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import type { Billing, BillingCheckoutInput, Visit, VisitId } from '@dms/types';
 import { visitRepository } from './visitRepository';
@@ -78,6 +77,11 @@ interface ComputedBillingTotals {
 const computeTotals = (visitId: VisitId, input: BillingCheckoutInput): ComputedBillingTotals => {
   const now = Date.now();
 
+  // ✅ enforce mutual exclusivity here too (in addition to zod)
+  if (input.receivedOnline === true && input.receivedOffline === true) {
+    throw new BillingRuleViolationError('Only one of receivedOnline/receivedOffline can be true');
+  }
+
   const items = input.items.map((item) => {
     const lineTotal = item.quantity * item.unitAmount;
     if (lineTotal < 0) {
@@ -108,6 +112,11 @@ const computeTotals = (visitId: VisitId, input: BillingCheckoutInput): ComputedB
     total,
     currency: 'INR',
     createdAt: now,
+
+    ...(typeof input.receivedOnline === 'boolean' ? { receivedOnline: input.receivedOnline } : {}),
+    ...(typeof input.receivedOffline === 'boolean'
+      ? { receivedOffline: input.receivedOffline }
+      : {}),
   };
 
   return { billing, total };
@@ -223,21 +232,35 @@ export class DynamoDBBillingRepository implements BillingRepository {
       };
     }
 
+    const receivedOnline =
+      typeof input.receivedOnline === 'boolean' ? input.receivedOnline : undefined;
+    const receivedOffline =
+      typeof input.receivedOffline === 'boolean' ? input.receivedOffline : undefined;
+
     const transactItems: TransactItem[] = [
       {
         Update: {
           TableName: TABLE_NAME,
           Key: buildVisitMetaKey(visitId),
-          UpdateExpression: 'SET #billingAmount = :billingAmount, #updatedAt = :updatedAt',
+          UpdateExpression:
+            'SET #billingAmount = :billingAmount, #updatedAt = :updatedAt' +
+            (typeof receivedOnline === 'boolean' ? ', #receivedOnline = :receivedOnline' : '') +
+            (typeof receivedOffline === 'boolean' ? ', #receivedOffline = :receivedOffline' : ''),
           ExpressionAttributeNames: {
             '#billingAmount': 'billingAmount',
             '#updatedAt': 'updatedAt',
             '#status': 'status',
+            '#receivedOnline': 'receivedOnline',
+            '#receivedOffline': 'receivedOffline',
           },
           ExpressionAttributeValues: {
             ':billingAmount': total,
             ':updatedAt': now,
             ':done': 'DONE',
+            ...(typeof receivedOnline === 'boolean' ? { ':receivedOnline': receivedOnline } : {}),
+            ...(typeof receivedOffline === 'boolean'
+              ? { ':receivedOffline': receivedOffline }
+              : {}),
           },
           ConditionExpression:
             'attribute_exists(PK) AND #status = :done AND attribute_not_exists(#billingAmount)',
@@ -247,14 +270,23 @@ export class DynamoDBBillingRepository implements BillingRepository {
         Update: {
           TableName: TABLE_NAME,
           Key: buildPatientVisitKey(visit.patientId, visit.visitId),
-          UpdateExpression: 'SET #billingAmount = :billingAmount, #updatedAt = :updatedAt',
+          UpdateExpression:
+            'SET #billingAmount = :billingAmount, #updatedAt = :updatedAt' +
+            (typeof receivedOnline === 'boolean' ? ', #receivedOnline = :receivedOnline' : '') +
+            (typeof receivedOffline === 'boolean' ? ', #receivedOffline = :receivedOffline' : ''),
           ExpressionAttributeNames: {
             '#billingAmount': 'billingAmount',
             '#updatedAt': 'updatedAt',
+            '#receivedOnline': 'receivedOnline',
+            '#receivedOffline': 'receivedOffline',
           },
           ExpressionAttributeValues: {
             ':billingAmount': total,
             ':updatedAt': now,
+            ...(typeof receivedOnline === 'boolean' ? { ':receivedOnline': receivedOnline } : {}),
+            ...(typeof receivedOffline === 'boolean'
+              ? { ':receivedOffline': receivedOffline }
+              : {}),
           },
           ConditionExpression: 'attribute_exists(PK)',
         },
@@ -299,6 +331,8 @@ export class DynamoDBBillingRepository implements BillingRepository {
       visitId,
       patientId: visit.patientId,
       total,
+      receivedOnline: billing.receivedOnline ?? false,
+      receivedOffline: billing.receivedOffline ?? false,
     });
 
     return billing;

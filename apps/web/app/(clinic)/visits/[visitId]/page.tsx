@@ -17,7 +17,7 @@ import {
   useGetVisitByIdQuery,
   useGetPatientByIdQuery,
   useGetVisitRxQuery,
-  useListVisitXraysQuery,
+  useGetVisitRxVersionsQuery,
   useUpdateVisitRxReceptionNotesMutation,
   useGetVisitBillQuery,
   useGetDoctorsQuery,
@@ -130,15 +130,20 @@ function getErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
 
   if (isRecord(err)) {
-    const data = err.data;
+    const data = (err as any).data;
     if (isRecord(data)) {
-      const msg = getString(data.message);
+      const msg = getString((data as any).message);
       if (msg) return msg;
     }
-    const msg = getString(err.message);
+    const msg = getString((err as any).message);
     if (msg) return msg;
   }
   return 'Request failed.';
+}
+
+function anchorIdFromVisit(v: Visit): string | undefined {
+  const rec: Record<string, unknown> = isRecord(v) ? (v as unknown as Record<string, unknown>) : {};
+  return getString((rec as any).anchorVisitId) ?? getString((rec as any).anchorId) ?? undefined;
 }
 
 export default function ClinicVisitInfoPage() {
@@ -148,6 +153,7 @@ export default function ClinicVisitInfoPage() {
 
   const visitId = String(params?.visitId ?? '');
 
+  // --- Visit + Patient ---
   const visitQuery = useGetVisitByIdQuery(visitId, {
     skip: !visitId,
     refetchOnMountOrArgChange: true,
@@ -163,117 +169,178 @@ export default function ClinicVisitInfoPage() {
     refetchOnMountOrArgChange: true,
   });
 
-  const rxQuery = useGetVisitRxQuery(
-    { visitId },
-    { skip: !visitId, refetchOnMountOrArgChange: true },
-  );
-
-  const xraysQuery = useListVisitXraysQuery(
-    { visitId },
-    { skip: !visitId, refetchOnMountOrArgChange: true },
-  );
-
+  // --- Billing ---
   const billQuery = useGetVisitBillQuery({ visitId }, { skip: !visitId });
   const bill = billQuery.data ?? null;
 
-  const role = auth.status === 'authenticated' ? auth.role : undefined;
-  const isAdmin = role === 'ADMIN';
-
+  // --- Doctors (for label) ---
   const doctorsQuery = useGetDoctorsQuery(undefined);
 
+  // --- Visits (for Rx chain) ---
   const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', {
     skip: !patientId,
     refetchOnMountOrArgChange: true,
   });
 
   const allVisitsRaw = React.useMemo(() => {
-    const items = visitsQuery.data?.items;
+    const items = (visitsQuery.data as any)?.items;
     return Array.isArray(items) ? (items as Visit[]) : [];
-  }, [visitsQuery.data?.items]);
+  }, [visitsQuery.data]);
+
+  // --- Rx versioning ---
+  const versionsQuery = useGetVisitRxVersionsQuery(
+    { visitId },
+    { skip: !visitId, refetchOnMountOrArgChange: true },
+  );
+
+  const versions = React.useMemo(() => {
+    const v = (versionsQuery.data as any)?.versions;
+    return Array.isArray(v) ? (v as number[]).filter((n) => Number.isFinite(n) && n > 0) : [];
+  }, [versionsQuery.data]);
+
+  const latestVersion = React.useMemo(() => {
+    if (!versions.length) return null;
+    // backend may return sorted or not; treat max as latest
+    return Math.max(...versions);
+  }, [versions]);
+
+  const [selectedRxVersion, setSelectedRxVersion] = React.useState<number | null>(null);
 
   React.useEffect(() => {
-    if (!visitId) return;
-    visitQuery.refetch();
-    rxQuery.refetch();
-    xraysQuery.refetch();
-    billQuery.refetch?.();
-    hydratedRef.current = false;
-    setNotes('');
-  }, [visitId, visitQuery, rxQuery, xraysQuery, billQuery]);
+    // default select latest when available
+    if (selectedRxVersion != null) return;
+    if (latestVersion != null) setSelectedRxVersion(latestVersion);
+  }, [latestVersion, selectedRxVersion]);
 
-  React.useEffect(() => {
-    if (!patientId) return;
-    patientQuery.refetch();
-    visitsQuery.refetch?.();
-  }, [patientId, patientQuery, visitsQuery]);
+  // Base "latest" rx query (fallback if versions endpoint unavailable)
+  const rxLatestQuery = useGetVisitRxQuery(
+    { visitId },
+    { skip: !visitId, refetchOnMountOrArgChange: true },
+  );
 
-  const [updateNotes, updateNotesState] = useUpdateVisitRxReceptionNotesMutation();
-  const rx = rxQuery.data?.rx ?? null;
+  // Versioned rx query (preferred when DONE / when versions exist)
+  const rxByVersionQuery = useGetVisitRxQuery(
+    { visitId, version: selectedRxVersion ?? undefined } as any,
+    {
+      skip: !visitId || selectedRxVersion == null,
+      refetchOnMountOrArgChange: true,
+    },
+  );
+
+  const rxToShow = React.useMemo(() => {
+    const versioned = (rxByVersionQuery.data as any)?.rx ?? null;
+    const latest = (rxLatestQuery.data as any)?.rx ?? null;
+    return versioned ?? latest;
+  }, [rxByVersionQuery.data, rxLatestQuery.data]);
 
   const toothDetails = React.useMemo<ToothDetail[]>(() => {
-    if (!rx || !isRecord(rx)) return [];
-    const td = rx.toothDetails;
+    if (!rxToShow || !isRecord(rxToShow)) return [];
+    const td = (rxToShow as any).toothDetails;
     return Array.isArray(td) ? (td as ToothDetail[]) : [];
-  }, [rx]);
+  }, [rxToShow]);
 
   const doctorNotes = React.useMemo(() => {
-    if (!rx || !isRecord(rx)) return '';
-    return String(rx.doctorNotes ?? '');
-  }, [rx]);
+    if (!rxToShow || !isRecord(rxToShow)) return '';
+    return String((rxToShow as any).doctorNotes ?? '');
+  }, [rxToShow]);
 
+  // --- Reception notes editing (only allow on Latest) ---
+  const [updateNotes, updateNotesState] = useUpdateVisitRxReceptionNotesMutation();
   const [notes, setNotes] = React.useState('');
   const hydratedRef = React.useRef(false);
 
+  const isViewingLatest = React.useMemo(() => {
+    if (latestVersion == null) return true; // if versions missing, treat as latest
+    if (selectedRxVersion == null) return true;
+    return selectedRxVersion === latestVersion;
+  }, [selectedRxVersion, latestVersion]);
+
   React.useEffect(() => {
-    if (!rxQuery.isSuccess) return;
+    // reset hydration when switching versions
+    hydratedRef.current = false;
+  }, [selectedRxVersion]);
+
+  React.useEffect(() => {
+    // hydrate notes from rxToShow once per version view
+    if (!visitId) return;
     if (hydratedRef.current) return;
+
+    // only hydrate once we actually have rx response (either versioned or latest)
+    const loading =
+      rxLatestQuery.isLoading ||
+      rxLatestQuery.isFetching ||
+      rxByVersionQuery.isLoading ||
+      rxByVersionQuery.isFetching;
+
+    if (loading) return;
+
     hydratedRef.current = true;
 
-    if (rx && isRecord(rx)) {
-      setNotes(typeof rx.receptionNotes === 'string' ? rx.receptionNotes : '');
+    if (rxToShow && isRecord(rxToShow)) {
+      setNotes(
+        typeof (rxToShow as any).receptionNotes === 'string'
+          ? (rxToShow as any).receptionNotes
+          : '',
+      );
     } else {
       setNotes('');
     }
-  }, [rxQuery.isSuccess, rx]);
+  }, [
+    visitId,
+    rxToShow,
+    rxLatestQuery.isLoading,
+    rxLatestQuery.isFetching,
+    rxByVersionQuery.isLoading,
+    rxByVersionQuery.isFetching,
+  ]);
 
   const onSaveNotes = async () => {
     if (!visitId) return;
-    if (!rx) {
+
+    if (!rxToShow) {
       toast.error('No prescription found for this visit.');
+      return;
+    }
+
+    if (!isViewingLatest) {
+      toast.info('Reception Notes can be edited only on the latest prescription version.');
       return;
     }
 
     try {
       await updateNotes({ visitId, receptionNotes: notes }).unwrap();
       toast.success('Notes saved.');
-      rxQuery.refetch();
+      rxLatestQuery.refetch();
+      rxByVersionQuery.refetch();
     } catch (err: unknown) {
       toast.error(getErrorMessage(err) ?? 'Failed to save notes.');
     }
   };
 
-  const patientName = patientQuery.data?.name;
-  const patientPhone = patientQuery.data?.phone;
+  // --- Patient computed fields ---
+  const patientName = (patientQuery.data as any)?.name;
+  const patientPhone = (patientQuery.data as any)?.phone;
 
-  // ✅ patientQuery.data is typed; only use real fields from it.
-  // ✅ if you still want fallback reads, use an untyped record (safe).
   const patientDataUnknown: unknown = patientQuery.data;
   const patientDataRec = isRecord(patientDataUnknown) ? patientDataUnknown : undefined;
 
-  const patientSdId = getString(patientQuery.data?.sdId) ?? getString(visit?.sdId);
+  const patientSdId = getString((patientQuery.data as any)?.sdId) ?? getString(visit?.sdId);
 
   const opdNo =
     getString(visit?.opdNo) ?? getString(visit?.opdId) ?? getString(visit?.opdNumber) ?? undefined;
 
   const patientDobRaw =
-    patientQuery.data?.dob ??
-    patientDataRec?.dateOfBirth ??
-    patientDataRec?.birthDate ??
-    patientDataRec?.dobIso ??
+    (patientQuery.data as any)?.dob ??
+    (patientDataRec as any)?.dateOfBirth ??
+    (patientDataRec as any)?.birthDate ??
+    (patientDataRec as any)?.dobIso ??
     null;
 
   const patientSexRaw =
-    patientQuery.data?.gender ?? patientDataRec?.sex ?? patientDataRec?.patientSex ?? null;
+    (patientQuery.data as any)?.gender ??
+    (patientDataRec as any)?.sex ??
+    (patientDataRec as any)?.patientSex ??
+    null;
 
   const patientDob = safeParseDobToDate(patientDobRaw);
 
@@ -282,14 +349,14 @@ export default function ClinicVisitInfoPage() {
   const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
   const patientSex = normalizeSex(patientSexRaw);
 
+  // --- Doctor label ---
   const doctorId = getString(visit?.doctorId);
 
   const doctorFromList = React.useMemo<DoctorLite | null>(() => {
-    const list = doctorsQuery.data;
+    const list = doctorsQuery.data as any;
     if (!doctorId || !Array.isArray(list)) return null;
 
     const mapped = (list as unknown[]).filter(isRecord).map((d) => d as unknown as DoctorLite);
-
     return mapped.find((d) => d.doctorId === doctorId) ?? null;
   }, [doctorsQuery.data, doctorId]);
 
@@ -307,15 +374,18 @@ export default function ClinicVisitInfoPage() {
 
   const resolvedDoctorRegdLabel = React.useMemo(() => {
     if (doctorRegNoResolved) return `B.D.S Regd. - ${doctorRegNoResolved}`;
-    if (doctorsQuery.isLoading || doctorsQuery.isFetching) return undefined;
     return undefined;
-  }, [doctorRegNoResolved, doctorsQuery.isLoading, doctorsQuery.isFetching]);
+  }, [doctorRegNoResolved]);
 
   const rxVisitDateLabel = visitCreatedAtMs
     ? `Visit: ${toLocalISODate(new Date(visitCreatedAtMs))}`
     : undefined;
 
-  const visitDone = Boolean(visit && visit.status === 'DONE');
+  // --- Checkout button rules ---
+  const role = auth.status === 'authenticated' ? auth.role : undefined;
+  const isAdmin = role === 'ADMIN';
+
+  const visitDone = Boolean(visit && (visit as any).status === 'DONE');
   const hasBill = Boolean(bill);
 
   const primaryLabel = hasBill ? 'Print/Followup' : 'Checkout';
@@ -332,7 +402,7 @@ export default function ClinicVisitInfoPage() {
     try {
       setOfflineCheckoutBusy(true);
 
-      if (visit.status !== 'DONE') {
+      if ((visit as any).status !== 'DONE') {
         await updateVisitStatus({ visitId, status: 'DONE' }).unwrap();
         await visitQuery.refetch();
       }
@@ -351,16 +421,14 @@ export default function ClinicVisitInfoPage() {
     updateVisitStatusState.isLoading ||
     (!hasBill && !visitDone && !isOfflineVisit);
 
-  type PreviewProps = React.ComponentProps<typeof PrescriptionPreview>;
-  const Preview = PrescriptionPreview as React.ComponentType<PreviewProps>;
-
+  // --- Rx chain for history blocks in PrescriptionPreview ---
   const rxChain = React.useMemo(() => {
     const meta = new Map<string, Visit>();
     for (const v of allVisitsRaw) meta.set(v.visitId, v);
     if (visit?.visitId) meta.set(visit.visitId, visit);
 
-    const tag = getString(visit?.tag);
-    const anchorVisitId = getString(visit?.anchorVisitId);
+    const tag = getString((visit as any)?.tag);
+    const anchorVisitId = getString((visit as any)?.anchorVisitId);
 
     const anchorId = tag === 'F' ? anchorVisitId : visitId;
     if (!anchorId) return { visitIds: [visitId], meta, currentVisitId: visitId };
@@ -371,12 +439,15 @@ export default function ClinicVisitInfoPage() {
 
     const followups: Visit[] = [];
     for (const v of meta.values()) {
-      const vRec = isRecord(v) ? v : ({} as Record<string, unknown>);
-      const aId = getString(vRec.anchorVisitId);
+      const aId = anchorIdFromVisit(v);
       if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
     }
 
-    followups.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+    followups.sort(
+      (a, b) =>
+        ((a as any).createdAt ?? (a as any).updatedAt ?? 0) -
+        ((b as any).createdAt ?? (b as any).updatedAt ?? 0),
+    );
     chain.push(...followups);
 
     if (!chain.some((v) => v.visitId === visitId)) {
@@ -384,7 +455,11 @@ export default function ClinicVisitInfoPage() {
       chain.push(cur ?? ({ visitId } as Visit));
     }
 
-    chain.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+    chain.sort(
+      (a, b) =>
+        ((a as any).createdAt ?? (a as any).updatedAt ?? 0) -
+        ((b as any).createdAt ?? (b as any).updatedAt ?? 0),
+    );
 
     const seen = new Set<string>();
     const chainIdsOrdered = chain
@@ -402,13 +477,33 @@ export default function ClinicVisitInfoPage() {
     return { visitIds: limitedIds, meta, currentVisitId: visitId };
   }, [allVisitsRaw, visit, visitId]);
 
+  // --- UI helpers ---
+  const versionOptions = React.useMemo(() => {
+    if (!versions.length) return [];
+    const latest = latestVersion ?? null;
+    if (!latest) return [];
+    // show: Latest, then older descending
+    return Array.from({ length: latest }, (_, i) => latest - i);
+  }, [versions, latestVersion]);
+
+  const rxLoading =
+    rxLatestQuery.isLoading ||
+    rxLatestQuery.isFetching ||
+    rxByVersionQuery.isLoading ||
+    rxByVersionQuery.isFetching;
+
+  const rxReady = !!rxToShow;
+
+  type PreviewProps = React.ComponentProps<typeof PrescriptionPreview>;
+  const Preview = PrescriptionPreview as React.ComponentType<PreviewProps>;
+
   return (
     <section className="p-4 2xl:p-8">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <div className="text-lg font-semibold text-gray-900">Visit Info</div>
           <div className="text-xs text-gray-500">{visitId ? `Visit ID: ${visitId}` : ''}</div>
-          {isOfflineVisit ? <div className="text-xs text-amber-600 mt-1">Offline visit</div> : null}
+          {isOfflineVisit ? <div className="mt-1 text-xs text-amber-600">Offline visit</div> : null}
         </div>
 
         <div className="flex items-center gap-2">
@@ -457,17 +552,49 @@ export default function ClinicVisitInfoPage() {
       </div>
 
       <div className="grid w-full grid-cols-1 gap-4 lg:grid-cols-10">
-        <div className="lg:col-span-6 rounded-2xl bg-white p-4 border">
+        <div className="lg:col-span-6 rounded-2xl border bg-white p-4">
           <div className="mb-3 flex items-center justify-between">
             <div className="text-lg font-semibold text-gray-900">Prescription</div>
             <div className="text-xs text-gray-500">
-              {rxQuery.isLoading || rxQuery.isFetching
-                ? 'Loading…'
-                : rx
-                  ? 'Ready'
-                  : 'No prescription'}
+              {rxLoading ? 'Loading…' : rxReady ? 'Ready' : 'No prescription'}
             </div>
           </div>
+
+          {/* ✅ Version selector (only if versions exist) */}
+          {versionOptions.length > 0 ? (
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-gray-50 px-3 py-2">
+              <div className="text-xs font-medium text-gray-700">
+                Prescription version
+                {selectedRxVersion != null ? (
+                  <span className="text-gray-500">{` • v${selectedRxVersion}`}</span>
+                ) : null}
+                {!isViewingLatest ? (
+                  <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-800">
+                    Read-only (older version)
+                  </span>
+                ) : null}
+              </div>
+
+              <div className="flex items-center gap-2">
+                <select
+                  className="h-9 rounded-xl border bg-white px-3 text-sm"
+                  value={selectedRxVersion ?? ''}
+                  onChange={(e) => setSelectedRxVersion(Number(e.target.value))}
+                  disabled={rxByVersionQuery.isFetching}
+                >
+                  {versionOptions.map((v) => (
+                    <option key={v} value={v}>
+                      {v === versionOptions[0] ? `Latest (v${v})` : `Version ${v}`}
+                    </option>
+                  ))}
+                </select>
+
+                {rxByVersionQuery.isFetching ? (
+                  <span className="text-xs text-gray-500">Loading…</span>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
 
           <div className="min-w-0 overflow-hidden">
             <Preview
@@ -481,7 +608,9 @@ export default function ClinicVisitInfoPage() {
               doctorRegdLabel={resolvedDoctorRegdLabel}
               visitDateLabel={rxVisitDateLabel}
               lines={
-                isRecord(rx) && Array.isArray(rx.lines) ? (rx.lines as PreviewProps['lines']) : []
+                isRecord(rxToShow) && Array.isArray((rxToShow as any).lines)
+                  ? ((rxToShow as any).lines as PreviewProps['lines'])
+                  : []
               }
               receptionNotes={notes}
               toothDetails={toothDetails}
@@ -526,24 +655,38 @@ export default function ClinicVisitInfoPage() {
                 variant="default"
                 className="rounded-xl bg-black text-white hover:bg-black/90"
                 onClick={() => void onSaveNotes()}
-                disabled={updateNotesState.isLoading || !rx}
-                title={!rx ? 'No prescription found' : 'Save notes'}
+                disabled={updateNotesState.isLoading || !rxToShow || !isViewingLatest}
+                title={
+                  !rxToShow
+                    ? 'No prescription found'
+                    : !isViewingLatest
+                      ? 'Editing disabled for older versions'
+                      : 'Save notes'
+                }
               >
                 {updateNotesState.isLoading ? 'Saving…' : 'Save'}
               </Button>
             </div>
 
             <Textarea
-              className="mt-3 rounded-xl min-h-[120px]"
-              placeholder="Add reception notes (will print on the prescription)…"
+              className="mt-3 min-h-[120px] rounded-xl"
+              placeholder={
+                !isViewingLatest
+                  ? 'Reception Notes are read-only for older versions. Switch to Latest to edit.'
+                  : 'Add reception notes (will print on the prescription)…'
+              }
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              disabled={!rx}
+              disabled={!rxToShow || !isViewingLatest}
             />
 
-            {!rx ? (
+            {!rxToShow ? (
               <div className="mt-2 text-xs text-amber-600">
                 No prescription found for this visit. Notes require a prescription.
+              </div>
+            ) : !isViewingLatest ? (
+              <div className="mt-2 text-xs text-amber-600">
+                You’re viewing an older prescription version. Switch to <b>Latest</b> to edit notes.
               </div>
             ) : null}
           </div>
