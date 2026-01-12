@@ -1,24 +1,38 @@
+# Dockerfile.api
+
+FROM node:20 AS turbo_pruner
+WORKDIR /repo
+COPY . .
+
+ARG TURBO_SCOPE=@dcm/api
+
+# Use the repo turbo version for predictable behavior
+RUN npm install -g turbo@2.6.0
+RUN turbo prune --scope=$TURBO_SCOPE --docker
+
 FROM node:20 AS installer
 WORKDIR /repo
 
-COPY --from=pruner /repo/out/json/ ./
-COPY --from=pruner /repo/out/package-lock.json ./package-lock.json
-COPY --from=pruner /repo/turbo.json ./turbo.json
+# Copy only pruned manifests + lockfile first (best caching + correctness)
+COPY --from=turbo_pruner /repo/out/json/ ./
+COPY --from=turbo_pruner /repo/out/package-lock.json ./package-lock.json
+COPY --from=turbo_pruner /repo/turbo.json ./turbo.json
 
-COPY --from=pruner /repo/packages/tsconfig/base.json ./packages/tsconfig/base.json
-COPY --from=pruner /repo/tsconfig.base.json ./tsconfig.base.json
+# TS configs used by builds
+COPY --from=turbo_pruner /repo/packages/tsconfig/base.json ./packages/tsconfig/base.json
+COPY --from=turbo_pruner /repo/tsconfig.base.json ./tsconfig.base.json
 
+# Native deps for bcrypt/sharp etc
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
-# ✅ align npm version with your repo's "packageManager": "npm@11.6.2"
+# Ensure npm version matches repo packageManager (npm@11.6.2)
 RUN npm -v && npm install -g npm@11.6.2 && npm -v
 
 RUN test -f package-lock.json
-
 RUN npm ci --workspaces --include-workspace-root
 
-# 3) Now copy full source (won't affect npm ci correctness)
-COPY --from=pruner /repo/out/full/ ./
+# Now copy full pruned source
+COPY --from=turbo_pruner /repo/out/full/ ./
 
 FROM node:20 AS builder
 WORKDIR /repo
