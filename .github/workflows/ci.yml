@@ -22,7 +22,14 @@ jobs:
 
     env:
       NODE_ENV: test
-      DDB_TABLE_NAME: dms-dev-table
+      AWS_REGION: us-east-1
+      DDB_TABLE_NAME: dms-test-table
+      XRAY_BUCKET_NAME: dms-xray-test
+
+      DYNAMO_ENDPOINT: http://localhost:8000
+      S3_ENDPOINT: http://localhost:4566
+      S3_PUBLIC_ENDPOINT: http://localhost:4566
+
       AWS_ACCESS_KEY_ID: test
       AWS_SECRET_ACCESS_KEY: test
 
@@ -98,8 +105,29 @@ jobs:
           echo "DynamoDB Local did not start in time" >&2
           exit 1
 
-      - name: Run tests (temporarily disabled)
-        run: npm run test:ci
+      - name: Wait for LocalStack (S3) on 4566
+        run: |
+          for i in {1..30}; do
+            nc -z localhost 4566 && echo "LocalStack is up" && exit 0
+            sleep 2
+          done
+          echo "LocalStack did not start in time" >&2
+          exit 1
+
+      - name: Create S3 test bucket (LocalStack)
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          XRAY_BUCKET_NAME: dms-xray-test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y awscli
+          aws --endpoint-url=http://localhost:4566 s3api head-bucket --bucket "$XRAY_BUCKET_NAME" 2>/dev/null \
+            || aws --endpoint-url=http://localhost:4566 s3api create-bucket --bucket "$XRAY_BUCKET_NAME"
+
+      - name: Run tests
+        run: npm run test --workspace @dcm/api
 
       - name: Stop emulators
         if: always()
