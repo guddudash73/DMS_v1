@@ -69,23 +69,17 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: 'Preflight: show key files'
+      - name: Preflight
         run: |
           set -euxo pipefail
-          ls -la
           test -f Dockerfile.api
           test -f package-lock.json
-          echo "Dockerfile.api sha:"
-          sha256sum Dockerfile.api
-          echo "First 30 lines of Dockerfile.api:"
-          sed -n '1,30p' Dockerfile.api
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build API Docker image (plain logs)
+      - name: Build API Docker image
         run: |
-          set -euxo pipefail
           docker buildx build \
             --progress=plain \
             --file Dockerfile.api \
@@ -93,40 +87,39 @@ jobs:
             --tag dcm-api:ci \
             .
 
-      - name: Start emulators (DynamoDB Local / S3)
+      - name: Start emulators
         run: npm run dev:emulators:up
 
-      - name: Wait for DynamoDB Local on 8000
+      - name: Wait for DynamoDB
         run: |
           for i in {1..30}; do
-            nc -z localhost 8000 && echo "DynamoDB Local is up" && exit 0
+            nc -z localhost 8000 && exit 0
             sleep 2
           done
-          echo "DynamoDB Local did not start in time" >&2
           exit 1
 
-      - name: Wait for LocalStack (S3) on 4566
+      - name: Wait for LocalStack
         run: |
           for i in {1..30}; do
-            nc -z localhost 4566 && echo "LocalStack is up" && exit 0
+            nc -z localhost 4566 && exit 0
             sleep 2
           done
-          echo "LocalStack did not start in time" >&2
           exit 1
 
-      - name: Create S3 test bucket (LocalStack)
-        env:
-          AWS_ACCESS_KEY_ID: test
-          AWS_SECRET_ACCESS_KEY: test
-          AWS_DEFAULT_REGION: us-east-1
-          XRAY_BUCKET_NAME: dms-xray-test
+      # ✅ FIXED AWS CLI INSTALL
+      - name: Install AWS CLI
         run: |
           sudo apt-get update
-          sudo apt-get install -y awscli
-          aws --endpoint-url=http://localhost:4566 s3api head-bucket --bucket "$XRAY_BUCKET_NAME" 2>/dev/null \
-            || aws --endpoint-url=http://localhost:4566 s3api create-bucket --bucket "$XRAY_BUCKET_NAME"
+          sudo apt-get install -y python3-pip
+          pip3 install --upgrade awscli
+          aws --version
 
-      - name: Run tests
+      - name: Create S3 test bucket
+        run: |
+          aws --endpoint-url=http://localhost:4566 s3api head-bucket --bucket dms-xray-test 2>/dev/null \
+            || aws --endpoint-url=http://localhost:4566 s3api create-bucket --bucket dms-xray-test
+
+      - name: Run API tests
         run: npm run test --workspace @dcm/api
 
       - name: Stop emulators
