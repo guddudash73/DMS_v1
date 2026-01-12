@@ -7,17 +7,18 @@ FROM node:20 AS turbo_pruner
 WORKDIR /repo
 COPY . .
 
-ARG TURBO_SCOPE=@dcm/api
-
 # Disable turbo telemetry in CI
 ENV TURBO_TELEMETRY_DISABLED=1
 
-# Install repo deps (without scripts) so turbo is "locally installed"
-# and we avoid husky/prepare hooks during this stage.
+# Install deps (without scripts) so turbo is locally available
 RUN npm ci --ignore-scripts --no-audit --no-fund
 
-# Prune using the local turbo from node_modules
-RUN npx turbo prune --scope=$TURBO_SCOPE --docker
+# Prune API + required internal packages
+RUN npx turbo prune \
+  --scope=@dcm/api \
+  --scope=@dcm/config \
+  --scope=@dcm/types \
+  --docker
 
 
 # -----------------------------------------
@@ -26,38 +27,25 @@ RUN npx turbo prune --scope=$TURBO_SCOPE --docker
 FROM node:20 AS installer
 WORKDIR /repo
 
-# Disable husky everywhere in Docker/CI
 ENV HUSKY=0
 ENV TURBO_TELEMETRY_DISABLED=1
 
-# Copy only pruned manifests + lockfile first (best caching)
 COPY --from=turbo_pruner /repo/out/json/ ./
 COPY --from=turbo_pruner /repo/out/package-lock.json ./package-lock.json
 COPY --from=turbo_pruner /repo/turbo.json ./turbo.json
 
-# TS configs used by builds
 COPY --from=turbo_pruner /repo/packages/tsconfig/base.json ./packages/tsconfig/base.json
 COPY --from=turbo_pruner /repo/tsconfig.base.json ./tsconfig.base.json
 
-# Native deps for bcrypt/sharp etc
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
-# Pin npm if your repo expects it (optional)
 RUN npm -v && npm install -g npm@11.6.2 && npm -v
 
-# --- Sanity checks (optional) ---
-RUN test -f package-lock.json
-RUN node -e "JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log('package-lock.json: valid JSON')"
-RUN sed -n '1,40p' package-lock.json
-
-# ✅ Critical fix:
-# Regenerate a lockfile that matches this pruned workspace (turbo lockfile can break npm ci with workspaces),
-# without running scripts (avoids husky prepare), then run npm ci.
+# Regenerate lockfile for the pruned workspace, then npm ci
 RUN rm -f package-lock.json \
   && npm_config_ignore_scripts=true npm install --workspaces --include-workspace-root --package-lock-only --no-audit --no-fund \
   && npm ci --workspaces --include-workspace-root --no-audit --no-fund
 
-# Now copy full pruned source
 COPY --from=turbo_pruner /repo/out/full/ ./
 
 
@@ -91,11 +79,9 @@ RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/
 ENV NODE_ENV=production
 
 COPY --from=proddeps /repo/node_modules ./node_modules
-
-# App build output
 COPY --from=builder /repo/apps/api/dist ./apps/api/dist
 
-# ✅ Copy compiled internal packages (runtime needs dist, not package.json)
+# Copy compiled internal packages
 COPY --from=builder /repo/packages/config/dist ./packages/config/dist
 COPY --from=builder /repo/packages/types/dist  ./packages/types/dist
 
