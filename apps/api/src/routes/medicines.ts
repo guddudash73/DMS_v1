@@ -1,3 +1,4 @@
+// apps/api/src/routes/medicines.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
@@ -10,6 +11,8 @@ import type { MedicineTypeaheadItem } from '@dms/types';
 import { medicinePresetRepository } from '../repositories/medicinePresetRepository';
 import { logAudit } from '../lib/logger';
 import { sendZodValidationError } from '../lib/validation';
+import { qNumber, qTrimmed } from '../lib/httpQuery';
+import { pString } from '../lib/httpParams';
 
 const router = express.Router();
 
@@ -23,39 +26,18 @@ const asyncHandler =
     void fn(req, res, next).catch(next);
 
 const buildSearchQueryFromRequest = (req: Request): MedicineSearchQuery => {
-  const query =
-    typeof req.query.query === 'string' && req.query.query.trim().length > 0
-      ? req.query.query
-      : undefined;
+  const query = qTrimmed(req, 'query');
+  const limit = qNumber(req, 'limit');
 
-  const limitRaw = req.query.limit;
-  const limit = typeof limitRaw === 'string' && limitRaw.length > 0 ? Number(limitRaw) : undefined;
-
-  const parsed = MedicineSearchQuery.safeParse({
-    query,
-    limit,
-  });
-
-  if (!parsed.success) {
-    throw parsed.error;
-  }
-
+  const parsed = MedicineSearchQuery.safeParse({ query, limit });
+  if (!parsed.success) throw parsed.error;
   return parsed.data;
 };
 
 const buildCatalogQueryFromRequest = (req: Request) => {
-  const query =
-    typeof req.query.query === 'string' && req.query.query.trim().length > 0
-      ? req.query.query
-      : undefined;
-
-  const limitRaw = req.query.limit;
-  const limit = typeof limitRaw === 'string' && limitRaw.length > 0 ? Number(limitRaw) : undefined;
-
-  const cursor =
-    typeof req.query.cursor === 'string' && req.query.cursor.trim().length > 0
-      ? req.query.cursor
-      : undefined;
+  const query = qTrimmed(req, 'query');
+  const limit = qNumber(req, 'limit');
+  const cursor = qTrimmed(req, 'cursor');
 
   const parsed = MedicineCatalogSearchQuery.safeParse({ query, limit, cursor });
   if (!parsed.success) throw parsed.error;
@@ -69,9 +51,7 @@ router.get(
     try {
       searchQuery = buildSearchQueryFromRequest(req);
     } catch (err) {
-      if (err instanceof z.ZodError) {
-        return handleValidationError(req, res, err.issues);
-      }
+      if (err instanceof z.ZodError) return handleValidationError(req, res, err.issues);
       throw err;
     }
 
@@ -85,9 +65,7 @@ router.get(
 
     const items: MedicineTypeaheadItem[] = await medicinePresetRepository.search(searchParams);
 
-    return res.status(200).json({
-      items,
-    });
+    return res.status(200).json({ items });
   }),
 );
 
@@ -128,9 +106,7 @@ router.post(
   '/quick-add',
   asyncHandler(async (req, res) => {
     const parsed = QuickAddMedicineInput.safeParse(req.body);
-    if (!parsed.success) {
-      return handleValidationError(req, res, parsed.error.issues);
-    }
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
     const createdByUserId = req.auth?.userId ?? 'INLINE_DOCTOR_PLACEHOLDER';
 
@@ -144,10 +120,7 @@ router.post(
       logAudit({
         actorUserId: req.auth.userId,
         action: 'MEDICINE_QUICK_ADD',
-        entity: {
-          type: 'MEDICINE',
-          id: preset.id,
-        },
+        entity: { type: 'MEDICINE', id: preset.id },
         meta: {
           normalizedName: preset.normalizedName,
           source: preset.source,
@@ -171,7 +144,7 @@ router.patch(
       });
     }
 
-    const id = req.params.id;
+    const id = pString(req, 'id');
     if (!id) {
       return res.status(400).json({
         error: 'INVALID_MEDICINE_ID',
@@ -221,7 +194,7 @@ router.delete(
       });
     }
 
-    const id = req.params.id;
+    const id = pString(req, 'id');
     if (!id) {
       return res.status(400).json({
         error: 'INVALID_MEDICINE_ID',

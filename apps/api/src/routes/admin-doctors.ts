@@ -1,3 +1,4 @@
+// apps/api/src/routes/admin-doctors.ts
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';
@@ -5,6 +6,7 @@ import { AdminCreateDoctorRequest, AdminUpdateDoctorRequest } from '@dms/types';
 import type { AdminDoctorListItem, DoctorProfile } from '@dms/types';
 import { userRepository } from '../repositories/userRepository';
 import { logAudit } from '../lib/logger';
+import { pString } from '../lib/httpParams';
 
 const r = Router();
 
@@ -89,7 +91,7 @@ r.get('/', async (_req, res, next) => {
 
 r.patch('/:doctorId', validate(AdminUpdateDoctorRequest), async (req, res, next) => {
   try {
-    const doctorId = req.params.doctorId;
+    const doctorId = pString(req, 'doctorId');
     if (!doctorId) {
       return res.status(400).json({
         error: 'INVALID_DOCTOR_ID',
@@ -116,7 +118,6 @@ r.patch('/:doctorId', validate(AdminUpdateDoctorRequest), async (req, res, next)
     }
     if (body.active !== undefined) {
       repoPatch.active = body.active;
-
       await userRepository.setUserActive(doctorId, body.active);
     }
 

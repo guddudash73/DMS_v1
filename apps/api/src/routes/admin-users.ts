@@ -1,3 +1,4 @@
+// apps/api/src/routes/admin-users.ts
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';
@@ -9,22 +10,26 @@ import {
 import type { AdminUserListItem, Role } from '@dms/types';
 import { userRepository } from '../repositories/userRepository';
 import { logAudit } from '../lib/logger';
-import { requireRole } from '../middlewares/auth'; // ✅ ADD
+import { requireRole } from '../middlewares/auth';
+import { qTrimmed } from '../lib/httpQuery';
+import { pString } from '../lib/httpParams';
 
 const r = Router();
 
 r.use(requireRole('ADMIN'));
 
+// Only allow non-doctor users here; doctors are managed via /admin/doctors
 const SAFE_ROLES: Role[] = ['RECEPTION', 'VIEWER', 'ADMIN'];
 
 r.get('/', async (req, res, next) => {
   try {
-    const query = String(req.query.query ?? '')
-      .trim()
-      .toLowerCase();
-    const role = String(req.query.role ?? '').trim() as Role | '';
-    const activeStr = String(req.query.active ?? '').trim();
-    const active = activeStr === 'true' ? true : activeStr === 'false' ? false : undefined;
+    const query = (qTrimmed(req, 'query') ?? '').toLowerCase();
+
+    const roleRaw = qTrimmed(req, 'role');
+    const role = roleRaw && SAFE_ROLES.includes(roleRaw as Role) ? (roleRaw as Role) : undefined;
+
+    const activeRaw = qTrimmed(req, 'active');
+    const active = activeRaw === 'true' ? true : activeRaw === 'false' ? false : undefined;
 
     const users = await userRepository.listUsers();
 
@@ -58,18 +63,11 @@ r.post('/', validate(AdminCreateUserRequest), async (req, res, next) => {
   try {
     const input = req.body as AdminCreateUserRequest;
 
-    if (input.role === 'DOCTOR') {
+    // Runtime safety: even if schema is changed later, keep backend safe.
+    if (!SAFE_ROLES.includes(input.role as Role)) {
       return res.status(400).json({
         error: 'INVALID_ROLE',
-        message: 'Use admin-doctors to create doctors',
-        traceId: req.requestId,
-      });
-    }
-
-    if (!SAFE_ROLES.includes(input.role)) {
-      return res.status(400).json({
-        error: 'INVALID_ROLE',
-        message: 'Role not allowed',
+        message: 'Use admin-doctors to create doctors (or role not allowed)',
         traceId: req.requestId,
       });
     }
@@ -80,7 +78,7 @@ r.post('/', validate(AdminCreateUserRequest), async (req, res, next) => {
       email: input.email,
       displayName: input.displayName,
       passwordHash,
-      role: input.role,
+      role: input.role as Role,
       active: input.active ?? true,
     });
 
@@ -111,7 +109,7 @@ r.post('/', validate(AdminCreateUserRequest), async (req, res, next) => {
 
 r.patch('/:userId', validate(AdminUpdateUserRequest), async (req, res, next) => {
   try {
-    const userId = req.params.userId;
+    const userId = pString(req, 'userId');
     if (!userId) {
       return res.status(400).json({
         error: 'INVALID_USER_ID',
@@ -122,17 +120,18 @@ r.patch('/:userId', validate(AdminUpdateUserRequest), async (req, res, next) => 
 
     const body = req.body as AdminUpdateUserRequest;
 
-    if (body.role === 'DOCTOR') {
+    // If role is provided, it must be one of SAFE_ROLES (doctors handled elsewhere)
+    if (body.role !== undefined && !SAFE_ROLES.includes(body.role as Role)) {
       return res.status(400).json({
         error: 'INVALID_ROLE',
-        message: 'Use admin-doctors to manage doctors',
+        message: 'Use admin-doctors to manage doctors (or role not allowed)',
         traceId: req.requestId,
       });
     }
 
     const updated = await userRepository.updateUser(userId, {
       displayName: body.displayName,
-      role: body.role,
+      role: body.role as Role | undefined,
       active: body.active,
     });
 
@@ -174,7 +173,7 @@ r.post(
   validate(AdminResetUserPasswordRequest),
   async (req, res, next) => {
     try {
-      const userId = req.params.userId;
+      const userId = pString(req, 'userId');
       if (!userId) {
         return res.status(400).json({
           error: 'INVALID_USER_ID',
@@ -221,7 +220,7 @@ r.post(
 
 r.delete('/:userId', async (req, res, next) => {
   try {
-    const userId = req.params.userId;
+    const userId = pString(req, 'userId');
     if (!userId) {
       return res.status(400).json({
         error: 'INVALID_USER_ID',

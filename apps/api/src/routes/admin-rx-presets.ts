@@ -1,3 +1,4 @@
+// apps/api/src/routes/admin-rx-presets.ts
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { validate } from '../middlewares/zod';
@@ -11,6 +12,8 @@ import type { PrescriptionPresetId, RxLineType } from '@dms/types';
 import { prescriptionPresetRepository } from '../repositories/prescriptionPresetRepository';
 import { logAudit } from '../lib/logger';
 import { sendZodValidationError } from '../lib/validation';
+import { qNumber, qTrimmed } from '../lib/httpQuery';
+import { pString } from '../lib/httpParams';
 
 const r = Router();
 
@@ -19,18 +22,9 @@ const handleValidationError = (req: Request, res: Response, issues: z.ZodIssue[]
 };
 
 const buildAdminSearchFromRequest = (req: Request) => {
-  const query =
-    typeof req.query.query === 'string' && req.query.query.trim().length > 0
-      ? req.query.query
-      : undefined;
-
-  const limitRaw = req.query.limit;
-  const limit = typeof limitRaw === 'string' && limitRaw.length > 0 ? Number(limitRaw) : undefined;
-
-  const cursor =
-    typeof req.query.cursor === 'string' && req.query.cursor.trim().length > 0
-      ? req.query.cursor
-      : undefined;
+  const query = qTrimmed(req, 'query');
+  const limit = qNumber(req, 'limit');
+  const cursor = qTrimmed(req, 'cursor');
 
   const parsed = AdminRxPresetSearchQuery.safeParse({ query, limit, cursor });
   if (!parsed.success) throw parsed.error;
@@ -81,7 +75,7 @@ r.post('/', validate(AdminCreateRxPresetRequest), async (req, res, next) => {
         action: 'ADMIN_CREATE_RX_PRESET',
         entity: {
           type: 'RX_PRESET',
-          id: created.id as string,
+          id: created.id,
         },
         meta: {
           name: created.name,
@@ -98,7 +92,7 @@ r.post('/', validate(AdminCreateRxPresetRequest), async (req, res, next) => {
 
 r.patch('/:id', validate(AdminUpdateRxPresetRequest), async (req, res, next) => {
   try {
-    const id = req.params.id;
+    const id = pString(req, 'id');
     if (!id) {
       return res.status(400).json({
         error: 'INVALID_RX_PRESET_ID',
@@ -110,16 +104,9 @@ r.patch('/:id', validate(AdminUpdateRxPresetRequest), async (req, res, next) => 
     const body = req.body as AdminUpdateRxPresetRequest;
 
     const patch: { name?: string; lines?: RxLineType[]; tags?: string[] } = {};
-
-    if (body.name !== undefined) {
-      patch.name = body.name;
-    }
-    if (body.lines !== undefined) {
-      patch.lines = body.lines;
-    }
-    if (body.tags !== undefined) {
-      patch.tags = body.tags;
-    }
+    if (body.name !== undefined) patch.name = body.name;
+    if (body.lines !== undefined) patch.lines = body.lines;
+    if (body.tags !== undefined) patch.tags = body.tags;
 
     const updated = await prescriptionPresetRepository.update(id as PrescriptionPresetId, patch);
     if (!updated) {
@@ -153,7 +140,7 @@ r.patch('/:id', validate(AdminUpdateRxPresetRequest), async (req, res, next) => 
 
 r.delete('/:id', async (req, res, next) => {
   try {
-    const id = req.params.id;
+    const id = pString(req, 'id');
     if (!id) {
       return res.status(400).json({
         error: 'INVALID_RX_PRESET_ID',
@@ -187,7 +174,7 @@ r.delete('/:id', async (req, res, next) => {
 
 r.get('/:id', async (req, res, next) => {
   try {
-    const id = req.params.id;
+    const id = pString(req, 'id');
     if (!id) {
       return res.status(400).json({
         error: 'INVALID_RX_PRESET_ID',

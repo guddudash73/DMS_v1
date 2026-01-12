@@ -23,11 +23,22 @@ import {
 
 import { useAuth } from '@/src/hooks/useAuth';
 
+// ✅ Admin users page should never create DOCTOR.
+// Keep Role for displaying existing users, but use a narrower type for creation/filtering.
+type AdminUserRole = Exclude<Role, 'DOCTOR'>;
+
 const ROLE_OPTIONS: Array<{ value: Role; label: string }> = [
   { value: 'RECEPTION', label: 'Reception' },
   { value: 'VIEWER', label: 'Viewer' },
   { value: 'ADMIN', label: 'Admin' },
   { value: 'DOCTOR', label: 'Doctor' },
+];
+
+// ✅ Only safe roles for create/filter
+const ADMIN_ROLE_OPTIONS: Array<{ value: AdminUserRole; label: string }> = [
+  { value: 'RECEPTION', label: 'Reception' },
+  { value: 'VIEWER', label: 'Viewer' },
+  { value: 'ADMIN', label: 'Admin' },
 ];
 
 function roleBadge(role: Role) {
@@ -60,6 +71,10 @@ function isRole(v: string): v is Role {
   return ROLE_OPTIONS.some((r) => r.value === v);
 }
 
+function isAdminUserRole(v: string): v is AdminUserRole {
+  return ADMIN_ROLE_OPTIONS.some((r) => r.value === v);
+}
+
 type ActiveFilter = 'all' | 'active' | 'inactive';
 function isActiveFilter(v: string): v is ActiveFilter {
   return v === 'all' || v === 'active' || v === 'inactive';
@@ -70,7 +85,8 @@ export default function AdminUsersPage() {
   const currentUserId = readCurrentUserId(auth);
 
   const [query, setQuery] = useState('');
-  const [role, setRole] = useState<Role | ''>('');
+  // ✅ Filter role should match what backend expects for /admin/users (no DOCTOR)
+  const [role, setRole] = useState<AdminUserRole | ''>('');
   const [active, setActive] = useState<ActiveFilter>('all');
 
   const filters = useMemo(() => {
@@ -87,7 +103,8 @@ export default function AdminUsersPage() {
   const [createEmail, setCreateEmail] = useState('');
   const [createName, setCreateName] = useState('');
   const [createPassword, setCreatePassword] = useState('');
-  const [createRole, setCreateRole] = useState<Role>('RECEPTION');
+  // ✅ Create role is safe union (cannot be DOCTOR)
+  const [createRole, setCreateRole] = useState<AdminUserRole>('RECEPTION');
   const [createActive, setCreateActive] = useState(true);
 
   const [createUser, createState] = useAdminCreateUserMutation();
@@ -120,8 +137,7 @@ export default function AdminUsersPage() {
   const canCreate =
     createEmail.trim().length > 0 &&
     createName.trim().length > 0 &&
-    createPassword.trim().length >= 8 &&
-    createRole !== 'DOCTOR';
+    createPassword.trim().length >= 8;
 
   const openReset = (userId: string, label: string) => {
     setResetUserId(userId);
@@ -138,7 +154,7 @@ export default function AdminUsersPage() {
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
           <p className="mt-1 text-sm text-gray-600">
-            Create and manage Reception/Viewer users. Toggle active to block login.
+            Create and manage Reception/Viewer/Admin users. Toggle active to block login.
           </p>
         </div>
 
@@ -181,11 +197,11 @@ export default function AdminUsersPage() {
                 value={role}
                 onChange={(e) => {
                   const v = e.target.value;
-                  setRole(v === '' ? '' : isRole(v) ? v : '');
+                  setRole(v === '' ? '' : isAdminUserRole(v) ? v : '');
                 }}
               >
                 <option value="">All roles</option>
-                {ROLE_OPTIONS.map((r) => (
+                {ADMIN_ROLE_OPTIONS.map((r) => (
                   <option key={r.value} value={r.value}>
                     {r.label}
                   </option>
@@ -368,7 +384,7 @@ export default function AdminUsersPage() {
                   value={createRole}
                   onChange={(e) => {
                     const v = e.target.value;
-                    if (isRole(v)) setCreateRole(v);
+                    if (isAdminUserRole(v)) setCreateRole(v);
                   }}
                 >
                   <option value="RECEPTION">Reception</option>
@@ -408,7 +424,7 @@ export default function AdminUsersPage() {
                     email: createEmail.trim(),
                     displayName: createName.trim(),
                     password: createPassword,
-                    role: createRole,
+                    role: createRole, // ✅ now typed as AdminUserRole (no DOCTOR possible)
                     active: createActive,
                   }).unwrap();
 

@@ -1,3 +1,4 @@
+// apps/api/src/routes/admin-medicines.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
@@ -9,6 +10,8 @@ import {
 import { medicinePresetRepository } from '../repositories/medicinePresetRepository';
 import { sendZodValidationError } from '../lib/validation';
 import { logAudit } from '../lib/logger';
+import { qNumber, qTrimmed } from '../lib/httpQuery';
+import { pString } from '../lib/httpParams';
 
 const router = express.Router();
 
@@ -22,23 +25,10 @@ const asyncHandler =
     void fn(req, res, next).catch(next);
 
 const buildAdminSearch = (req: Request) => {
-  const query =
-    typeof req.query.query === 'string' && req.query.query.trim().length > 0
-      ? req.query.query
-      : undefined;
-
-  const limitRaw = req.query.limit;
-  const limit = typeof limitRaw === 'string' && limitRaw.length > 0 ? Number(limitRaw) : undefined;
-
-  const cursor =
-    typeof req.query.cursor === 'string' && req.query.cursor.trim().length > 0
-      ? req.query.cursor
-      : undefined;
-
-  const status =
-    typeof req.query.status === 'string' && req.query.status.trim().length > 0
-      ? req.query.status
-      : undefined;
+  const query = qTrimmed(req, 'query');
+  const limit = qNumber(req, 'limit');
+  const cursor = qTrimmed(req, 'cursor');
+  const status = qTrimmed(req, 'status');
 
   const parsed = AdminMedicineSearchQuery.safeParse({ query, limit, cursor, status });
   if (!parsed.success) throw parsed.error;
@@ -102,7 +92,7 @@ router.post(
 router.post(
   '/:id/verify',
   asyncHandler(async (req, res) => {
-    const id = req.params.id;
+    const id = pString(req, 'id');
     if (!id) {
       return res.status(400).json({
         error: 'INVALID_MEDICINE_ID',
@@ -139,7 +129,7 @@ router.post(
 router.patch(
   '/:id',
   asyncHandler(async (req, res) => {
-    const id = req.params.id;
+    const id = pString(req, 'id');
     if (!id) {
       return res.status(400).json({
         error: 'INVALID_MEDICINE_ID',
@@ -179,7 +169,7 @@ router.patch(
 router.delete(
   '/:id',
   asyncHandler(async (req, res) => {
-    const id = req.params.id;
+    const id = pString(req, 'id');
     if (!id) {
       return res.status(400).json({
         error: 'INVALID_MEDICINE_ID',
