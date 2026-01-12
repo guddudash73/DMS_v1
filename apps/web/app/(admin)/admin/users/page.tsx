@@ -67,10 +67,6 @@ function readCurrentUserId(auth: unknown): string | null {
   return null;
 }
 
-function isRole(v: string): v is Role {
-  return ROLE_OPTIONS.some((r) => r.value === v);
-}
-
 function isAdminUserRole(v: string): v is AdminUserRole {
   return ADMIN_ROLE_OPTIONS.some((r) => r.value === v);
 }
