@@ -114,6 +114,7 @@ jobs:
           echo "LocalStack did not start in time" >&2
           exit 1
 
+      # ✅ FIXED AWS BLOCK (pip-based install)
       - name: Create S3 test bucket (LocalStack)
         env:
           AWS_ACCESS_KEY_ID: test
@@ -122,7 +123,9 @@ jobs:
           XRAY_BUCKET_NAME: dms-xray-test
         run: |
           sudo apt-get update
-          sudo apt-get install -y awscli
+          sudo apt-get install -y python3-pip
+          pip3 install --upgrade awscli
+          aws --version
           aws --endpoint-url=http://localhost:4566 s3api head-bucket --bucket "$XRAY_BUCKET_NAME" 2>/dev/null \
             || aws --endpoint-url=http://localhost:4566 s3api create-bucket --bucket "$XRAY_BUCKET_NAME"
 
