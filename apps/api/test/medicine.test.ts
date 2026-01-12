@@ -1,10 +1,18 @@
-import { describe, it, expect } from 'vitest';
+// apps/api/test/medicine.test.ts
+import { beforeAll, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
 import type { MedicinePreset } from '@dms/types';
-import { asDoctor } from './helpers/auth';
+import { warmAuth, asDoctor } from './helpers/auth';
 
 const app = createApp();
+
+let doctorAuthHeader: string;
+
+beforeAll(async () => {
+  await warmAuth();
+  doctorAuthHeader = asDoctor(); // already "Bearer <token>"
+});
 
 describe('Medicines API', () => {
   it('quick-add creates a new medicine preset for a fresh normalized name', async () => {
@@ -12,7 +20,7 @@ describe('Medicines API', () => {
 
     const res = await request(app)
       .post('/medicines/quick-add')
-      .set('Authorization', asDoctor())
+      .set('Authorization', doctorAuthHeader)
       .send({
         displayName,
         defaultDose: '1 tab',
@@ -40,7 +48,7 @@ describe('Medicines API', () => {
 
     const firstRes = await request(app)
       .post('/medicines/quick-add')
-      .set('Authorization', asDoctor())
+      .set('Authorization', doctorAuthHeader)
       .send({
         displayName: variant1,
         defaultDose: '1 cap',
@@ -54,7 +62,7 @@ describe('Medicines API', () => {
 
     const secondRes = await request(app)
       .post('/medicines/quick-add')
-      .set('Authorization', asDoctor())
+      .set('Authorization', doctorAuthHeader)
       .send({
         displayName: variant2,
         defaultDose: '1 cap',
@@ -75,7 +83,7 @@ describe('Medicines API', () => {
 
     await request(app)
       .post('/medicines/quick-add')
-      .set('Authorization', asDoctor())
+      .set('Authorization', doctorAuthHeader)
       .send({
         displayName: uniqueName,
         defaultDose: '1 tab',
@@ -87,13 +95,13 @@ describe('Medicines API', () => {
 
     const searchRes = await request(app)
       .get('/medicines')
-      .set('Authorization', asDoctor())
+      .set('Authorization', doctorAuthHeader)
       .query({ query: uniqueName, limit: '10' })
       .expect(200);
 
     expect(Array.isArray(searchRes.body.items)).toBe(true);
 
-    const found = searchRes.body.items.find((item: any) => item.displayName === uniqueName);
+    const found = (searchRes.body.items as any[]).find((item) => item.displayName === uniqueName);
 
     expect(found).toBeDefined();
     expect(found.defaultFrequency).toBe('TID');

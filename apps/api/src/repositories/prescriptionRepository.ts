@@ -1,5 +1,4 @@
 // apps/api/src/repositories/prescriptionRepository.ts
-import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -41,6 +40,15 @@ const getStringProp = (v: unknown, key: string): string | undefined =>
 
 const getNumberProp = (v: unknown, key: string): number | undefined =>
   isObject(v) && typeof v[key] === 'number' ? (v[key] as number) : undefined;
+
+/**
+ * ✅ Idempotent Rx IDs to prevent duplicates under concurrency:
+ * - v1: `${visitId}#v1`
+ * - v2: `${visitId}#v2`
+ *
+ * This keeps your existing API behavior while eliminating duplicate v2 rows when two requests race.
+ */
+const rxIdFor = (visitId: string, version: 1 | 2) => `${visitId}#v${version}` as RxId;
 
 export interface PrescriptionRepository {
   /** Option 2: draft stays version=1 and is overwritten (stable jsonKey) */
@@ -122,6 +130,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
   }
 
   async getByVisitAndVersion(visitId: string, version: number): Promise<Prescription | null> {
+    // list size should remain small; this avoids needing extra indexes
     const all = await this.listByVisit(visitId);
     return all.find((p) => p.version === version) ?? null;
   }
@@ -153,27 +162,28 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
     doctorNotes?: Prescription['doctorNotes'];
-  }) {
+  }): Promise<Prescription> {
     const { visit, lines, jsonKey, toothDetails, doctorNotes } = params;
 
-    const { currentRxId, currentRxVersion } = await this.getCurrentMetaForVisit(visit.visitId);
+    // ✅ deterministic v1 id prevents duplicates
+    const rxId = rxIdFor(visit.visitId, 1);
 
-    // ✅ Option 2: if we already have a draft (version 1), overwrite it (never creates v2 here)
-    if (currentRxId && currentRxVersion === 1) {
+    // if it already exists, overwrite via update
+    const existing = await this.getById(rxId);
+    if (existing) {
       const updated = await this.updateById({
-        rxId: currentRxId,
+        rxId,
         lines,
         jsonKey,
         toothDetails,
         doctorNotes,
       });
-      if (updated) return updated;
+      return updated ?? existing;
     }
 
-    // ✅ Otherwise: create FIRST version only
+    // ✅ create FIRST version only (idempotent with conditional puts)
     const now = Date.now();
-    const rxId = randomUUID();
-    const version = 1;
+    const version = 1 as const;
 
     const base: Prescription = {
       rxId,
@@ -204,56 +214,70 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       ...base,
     };
 
-    await docClient.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          { Put: { TableName: TABLE_NAME, Item: visitScopedItem } },
-          {
-            Put: {
-              TableName: TABLE_NAME,
-              Item: rxMetaItem,
-              ConditionExpression: 'attribute_not_exists(PK)',
-            },
-          },
-          {
-            Update: {
-              TableName: TABLE_NAME,
-              Key: buildVisitMetaKey(visit.visitId),
-              UpdateExpression:
-                'SET #currentRxId = :rxId, #currentRxVersion = :v, #updatedAt = :u, #createdAt = if_not_exists(#createdAt, :u)',
-              ExpressionAttributeNames: {
-                '#currentRxId': 'currentRxId',
-                '#currentRxVersion': 'currentRxVersion',
-                '#updatedAt': 'updatedAt',
-                '#createdAt': 'createdAt',
-              },
-              ExpressionAttributeValues: {
-                ':rxId': rxId,
-                ':v': version,
-                ':u': now,
+    try {
+      await docClient.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Put: {
+                TableName: TABLE_NAME,
+                Item: visitScopedItem,
+                ConditionExpression: 'attribute_not_exists(PK)',
               },
             },
-          },
-        ],
-      }),
-    );
-
-    return base;
+            {
+              Put: {
+                TableName: TABLE_NAME,
+                Item: rxMetaItem,
+                ConditionExpression: 'attribute_not_exists(PK)',
+              },
+            },
+            {
+              Update: {
+                TableName: TABLE_NAME,
+                Key: buildVisitMetaKey(visit.visitId),
+                UpdateExpression:
+                  'SET #currentRxId = :rxId, #currentRxVersion = :v, #updatedAt = :u, #createdAt = if_not_exists(#createdAt, :u)',
+                ExpressionAttributeNames: {
+                  '#currentRxId': 'currentRxId',
+                  '#currentRxVersion': 'currentRxVersion',
+                  '#updatedAt': 'updatedAt',
+                  '#createdAt': 'createdAt',
+                },
+                ExpressionAttributeValues: {
+                  ':rxId': rxId,
+                  ':v': version,
+                  ':u': now,
+                },
+              },
+            },
+          ],
+        }),
+      );
+      return base;
+    } catch (err) {
+      // If a race created it first, return the winner
+      const raced = await this.getById(rxId);
+      if (raced) return raced;
+      throw err;
+    }
   }
 
-  async ensureRevisionForVisit(params: { visit: Visit; jsonKey: string }) {
+  async ensureRevisionForVisit(params: { visit: Visit; jsonKey: string }): Promise<Prescription> {
     const { visit, jsonKey } = params;
 
-    const existing = await this.listByVisit(visit.visitId);
-    const v2 = existing.find((p) => p.version === 2);
-    if (v2) return v2;
+    // ✅ deterministic v2 id prevents duplicates
+    const rxId = rxIdFor(visit.visitId, 2);
+
+    // If already exists, return it
+    const already = await this.getById(rxId);
+    if (already) return already;
 
     const now = Date.now();
-    const rxId = randomUUID();
-    const version = 2;
+    const version = 2 as const;
 
-    // ✅ copy from current (prefer version 1 if present)
-    const v1 = existing.find((p) => p.version === 1);
+    // copy from v1 if present (prefer version 1)
+    const v1 = await this.getById(rxIdFor(visit.visitId, 1));
 
     const base: Prescription = {
       rxId,
@@ -284,41 +308,53 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       ...base,
     };
 
-    await docClient.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          { Put: { TableName: TABLE_NAME, Item: visitScopedItem } },
-          {
-            Put: {
-              TableName: TABLE_NAME,
-              Item: rxMetaItem,
-              ConditionExpression: 'attribute_not_exists(PK)',
-            },
-          },
-          {
-            Update: {
-              TableName: TABLE_NAME,
-              Key: buildVisitMetaKey(visit.visitId),
-              UpdateExpression:
-                'SET #currentRxId = :rxId, #currentRxVersion = :v, #updatedAt = :u, #createdAt = if_not_exists(#createdAt, :u)',
-              ExpressionAttributeNames: {
-                '#currentRxId': 'currentRxId',
-                '#currentRxVersion': 'currentRxVersion',
-                '#updatedAt': 'updatedAt',
-                '#createdAt': 'createdAt',
-              },
-              ExpressionAttributeValues: {
-                ':rxId': rxId,
-                ':v': version,
-                ':u': now,
+    try {
+      await docClient.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Put: {
+                TableName: TABLE_NAME,
+                Item: visitScopedItem,
+                ConditionExpression: 'attribute_not_exists(PK)',
               },
             },
-          },
-        ],
-      }),
-    );
-
-    return base;
+            {
+              Put: {
+                TableName: TABLE_NAME,
+                Item: rxMetaItem,
+                ConditionExpression: 'attribute_not_exists(PK)',
+              },
+            },
+            {
+              Update: {
+                TableName: TABLE_NAME,
+                Key: buildVisitMetaKey(visit.visitId),
+                UpdateExpression:
+                  'SET #currentRxId = :rxId, #currentRxVersion = :v, #updatedAt = :u, #createdAt = if_not_exists(#createdAt, :u)',
+                ExpressionAttributeNames: {
+                  '#currentRxId': 'currentRxId',
+                  '#currentRxVersion': 'currentRxVersion',
+                  '#updatedAt': 'updatedAt',
+                  '#createdAt': 'createdAt',
+                },
+                ExpressionAttributeValues: {
+                  ':rxId': rxId,
+                  ':v': version,
+                  ':u': now,
+                },
+              },
+            },
+          ],
+        }),
+      );
+      return base;
+    } catch (err) {
+      // If a race created it first, return the winner
+      const raced = await this.getById(rxId);
+      if (raced) return raced;
+      throw err;
+    }
   }
 
   async updateById(params: {
@@ -327,7 +363,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
     doctorNotes?: Prescription['doctorNotes'];
-  }) {
+  }): Promise<Prescription | null> {
     const { rxId, lines, jsonKey, toothDetails, doctorNotes } = params;
 
     const existing = await this.getById(rxId);
@@ -403,7 +439,10 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     return next;
   }
 
-  async updateReceptionNotesById(params: { rxId: RxId; receptionNotes: string }) {
+  async updateReceptionNotesById(params: {
+    rxId: RxId;
+    receptionNotes: string;
+  }): Promise<Prescription | null> {
     const { rxId, receptionNotes } = params;
     const existing = await this.getById(rxId);
     if (!existing) return null;

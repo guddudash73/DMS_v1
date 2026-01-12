@@ -1,3 +1,4 @@
+// apps/api/src/routes/visits.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
@@ -17,7 +18,11 @@ import {
 } from '@dms/types';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 
-import { visitRepository, InvalidStatusTransitionError } from '../repositories/visitRepository';
+import {
+  visitRepository,
+  InvalidStatusTransitionError,
+  VisitCreateRuleViolationError,
+} from '../repositories/visitRepository';
 import { followupRepository, FollowUpRuleViolationError } from '../repositories/followupRepository';
 import { xrayRepository, XrayConflictError } from '../repositories/xrayRepository';
 import { prescriptionRepository } from '../repositories/prescriptionRepository';
@@ -94,47 +99,62 @@ router.post(
     const parsed = VisitCreate.safeParse(req.body);
     if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
 
-    const visit = await visitRepository.create(parsed.data);
-    const patient = await patientRepository.getById(visit.patientId);
+    const idempotencyKey =
+      (req.header('idempotency-key') ?? req.header('Idempotency-Key') ?? '').trim() || undefined;
 
-    const patientVisits = await visitRepository.listByPatientId(visit.patientId);
-    const visitNumberForPatient = patientVisits.length;
+    try {
+      const visit = await visitRepository.create(parsed.data, { idempotencyKey });
+      const patient = await patientRepository.getById(visit.patientId);
 
-    const queue = await visitRepository.getPatientQueue({
-      date: visit.visitDate,
-      status: 'QUEUED',
-    });
+      const patientVisits = await visitRepository.listByPatientId(visit.patientId);
+      const visitNumberForPatient = patientVisits.length;
 
-    const idx = queue.findIndex((v) => v.visitId === visit.visitId);
-    const tokenNumber = idx >= 0 ? idx + 1 : Math.max(1, queue.length);
+      const queue = await visitRepository.getPatientQueue({
+        date: visit.visitDate,
+        status: 'QUEUED',
+      });
 
-    void publishClinicQueueUpdated({ visitDate: visit.visitDate });
+      const idx = queue.findIndex((v) => v.visitId === visit.visitId);
+      const tokenNumber = idx >= 0 ? idx + 1 : Math.max(1, queue.length);
 
-    type VisitWithOffline = typeof visit & { isOffline?: boolean };
+      void publishClinicQueueUpdated({ visitDate: visit.visitDate });
 
-    return res.status(201).json({
-      visit,
-      tokenPrint: {
-        // existing
-        tokenNumber,
-        visitId: visit.visitId,
-        patientName: patient?.name ?? '—',
-        patientPhone: patient?.phone ?? undefined,
-        reason: visit.reason,
-        tag: visit.tag,
-        isOffline: (visit as VisitWithOffline).isOffline === true,
-        visitNumberForPatient,
-        createdAt: visit.createdAt,
-        visitDate: visit.visitDate,
+      type VisitWithOffline = typeof visit & { isOffline?: boolean };
 
-        // ✅ NEW: stable daily patient number + OPD + SD + DOB/Gender for Age/Sex printing
-        dailyPatientNumber: visit.dailyPatientNumber,
-        opdNo: visit.opdNo,
-        sdId: patient?.sdId,
-        patientDob: patient?.dob,
-        patientGender: patient?.gender,
-      },
-    });
+      return res.status(201).json({
+        visit,
+        tokenPrint: {
+          // existing
+          tokenNumber,
+          visitId: visit.visitId,
+          patientName: patient?.name ?? '—',
+          patientPhone: patient?.phone ?? undefined,
+          reason: visit.reason,
+          tag: visit.tag,
+          isOffline: (visit as VisitWithOffline).isOffline === true,
+          visitNumberForPatient,
+          createdAt: visit.createdAt,
+          visitDate: visit.visitDate,
+
+          // ✅ stable daily patient number + OPD + SD + DOB/Gender for Age/Sex printing
+          dailyPatientNumber: visit.dailyPatientNumber,
+          opdNo: visit.opdNo,
+          sdId: patient?.sdId,
+          patientDob: patient?.dob,
+          patientGender: patient?.gender,
+        },
+      });
+    } catch (err) {
+      // Idempotency-Key misuse (same key, different payload)
+      if (err instanceof VisitCreateRuleViolationError) {
+        return res.status(400).json({
+          error: err.code,
+          message: err.message,
+          traceId: req.requestId,
+        });
+      }
+      throw err;
+    }
   }),
 );
 
@@ -715,7 +735,7 @@ router.get(
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) return handleValidationError(req, res, id.error.issues);
 
-    // ✅ NEW: support ?version=2 or ?rxId=<uuid>
+    // ✅ support ?version=2 or ?rxId=<uuid>
     const RxQuery = z.object({
       version: z.coerce.number().int().positive().optional(),
       rxId: z.string().uuid().optional(),
@@ -754,11 +774,11 @@ router.get(
 
     if (q.data.rxId) {
       rx = await prescriptionRepository.getById(q.data.rxId);
-      // If rxId doesn't exist, keep compatibility: return { rx: null }
       if (!rx) return res.status(200).json({ rx: null });
-      // Extra safety: ensure it belongs to the same visit
+
       if (!hasVisitId(rx) || rx.visitId !== visit.visitId)
         return res.status(200).json({ rx: null });
+
       return res.status(200).json({ rx });
     }
 
@@ -767,7 +787,6 @@ router.get(
         visit.visitId,
         q.data.version,
       );
-      // Keep compatibility: if version missing, return { rx: null } (no breaking change)
       return res.status(200).json({ rx: picked ?? null });
     }
 
@@ -823,13 +842,10 @@ router.post(
       });
     }
 
-    // ✅ Option 2: stable key, idempotent creation
     const jsonKey = revisionRxJsonKey(visit.visitId);
 
-    // create (if needed) from v1
     const revision = await prescriptionRepository.ensureRevisionForVisit({ visit, jsonKey });
 
-    // ensure the JSON exists (overwrite is safe)
     const now = Date.now();
     const jsonPayload: Record<string, unknown> = {
       visitId: visit.visitId,

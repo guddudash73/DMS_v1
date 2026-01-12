@@ -12,6 +12,7 @@ import { logError } from '../lib/logger';
 import { RxLine, ToothDetail } from '@dms/types';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { s3Client } from '../config/aws';
+import { requireRole } from '../middlewares/auth'; // ✅ ADD
 
 const router = express.Router();
 
@@ -62,6 +63,7 @@ const RxUpdateBody = z
 
 router.get(
   '/:rxId/json-url',
+  requireRole('DOCTOR', 'ADMIN', 'RECEPTION'), // ✅ ADD
   asyncHandler(async (req, res) => {
     const env = getEnv();
 
@@ -149,6 +151,7 @@ router.get(
 
 router.put(
   '/:rxId',
+  requireRole('DOCTOR', 'ADMIN'), // ✅ doctor-only editing
   asyncHandler(async (req, res) => {
     const env = getEnv();
 

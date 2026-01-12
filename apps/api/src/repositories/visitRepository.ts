@@ -1,5 +1,5 @@
 // apps/api/src/repositories/visitRepository.ts
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -18,6 +18,16 @@ export class InvalidStatusTransitionError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'InvalidStatusTransitionError';
+  }
+}
+
+export class VisitCreateRuleViolationError extends Error {
+  readonly code = 'VISIT_CREATE_RULE_VIOLATION' as const;
+  readonly statusCode = 400 as const;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'VisitCreateRuleViolationError';
   }
 }
 
@@ -54,6 +64,23 @@ const buildOpdTagCounterKey = (visitDate: string, tag: VisitTag) => ({
   SK: 'META',
 });
 
+/**
+ * Tiny helpers to avoid `any` when reading DynamoDB Item props.
+ * (No behavior change: just safe property access.)
+ */
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
+
+const getStringProp = (v: unknown, key: string): string | null => {
+  if (!isRecord(v)) return null;
+  const val = v[key];
+  return typeof val === 'string' ? val : null;
+};
+
+/**
+ * Increment a counter atomically.
+ * - Uses ADD which is atomic in DynamoDB.
+ * - Returns the updated value ("last").
+ */
 async function nextCounter(key: { PK: string; SK: string }): Promise<number> {
   const { Attributes } = await docClient.send(
     new UpdateCommand({
@@ -98,7 +125,7 @@ function formatOpdNo(
 }
 
 export interface VisitRepository {
-  create(input: VisitCreate): Promise<Visit>;
+  create(input: VisitCreate, opts?: { idempotencyKey?: string }): Promise<Visit>;
   getById(visitId: string): Promise<Visit | null>;
   listByPatientId(patientId: string): Promise<Visit[]>;
   updateStatus(visitId: string, nextStatus: VisitStatus): Promise<Visit | null>;
@@ -123,34 +150,79 @@ export class DynamoDBVisitRepository implements VisitRepository {
     return false;
   }
 
-  async create(input: VisitCreate): Promise<Visit> {
+  async create(input: VisitCreate, opts?: { idempotencyKey?: string }): Promise<Visit> {
     const now = Date.now();
+
+    // ✅ Idempotency: ONLY dedupe if caller provides a key (does NOT restrict multiple open visits)
+    const idemKeyRaw = opts?.idempotencyKey?.trim();
+    const idemKey = idemKeyRaw && idemKeyRaw.length > 0 ? idemKeyRaw : undefined;
+
+    const idempotencyPk = idemKey ? `IDEMPOTENCY#VISIT_CREATE#${idemKey}` : undefined;
+    const idempotencyDdbKey = idempotencyPk ? { PK: idempotencyPk, SK: 'META' } : undefined;
+
+    const inputHash = createHash('sha256').update(JSON.stringify(input)).digest('hex');
+
+    // 1) If we already created a visit for this idempotency key, return it (no counter increments)
+    if (idempotencyDdbKey) {
+      const { Item } = await docClient.send(
+        new GetCommand({
+          TableName: TABLE_NAME,
+          Key: idempotencyDdbKey,
+          ConsistentRead: true,
+        }),
+      );
+
+      const prevVisitId = getStringProp(Item, 'visitId');
+      const prevHash = getStringProp(Item, 'inputHash');
+
+      if (prevVisitId) {
+        // Optional safety: if same key used with different payload, treat as misuse
+        if (prevHash && prevHash !== inputHash) {
+          throw new VisitCreateRuleViolationError(
+            'Idempotency-Key reused with different request payload',
+          );
+        }
+
+        const existingVisit = await this.getById(prevVisitId);
+        if (existingVisit) return existingVisit;
+        // If mapping exists but visit missing, fall through (rare)
+      }
+    }
+
     const visitId = randomUUID();
     const visitDate = clinicDateKeyFromMs(now);
 
     const status: VisitStatus = 'QUEUED';
     const tag: VisitTag | undefined = input.tag;
 
+    // ✅ Validate follow-up anchor visit rules (do NOT restrict multiple open visits)
     if (tag === 'F') {
       const anchorId = input.anchorVisitId;
-      if (!anchorId) throw new Error('anchorVisitId is required when tag is F');
-
-      const anchor = await this.getById(anchorId);
-      if (!anchor) throw new Error('anchorVisitId does not exist');
-
-      if (anchor.patientId !== input.patientId) {
-        throw new Error('anchorVisitId must belong to the same patient');
+      if (!anchorId) {
+        throw new VisitCreateRuleViolationError('anchorVisitId is required when tag is F');
       }
 
-      if (anchor.tag !== 'N') {
-        throw new Error('anchorVisitId must point to an N (new) visit');
+      const anchor = await this.getById(anchorId);
+      if (!anchor) {
+        throw new VisitCreateRuleViolationError('anchorVisitId does not exist');
+      }
+
+      if (anchor.patientId !== input.patientId) {
+        throw new VisitCreateRuleViolationError('anchorVisitId must belong to the same patient');
+      }
+
+      // NOTE: tags are now N/F only; anchor should be N or undefined (older records might not have tag)
+      if (anchor.tag && anchor.tag !== 'N') {
+        throw new VisitCreateRuleViolationError('anchorVisitId must point to an N (new) visit');
       }
     }
 
-    // ✅ daily patient number for the date (stable, never changes)
-    const dailySeq = await nextCounter(buildOpdDailyCounterKey(visitDate));
-
+    // ✅ stable daily patient number for the date (never changes)
+    // ✅ stable tag counter for OPD formatting
     const tagForCounter: VisitTag = tag ?? 'N';
+
+    // If either counter write fails transiently, allow retry by caller (repo throws)
+    const dailySeq = await nextCounter(buildOpdDailyCounterKey(visitDate));
     const tagSeq = await nextCounter(buildOpdTagCounterKey(visitDate, tagForCounter));
     const opdNo = formatOpdNo(visitDate, dailySeq, tagForCounter, tagSeq);
 
@@ -162,7 +234,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
       visitDate,
       opdNo,
 
-      // ✅ NEW: stable daily number (use this in queue + token)
+      // ✅ stable daily number (use this in queue + token)
       dailyPatientNumber: dailySeq,
 
       createdAt: now,
@@ -187,28 +259,72 @@ export class DynamoDBVisitRepository implements VisitRepository {
       ...buildGsi3Keys(visitDate, visitId),
     };
 
-    await docClient.send(
-      new TransactWriteCommand({
-        TransactItems: [
-          {
-            Put: {
-              TableName: TABLE_NAME,
-              Item: patientItem,
-              ConditionExpression: 'attribute_not_exists(PK)',
-            },
-          },
-          {
-            Put: {
-              TableName: TABLE_NAME,
-              Item: metaItem,
-              ConditionExpression: 'attribute_not_exists(PK)',
-            },
-          },
-        ],
-      }),
-    );
+    // ✅ idempotency record to prevent duplicate visits on retries
+    const idemItem = idempotencyDdbKey
+      ? {
+          ...idempotencyDdbKey,
+          entityType: 'IDEMPOTENCY',
+          kind: 'VISIT_CREATE',
+          visitId,
+          inputHash,
+          createdAt: now,
+        }
+      : null;
 
-    return base;
+    try {
+      await docClient.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Put: {
+                TableName: TABLE_NAME,
+                Item: patientItem,
+                ConditionExpression: 'attribute_not_exists(PK)',
+              },
+            },
+            {
+              Put: {
+                TableName: TABLE_NAME,
+                Item: metaItem,
+                ConditionExpression: 'attribute_not_exists(PK)',
+              },
+            },
+            ...(idemItem
+              ? [
+                  {
+                    Put: {
+                      TableName: TABLE_NAME,
+                      Item: idemItem,
+                      ConditionExpression: 'attribute_not_exists(PK)',
+                    },
+                  },
+                ]
+              : []),
+          ],
+        }),
+      );
+
+      return base;
+    } catch (err) {
+      // If we lost a race, fetch the idempotency winner and return that visit
+      if (idempotencyDdbKey) {
+        const { Item } = await docClient.send(
+          new GetCommand({
+            TableName: TABLE_NAME,
+            Key: idempotencyDdbKey,
+            ConsistentRead: true,
+          }),
+        );
+
+        const winnerVisitId = getStringProp(Item, 'visitId');
+
+        if (winnerVisitId) {
+          const existingVisit = await this.getById(winnerVisitId);
+          if (existingVisit) return existingVisit;
+        }
+      }
+      throw err;
+    }
   }
 
   async getById(visitId: string): Promise<Visit | null> {
@@ -220,7 +336,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
       }),
     );
 
-    if (!Item || Item.entityType !== 'VISIT') return null;
+    if (!Item || (Item as { entityType?: string }).entityType !== 'VISIT') return null;
     return Item as Visit;
   }
 
@@ -320,6 +436,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
     const visits = (Items ?? []) as Visit[];
     const filtered = status ? visits.filter((v) => v.status === status) : visits;
 
+    // Keep queue stable (createdAt ascending)
     filtered.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
     return filtered;
   }
@@ -347,7 +464,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
     patientId: string;
     rxId: string;
     version: number;
-  }) {
+  }): Promise<void> {
     const now = Date.now();
 
     const metaKey = buildVisitMetaKeys(params.visitId);
@@ -399,6 +516,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
         }),
       );
     } catch {
+      // keep existing behavior: ignore contention, do not throw
       return;
     }
   }

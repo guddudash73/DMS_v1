@@ -1,23 +1,23 @@
-import { afterEach, describe, it, expect } from 'vitest';
+// apps/api/test/visits.test.ts
+import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
-import { asDoctor, asReception } from './helpers/auth';
+import { warmAuth, asDoctor, asReception } from './helpers/auth';
 import { deletePatientCompletely } from './helpers/patients';
 
 const app = createApp();
 
 const createdPatients: string[] = [];
-const registerPatient = (id: string) => {
-  createdPatients.push(id);
-};
+const registerPatient = (id: string) => createdPatients.push(id);
+
+beforeAll(async () => {
+  await warmAuth();
+});
 
 afterEach(async () => {
   const ids = [...createdPatients];
   createdPatients.length = 0;
-
-  for (const id of ids) {
-    await deletePatientCompletely(id);
-  }
+  for (const id of ids) await deletePatientCompletely(id);
 });
 
 async function createPatient() {
@@ -53,13 +53,15 @@ describe('Visits API', () => {
       })
       .expect(201);
 
-    expect(createVisitRes.body).toHaveProperty('visitId');
-    const visitId = createVisitRes.body.visitId as string;
+    // backend returns { visit, tokenPrint }
+    const visitId = (createVisitRes.body.visit?.visitId ?? createVisitRes.body.visitId) as string;
+    expect(visitId).toBeTruthy();
 
     const getRes = await request(app)
       .get(`/visits/${visitId}`)
       .set('Authorization', asReception())
       .expect(200);
+
     expect(getRes.body.visitId).toBe(visitId);
     expect(getRes.body.patientId).toBe(patientId);
     expect(getRes.body.status).toBe('QUEUED');
@@ -87,7 +89,7 @@ describe('Visits API', () => {
       })
       .expect(201);
 
-    const visitId = createVisitRes.body.visitId as string;
+    const visitId = (createVisitRes.body.visit?.visitId ?? createVisitRes.body.visitId) as string;
 
     const inProgressRes = await request(app)
       .patch(`/visits/${visitId}/status`)
@@ -134,8 +136,9 @@ describe('Visits API', () => {
       })
       .expect(201);
 
-    const visitId = createVisitRes.body.visitId as string;
-    const visitDate = createVisitRes.body.visitDate as string;
+    const visitId = (createVisitRes.body.visit?.visitId ?? createVisitRes.body.visitId) as string;
+    const visitDate = (createVisitRes.body.visit?.visitDate ??
+      createVisitRes.body.visitDate) as string;
 
     const queueRes = await request(app)
       .get('/visits/queue')

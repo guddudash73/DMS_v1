@@ -1,3 +1,4 @@
+// apps/api/src/repositories/refreshTokenRepository.ts
 import {
   DynamoDBDocumentClient,
   PutCommand,
@@ -70,6 +71,7 @@ export class DynamoDBRefreshTokenRepository implements RefreshTokenRepository {
       return null;
     }
 
+    // ✅ atomic consume: only if still valid AND not expired at update time
     const { Attributes } = await docClient.send(
       new UpdateCommand({
         TableName: TABLE_NAME,
@@ -78,13 +80,15 @@ export class DynamoDBRefreshTokenRepository implements RefreshTokenRepository {
         ExpressionAttributeNames: {
           '#valid': 'valid',
           '#revokedAt': 'revokedAt',
+          '#expiresAt': 'expiresAt',
         },
         ExpressionAttributeValues: {
           ':false': false,
           ':revokedAt': now,
           ':true': true,
+          ':now': now,
         },
-        ConditionExpression: 'attribute_exists(PK) AND #valid = :true',
+        ConditionExpression: 'attribute_exists(PK) AND #valid = :true AND #expiresAt >= :now',
         ReturnValues: 'ALL_NEW',
       }),
     );

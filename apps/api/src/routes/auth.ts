@@ -27,15 +27,7 @@ const setRefreshCookie = (res: Response, refreshToken: string) => {
     secure: env.NODE_ENV === 'production',
     sameSite: 'lax',
     maxAge: env.REFRESH_TOKEN_TTL_SEC * 1000,
-    path: '/',
-  });
-
-  res.cookie(COOKIE_NAME, refreshToken, {
-    httpOnly: true,
-    secure: env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: env.REFRESH_TOKEN_TTL_SEC * 1000,
-    path: '/auth',
+    path: '/', // ✅ IMPORTANT: allow cookie on all routes
   });
 };
 
@@ -143,7 +135,7 @@ r.post('/refresh', async (req, res, next) => {
     const body = RefreshRequest.safeParse(req.body);
     const bodyToken = body.success ? body.data.refreshToken : undefined;
 
-    const cookieToken = req.cookies?.[COOKIE_NAME] as string | undefined;
+    const cookieToken = (req.cookies?.[COOKIE_NAME] as string | undefined) ?? undefined;
     const refreshToken = cookieToken ?? bodyToken;
 
     if (!refreshToken) {

@@ -88,6 +88,7 @@ export const verifyAccessToken = (token: string) => {
     clockTolerance: CLOCK_TOLERANCE_SEC,
   });
 
+  // JwtClaims now enforces type === "access"
   const parsed = JwtClaims.safeParse(decoded);
   if (!parsed.success) {
     throw new Error('Invalid access token claims');
@@ -109,10 +110,7 @@ export const verifyRefreshToken = (token: string) => {
     throw new Error('Invalid refresh token claims');
   }
 
-  if (parsed.data.type !== 'refresh') {
-    throw new Error('Invalid refresh token type');
-  }
-
+  // RefreshTokenClaims enforces type === "refresh"
   return parsed.data;
 };
 

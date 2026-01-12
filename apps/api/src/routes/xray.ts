@@ -12,9 +12,10 @@ import { getEnv } from '../config/env';
 import { getPresignedUploadUrl, getPresignedDownloadUrl, s3Client } from '../lib/s3';
 import { DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { patientRepository } from '../repositories/patientRepository';
-import { v4 as randomUUID } from 'uuid';
+import { randomUUID } from 'node:crypto'; // ✅ replace uuid package
 import { logAudit, logError } from '../lib/logger';
 import { sendZodValidationError } from '../lib/validation';
+import { requireRole } from '../middlewares/auth'; // ✅ ADD
 
 const router = express.Router();
 
@@ -85,6 +86,7 @@ const RegisterXrayBody = z.object({
 
 router.post(
   '/presign',
+  requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
   asyncHandler(async (req, res) => {
     const env = getEnv();
 
@@ -164,6 +166,7 @@ router.post(
 
 router.post(
   '/visits/:visitId',
+  requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
   asyncHandler(async (req, res) => {
     const visitIdResult = VisitId.safeParse(req.params.visitId);
     if (!visitIdResult.success) return handleValidationError(req, res, visitIdResult.error.issues);
@@ -259,6 +262,7 @@ router.post(
 
 router.get(
   '/visits/:visitId',
+  requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
   asyncHandler(async (req, res) => {
     const visitIdResult = VisitId.safeParse(req.params.visitId);
     if (!visitIdResult.success) return handleValidationError(req, res, visitIdResult.error.issues);
@@ -291,6 +295,7 @@ router.get(
 
 router.get(
   '/:xrayId/url',
+  requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
   asyncHandler(async (req, res) => {
     const env = getEnv();
 
@@ -374,6 +379,7 @@ router.get(
 
 router.delete(
   '/:xrayId',
+  requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
   asyncHandler(async (req, res) => {
     const env = getEnv();
 

@@ -1,8 +1,9 @@
+// apps/api/test/admin-rx-presets.test.ts
 import { beforeAll, describe, it, expect } from 'vitest';
 import request from 'supertest';
+import bcrypt from 'bcrypt';
 import { createApp } from '../src/server';
 import { userRepository } from '../src/repositories/userRepository';
-import bcrypt from 'bcrypt';
 import type { RxLineType } from '@dms/types';
 
 const app = createApp();
@@ -12,17 +13,17 @@ const runId = Date.now();
 const mkUser = async (role: 'RECEPTION' | 'DOCTOR' | 'ADMIN') => {
   const email = `${role.toLowerCase()}-rxpreset-${runId}@example.com`;
   const password = `${role}Pass123!`;
-  const hash = await bcrypt.hash(password, 10);
+  const passwordHash = await bcrypt.hash(password, 10);
 
   await userRepository.createUser({
     email,
     displayName: `${role} RxPreset User`,
-    passwordHash: hash,
+    passwordHash,
     role,
+    active: true,
   });
 
   const login = await request(app).post('/auth/login').send({ email, password }).expect(200);
-
   return login.body.tokens.accessToken as string;
 };
 
@@ -54,7 +55,7 @@ describe('Admin Rx-presets', () => {
       })
       .expect(201);
 
-    const presetId = createRes.body.id as string;
+    const presetId = (createRes.body.id ?? createRes.body.presetId) as string;
     expect(presetId).toBeDefined();
 
     const patchRes = await request(app)

@@ -1,29 +1,32 @@
-import { afterEach, describe, it, expect } from 'vitest';
+// apps/api/test/followup.test.ts
+import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
-import { asReception } from './helpers/auth';
+import { warmAuth, asReception } from './helpers/auth';
 import { deletePatientCompletely } from './helpers/patients';
 
 const app = createApp();
 
+let receptionAuthHeader: string;
+
 const createdPatients: string[] = [];
-const registerPatient = (id: string) => {
-  createdPatients.push(id);
-};
+const registerPatient = (id: string) => createdPatients.push(id);
+
+beforeAll(async () => {
+  await warmAuth();
+  receptionAuthHeader = asReception(); // already "Bearer <token>"
+});
 
 afterEach(async () => {
   const ids = [...createdPatients];
   createdPatients.length = 0;
-
-  for (const id of ids) {
-    await deletePatientCompletely(id);
-  }
+  for (const id of ids) await deletePatientCompletely(id);
 });
 
 async function createPatient() {
   const res = await request(app)
     .post('/patients')
-    .set('Authorization', asReception())
+    .set('Authorization', receptionAuthHeader)
     .send({
       name: 'Followup Test Patient',
       dob: '1995-01-01',
@@ -42,7 +45,7 @@ async function createPatient() {
 async function createVisit(patientId: string) {
   const res = await request(app)
     .post('/visits')
-    .set('Authorization', asReception())
+    .set('Authorization', receptionAuthHeader)
     .send({
       patientId,
       doctorId: 'DOCTOR#FOLLOWUP',
@@ -50,11 +53,10 @@ async function createVisit(patientId: string) {
     })
     .expect(201);
 
-  // visits.create returns { visit, tokenPrint } in your current routes/visits.ts
-  const visitId = (res.body.visit?.visitId ?? res.body.visitId) as string;
-  const visitDate = (res.body.visit?.visitDate ?? res.body.visitDate) as string;
+  // backend returns { visit, tokenPrint }
+  const visit = (res.body.visit ?? res.body) as { visitId: string; visitDate: string };
 
-  return { visitId, visitDate, patientId };
+  return { visitId: visit.visitId, visitDate: visit.visitDate, patientId };
 }
 
 const plusDays = (days: number) => {
@@ -72,7 +74,7 @@ describe('Follow-up API (multi followups)', () => {
 
     const res = await request(app)
       .post(`/visits/${visitId}/followups`)
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .send({
         followUpDate,
         reason: 'Call patient tomorrow',
@@ -84,17 +86,13 @@ describe('Follow-up API (multi followups)', () => {
     expect(res.body.followUpDate).toBe(followUpDate);
     expect(res.body.status).toBe('ACTIVE');
     expect(typeof res.body.followupId).toBe('string');
-    expect(res.body.followupId.length).toBeGreaterThan(5);
 
-    // list by visit
     const listRes = await request(app)
       .get(`/visits/${visitId}/followups`)
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .expect(200);
 
     expect(Array.isArray(listRes.body.items)).toBe(true);
-    expect(listRes.body.items.length).toBeGreaterThanOrEqual(1);
-
     const found = (listRes.body.items as any[]).find((x) => x.followupId === res.body.followupId);
     expect(found).toBeTruthy();
     expect(found.followUpDate).toBe(followUpDate);
@@ -109,7 +107,7 @@ describe('Follow-up API (multi followups)', () => {
 
     const res = await request(app)
       .post(`/visits/${visitId}/followups`)
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .send({
         followUpDate: earlierDate,
         reason: 'Invalid past follow-up',
@@ -120,7 +118,7 @@ describe('Follow-up API (multi followups)', () => {
     expect(String(res.body.message ?? '')).toContain('cannot be before visitDate');
   });
 
-  it('updates follow-up status to COMPLETED (PATCH /visits/:visitId/followups/:followupId/status) and daily includes it', async () => {
+  it('updates follow-up status to COMPLETED and daily includes it', async () => {
     const patientId = await createPatient();
     const { visitId } = await createVisit(patientId);
 
@@ -128,7 +126,7 @@ describe('Follow-up API (multi followups)', () => {
 
     const createRes = await request(app)
       .post(`/visits/${visitId}/followups`)
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .send({
         followUpDate,
         reason: 'Check healing',
@@ -140,18 +138,17 @@ describe('Follow-up API (multi followups)', () => {
 
     const patchRes = await request(app)
       .patch(`/visits/${visitId}/followups/${followupId}/status`)
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .send({ status: 'COMPLETED' })
       .expect(200);
 
     expect(patchRes.body.status).toBe('COMPLETED');
     expect(patchRes.body.followupId).toBe(followupId);
 
-    // ✅ now /followups/daily must include COMPLETED (non-active)
     const dailyRes = await request(app)
-      .get(`/followups/daily`)
+      .get('/followups/daily')
       .query({ date: followUpDate })
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .expect(200);
 
     expect(Array.isArray(dailyRes.body.items)).toBe(true);

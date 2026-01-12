@@ -1,7 +1,8 @@
-import { afterEach, describe, it, expect } from 'vitest';
+// apps/api/test/xray-conflict.test.ts
+import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
-import { asDoctor, asReception } from './helpers/auth';
+import { warmAuth, asDoctor, asReception } from './helpers/auth';
 import { deletePatientCompletely } from './helpers/patients';
 
 const app = createApp();
@@ -10,6 +11,10 @@ const createdPatients: string[] = [];
 const registerPatient = (id: string) => {
   createdPatients.push(id);
 };
+
+beforeAll(async () => {
+  await warmAuth();
+});
 
 afterEach(async () => {
   const ids = [...createdPatients];
@@ -53,7 +58,8 @@ async function createVisit(patientId: string) {
     })
     .expect(201);
 
-  return res.body as { visitId: string; visitDate: string; patientId: string };
+  // backend may return { visit, tokenPrint } or the visit directly
+  return (res.body.visit ?? res.body) as { visitId: string; visitDate: string; patientId: string };
 }
 
 describe('X-ray metadata conflict (XRAY_CONFLICT)', () => {

@@ -1,7 +1,8 @@
-import { afterEach, describe, it, expect } from 'vitest';
+// apps/api/test/xray-flow.test.ts
+import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
-import { asDoctor, asReception } from './helpers/auth';
+import { warmAuth, asDoctor, asReception } from './helpers/auth';
 import { deletePatientCompletely } from './helpers/patients';
 
 const app = createApp();
@@ -12,6 +13,10 @@ const createdPatients: string[] = [];
 const registerPatient = (id: string) => {
   createdPatients.push(id);
 };
+
+beforeAll(async () => {
+  await warmAuth();
+});
 
 afterEach(async () => {
   const ids = [...createdPatients];
@@ -51,7 +56,12 @@ afterEach(async () => {
       })
       .expect(201);
 
-    return res.body as { visitId: string; visitDate: string; patientId: string };
+    // backend returns { visit, tokenPrint }
+    return (res.body.visit ?? res.body) as {
+      visitId: string;
+      visitDate: string;
+      patientId: string;
+    };
   }
 
   it('POST /xrays/presign → PUT object → POST /visits/:visitId/xrays → GET /xrays/:id/url', async () => {
@@ -68,14 +78,17 @@ afterEach(async () => {
       })
       .expect(201);
 
-    const { xrayId, uploadUrl } = presignRes.body as {
+    const { xrayId, uploadUrl, key } = presignRes.body as {
       xrayId: string;
       uploadUrl: string;
+      key: string;
     };
 
     expect(typeof xrayId).toBe('string');
     expect(typeof uploadUrl).toBe('string');
     expect(uploadUrl.length).toBeGreaterThan(0);
+    expect(typeof key).toBe('string');
+    expect(key.length).toBeGreaterThan(0);
 
     const fetchFn: any = (globalThis as any).fetch;
     const putRes = await fetchFn(uploadUrl, {
@@ -98,6 +111,8 @@ afterEach(async () => {
         size: 2048,
         takenAt,
         takenByUserId: 'DOCTOR#XRAY_FLOW',
+        // IMPORTANT: backend requires contentKey and validates it
+        contentKey: key,
       })
       .expect(201);
 

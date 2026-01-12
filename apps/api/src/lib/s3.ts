@@ -27,7 +27,12 @@ type PresignDownloadParams = {
 function rewriteToPublicEndpoint(url: string): string {
   const env = getEnv();
 
+  // No public endpoint configured => do nothing (existing behavior)
   if (!env.S3_PUBLIC_ENDPOINT) return url;
+
+  // If internal endpoint isn't configured, we can't safely compare/replace hosts.
+  // Return original signed URL (safe fallback).
+  if (!env.S3_ENDPOINT) return url;
 
   try {
     const signed = new URL(url);
@@ -35,6 +40,7 @@ function rewriteToPublicEndpoint(url: string): string {
     const internal = new URL(env.S3_ENDPOINT);
     const publicEp = new URL(env.S3_PUBLIC_ENDPOINT);
 
+    // Only rewrite when the signed url is using the internal endpoint host
     if (signed.host !== internal.host) return url;
 
     signed.protocol = publicEp.protocol;

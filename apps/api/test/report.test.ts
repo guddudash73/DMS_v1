@@ -1,5 +1,5 @@
 // apps/api/test/report.test.ts
-import { afterEach, describe, it, expect } from 'vitest';
+import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
@@ -10,7 +10,7 @@ import {
   DeleteCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { getEnv } from '../src/config/env';
-import { asReception, asAdmin } from './helpers/auth';
+import { warmAuth, asReception, asAdmin } from './helpers/auth';
 import { deletePatientCompletely } from './helpers/patients';
 
 const env = getEnv();
@@ -22,29 +22,31 @@ const ddbClient = new DynamoDBClient({
 });
 
 const docClient = DynamoDBDocumentClient.from(ddbClient, {
-  marshallOptions: {
-    removeUndefinedValues: true,
-  },
+  marshallOptions: { removeUndefinedValues: true },
 });
 
+let receptionAuthHeader: string;
+let adminAuthHeader: string;
+
 const createdPatients: string[] = [];
-const registerPatient = (id: string) => {
-  createdPatients.push(id);
-};
+const registerPatient = (id: string) => createdPatients.push(id);
+
+beforeAll(async () => {
+  await warmAuth();
+  receptionAuthHeader = asReception();
+  adminAuthHeader = asAdmin();
+});
 
 afterEach(async () => {
   const ids = [...createdPatients];
   createdPatients.length = 0;
-
-  for (const id of ids) {
-    await deletePatientCompletely(id);
-  }
+  for (const id of ids) await deletePatientCompletely(id);
 });
 
 async function createPatient(name: string, phone: string) {
   const res = await request(app)
     .post('/patients')
-    .set('Authorization', asReception())
+    .set('Authorization', receptionAuthHeader)
     .send({
       name,
       dob: '1990-01-01',
@@ -58,26 +60,40 @@ async function createPatient(name: string, phone: string) {
   return patientId;
 }
 
+async function completeVisit(visitId: string) {
+  await request(app)
+    .patch(`/visits/${visitId}/status`)
+    .set('Authorization', receptionAuthHeader)
+    .send({ status: 'IN_PROGRESS' })
+    .expect(200);
+
+  await request(app)
+    .patch(`/visits/${visitId}/status`)
+    .set('Authorization', receptionAuthHeader)
+    .send({ status: 'DONE' })
+    .expect(200);
+}
+
 async function createVisit(
   patientId: string,
   doctorId: string,
   reason: string,
-  tag?: 'N' | 'F' | 'Z',
+  opts?: { tag?: 'N' | 'F'; zeroBilled?: boolean; anchorVisitId?: string },
 ) {
-  const payload: Record<string, unknown> = {
-    patientId,
-    doctorId,
-    reason,
-  };
-  if (tag) payload.tag = tag;
+  const payload: Record<string, unknown> = { patientId, doctorId, reason };
+
+  if (opts?.tag) payload.tag = opts.tag;
+  if (typeof opts?.zeroBilled === 'boolean') payload.zeroBilled = opts.zeroBilled;
+  if (opts?.anchorVisitId) payload.anchorVisitId = opts.anchorVisitId;
 
   const res = await request(app)
     .post('/visits')
-    .set('Authorization', asReception())
+    .set('Authorization', receptionAuthHeader)
     .send(payload)
     .expect(201);
 
-  return res.body as { visitId: string; visitDate: string; patientId: string };
+  // backend returns { visit, tokenPrint }
+  return (res.body.visit ?? res.body) as { visitId: string; visitDate: string; patientId: string };
 }
 
 async function setVisitDateAndBilling(
@@ -117,12 +133,8 @@ async function setVisitDateAndBilling(
     }),
   );
 
-  const pvNames: Record<string, string> = {
-    '#visitDate': 'visitDate',
-  };
-  const pvValues: Record<string, unknown> = {
-    ':date': date,
-  };
+  const pvNames: Record<string, string> = { '#visitDate': 'visitDate' };
+  const pvValues: Record<string, unknown> = { ':date': date };
   let pvUpdateExpr = 'SET #visitDate = :date';
 
   if (billingAmount !== undefined) {
@@ -140,6 +152,10 @@ async function setVisitDateAndBilling(
       ExpressionAttributeValues: pvValues,
     }),
   );
+}
+
+async function setVisitDateOnly(visitId: string, patientId: string, date: string) {
+  await setVisitDateAndBilling(visitId, patientId, date);
 }
 
 async function clearVisitsForDate(date: string) {
@@ -188,18 +204,16 @@ describe('Daily Reports API', () => {
 
     const res = await request(app)
       .get('/reports/daily')
-      .set('Authorization', asAdmin())
+      .set('Authorization', adminAuthHeader)
       .query({ date })
       .expect(200);
 
     expect(res.body).toEqual({
       date,
-      visitCountsByStatus: {
-        QUEUED: 0,
-        IN_PROGRESS: 0,
-        DONE: 0,
-      },
+      visitCountsByStatus: { QUEUED: 0, IN_PROGRESS: 0, DONE: 0 },
       totalRevenue: 0,
+      onlineReceivedTotal: 0,
+      offlineReceivedTotal: 0,
       procedureCounts: {},
     });
   });
@@ -214,22 +228,20 @@ describe('Daily Reports API', () => {
     const patientId2 = await createPatient('Queued Patient 2', '+919999000002');
     const v2 = await createVisit(patientId2, 'DOCTOR#QUEUE', 'Queued only 2');
 
-    await setVisitDateAndBilling(v1.visitId, v1.patientId, date);
-    await setVisitDateAndBilling(v2.visitId, v2.patientId, date);
+    await setVisitDateOnly(v1.visitId, v1.patientId, date);
+    await setVisitDateOnly(v2.visitId, v2.patientId, date);
 
     const res = await request(app)
       .get('/reports/daily')
-      .set('Authorization', asAdmin())
+      .set('Authorization', adminAuthHeader)
       .query({ date })
       .expect(200);
 
     expect(res.body.date).toBe(date);
-    expect(res.body.visitCountsByStatus).toEqual({
-      QUEUED: 2,
-      IN_PROGRESS: 0,
-      DONE: 0,
-    });
+    expect(res.body.visitCountsByStatus).toEqual({ QUEUED: 2, IN_PROGRESS: 0, DONE: 0 });
     expect(res.body.totalRevenue).toBe(0);
+    expect(res.body.onlineReceivedTotal).toBe(0);
+    expect(res.body.offlineReceivedTotal).toBe(0);
     expect(res.body.procedureCounts).toEqual({});
   });
 
@@ -248,43 +260,38 @@ describe('Daily Reports API', () => {
 
     await request(app)
       .patch(`/visits/${v1.visitId}/status`)
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .send({ status: 'IN_PROGRESS' })
       .expect(200);
     await request(app)
       .patch(`/visits/${v1.visitId}/status`)
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .send({ status: 'DONE' })
       .expect(200);
 
     await request(app)
       .patch(`/visits/${v2.visitId}/status`)
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .send({ status: 'IN_PROGRESS' })
       .expect(200);
     await request(app)
       .patch(`/visits/${v2.visitId}/status`)
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .send({ status: 'DONE' })
       .expect(200);
 
     await setVisitDateAndBilling(v1.visitId, v1.patientId, date, 1000);
-    await setVisitDateAndBilling(v2.visitId, v2.patientId, date);
+    await setVisitDateOnly(v2.visitId, v2.patientId, date);
     await setVisitDateAndBilling(v3.visitId, v3.patientId, date, 500);
 
     const res = await request(app)
       .get('/reports/daily')
-      .set('Authorization', asAdmin())
+      .set('Authorization', adminAuthHeader)
       .query({ date })
       .expect(200);
 
     expect(res.body.date).toBe(date);
-    expect(res.body.visitCountsByStatus).toEqual({
-      QUEUED: 1,
-      IN_PROGRESS: 0,
-      DONE: 2,
-    });
-
+    expect(res.body.visitCountsByStatus).toEqual({ QUEUED: 1, IN_PROGRESS: 0, DONE: 2 });
     expect(res.body.totalRevenue).toBe(1500);
     expect(res.body.procedureCounts).toEqual({});
   });
@@ -292,7 +299,7 @@ describe('Daily Reports API', () => {
   it('rejects invalid date input', async () => {
     const res = await request(app)
       .get('/reports/daily')
-      .set('Authorization', asAdmin())
+      .set('Authorization', adminAuthHeader)
       .query({ date: 'invalid-date' })
       .expect(400);
 
@@ -304,21 +311,28 @@ describe('Daily Reports API', () => {
     await clearVisitsForDate(date);
 
     const p1 = await createPatient('Tagged New', '+919999001001');
-    const v1 = await createVisit(p1, 'DOCTOR#TAGS', 'New visit', 'N');
+    const v1 = await createVisit(p1, 'DOCTOR#TAGS', 'New visit', { tag: 'N' });
 
+    // ✅ For F visits, backend requires anchorVisitId pointing to an N visit of same patient
     const p2 = await createPatient('Tagged Followup', '+919999001002');
-    const v2 = await createVisit(p2, 'DOCTOR#TAGS', 'Follow-up visit', 'F');
+    const anchor = await createVisit(p2, 'DOCTOR#TAGS', 'Anchor new visit', { tag: 'N' });
+    await completeVisit(anchor.visitId); // satisfy "anchor should be a real visit"; also realistic
+    const v2 = await createVisit(p2, 'DOCTOR#TAGS', 'Follow-up visit', {
+      tag: 'F',
+      anchorVisitId: anchor.visitId,
+    });
 
+    // ✅ "Z" is not a tag anymore; use zeroBilled flag
     const p3 = await createPatient('Tagged Zero', '+919999001003');
-    const v3 = await createVisit(p3, 'DOCTOR#TAGS', 'Zero billed visit', 'Z');
+    const v3 = await createVisit(p3, 'DOCTOR#TAGS', 'Zero billed visit', { zeroBilled: true });
 
-    await setVisitDateAndBilling(v1.visitId, v1.patientId, date);
-    await setVisitDateAndBilling(v2.visitId, v2.patientId, date);
-    await setVisitDateAndBilling(v3.visitId, v3.patientId, date);
+    await setVisitDateOnly(v1.visitId, v1.patientId, date);
+    await setVisitDateOnly(v2.visitId, v2.patientId, date);
+    await setVisitDateOnly(v3.visitId, v3.patientId, date);
 
     const res = await request(app)
       .get('/reports/daily/patients')
-      .set('Authorization', asAdmin())
+      .set('Authorization', adminAuthHeader)
       .query({ date })
       .expect(200);
 
@@ -327,7 +341,7 @@ describe('Daily Reports API', () => {
       newPatients: 1,
       followupPatients: 1,
       zeroBilledVisits: 1,
-      totalPatients: 3,
+      totalPatients: 2, // backend defines totalPatients = N + F (Z not additive)
     });
   });
 });

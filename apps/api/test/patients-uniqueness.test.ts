@@ -1,15 +1,23 @@
-import { afterEach, describe, it, expect } from 'vitest';
+// apps/api/test/patients-uniqueness.test.ts
+import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
-import { asReception } from './helpers/auth';
+import { warmAuth, asReception } from './helpers/auth';
 import { deletePatientCompletely } from './helpers/patients';
 
 const app = createApp();
+
+let receptionAuthHeader: string;
 
 const createdPatients: string[] = [];
 const registerPatient = (id: string) => {
   createdPatients.push(id);
 };
+
+beforeAll(async () => {
+  await warmAuth();
+  receptionAuthHeader = asReception();
+});
 
 afterEach(async () => {
   const ids = [...createdPatients];
@@ -23,7 +31,7 @@ afterEach(async () => {
 async function createPatient(name: string, phone: string) {
   const res = await request(app)
     .post('/patients')
-    .set('Authorization', asReception())
+    .set('Authorization', receptionAuthHeader)
     .send({
       name,
       phone,
@@ -41,13 +49,13 @@ describe('Patients – phone+name uniqueness', () => {
   it('allows same phone with different names but rejects same phone+same name', async () => {
     const phoneFmt1 = '+91 7749 123 456';
     const { patientId: p1Id } = await createPatient('Phone Test User', phoneFmt1);
-
     expect(p1Id).toBeDefined();
 
+    // Same phone (different formatting), different name => allowed
     const phoneFmt2 = '07749-123-456';
     const res2 = await request(app)
       .post('/patients')
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .send({
         name: 'Duplicate Phone User',
         phone: phoneFmt2,
@@ -60,27 +68,33 @@ describe('Patients – phone+name uniqueness', () => {
     registerPatient(p2Id);
     expect(p2Id).toBeDefined();
 
-    const res3 = await request(app).post('/patients').set('Authorization', asReception()).send({
-      name: 'Phone Test User',
-      phone: '07749123456',
-      dob: '1992-03-03',
-      gender: 'male',
-    });
+    // Same phone (normalized), same name => rejected
+    const res3 = await request(app)
+      .post('/patients')
+      .set('Authorization', receptionAuthHeader)
+      .send({
+        name: 'Phone Test User',
+        phone: '07749123456',
+        dob: '1992-03-03',
+        gender: 'male',
+      });
 
     expect(res3.status).toBe(409);
     expect(res3.body.error).toBe('DUPLICATE_PATIENT');
-
     expect(typeof res3.body.message).toBe('string');
   });
 
   it('enforces (phone+name) uniqueness on PATCH as well', async () => {
     const { patientId: aId } = await createPatient('Patient A', '+91 9999 111 222');
+    expect(aId).toBeDefined();
 
     const { patientId: bId } = await createPatient('Patient B', '+91 8888 111 222');
+    expect(bId).toBeDefined();
 
+    // Change B's phone to A's phone => allowed (name differs)
     const res1 = await request(app)
       .patch(`/patients/${bId}`)
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .send({
         phone: '09999111222',
       })
@@ -89,9 +103,10 @@ describe('Patients – phone+name uniqueness', () => {
     expect(res1.body.patientId).toBe(bId);
     expect(res1.body.name).toBe('Patient B');
 
+    // Now change B's name to A => conflict because phone+name matches A
     const res2 = await request(app)
       .patch(`/patients/${bId}`)
-      .set('Authorization', asReception())
+      .set('Authorization', receptionAuthHeader)
       .send({
         name: 'Patient A',
       });

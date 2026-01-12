@@ -1,3 +1,4 @@
+// packages/types/src/auth.ts
 import { z } from 'zod';
 import { Role, UserId } from './user';
 
@@ -12,15 +13,19 @@ export const RefreshRequest = z.object({
 });
 export type RefreshRequest = z.infer<typeof RefreshRequest>;
 
-export const JwtClaims = z.object({
+const BaseClaims = z.object({
   sub: UserId,
   role: Role,
   iat: z.number().int().nonnegative(),
   exp: z.number().int().nonnegative(),
 });
+
+export const JwtClaims = BaseClaims.extend({
+  type: z.literal('access'),
+});
 export type JwtClaims = z.infer<typeof JwtClaims>;
 
-export const RefreshTokenClaims = JwtClaims.extend({
+export const RefreshTokenClaims = BaseClaims.extend({
   jti: z.string().min(10),
   type: z.literal('refresh'),
 });

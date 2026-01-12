@@ -1,3 +1,4 @@
+// apps/api/src/middlewares/auth.ts
 import type { Request, Response, NextFunction } from 'express';
 import type { Role } from '@dms/types';
 import { verifyAccessToken } from '../lib/authTokens';
@@ -48,7 +49,8 @@ export const authMiddleware = async (req: Request, _res: Response, next: NextFun
       return next(new AuthError('USER_INACTIVE', 403, 'USER_INACTIVE'));
     }
 
-    req.auth = { userId: decoded.sub, role: decoded.role };
+    // ✅ Production-safe: role is sourced from DB (prevents stale-token privilege drift)
+    req.auth = { userId: user.userId, role: user.role };
     return next();
   } catch {
     return next(new AuthError('UNAUTHORIZED', 401, 'UNAUTHORIZED'));

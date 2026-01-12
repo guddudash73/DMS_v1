@@ -22,23 +22,34 @@ const REDACT_KEYS = new Set([
   'authorization',
   'cookie',
   'cookies',
+  'set-cookie',
 ]);
 
-function sanitize(payload: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
+function sanitizeAny(value: unknown, depth = 0): unknown {
+  if (depth > 4) return '[TRUNCATED]';
 
-  for (const [key, value] of Object.entries(payload)) {
-    const lower = key.toLowerCase();
+  if (Array.isArray(value)) return value.map((v) => sanitizeAny(v, depth + 1));
 
-    if (REDACT_KEYS.has(lower)) {
-      out[key] = '[READACTED]';
-      continue;
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    const out: Record<string, unknown> = {};
+
+    for (const [k, v] of Object.entries(obj)) {
+      const lower = k.toLowerCase();
+      if (REDACT_KEYS.has(lower)) {
+        out[k] = '[REDACTED]'; // ✅ fixed spelling
+      } else {
+        out[k] = sanitizeAny(v, depth + 1);
+      }
     }
-
-    out[key] = value;
+    return out;
   }
 
-  return out;
+  return value;
+}
+
+function sanitize(payload: Record<string, unknown>): Record<string, unknown> {
+  return sanitizeAny(payload, 0) as Record<string, unknown>;
 }
 
 function writeLog(level: LogLevel, event: string, payload: Record<string, unknown> = {}) {

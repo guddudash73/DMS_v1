@@ -9,8 +9,11 @@ import {
 import type { AdminUserListItem, Role } from '@dms/types';
 import { userRepository } from '../repositories/userRepository';
 import { logAudit } from '../lib/logger';
+import { requireRole } from '../middlewares/auth'; // ✅ ADD
 
 const r = Router();
+
+r.use(requireRole('ADMIN'));
 
 const SAFE_ROLES: Role[] = ['RECEPTION', 'VIEWER', 'ADMIN'];
 

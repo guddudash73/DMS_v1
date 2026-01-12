@@ -1,3 +1,4 @@
+// apps/api/src/repositories/billingRepository.ts
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
 import type { Billing, BillingCheckoutInput, Visit, VisitId } from '@dms/types';
 import { visitRepository } from './visitRepository';
@@ -160,7 +161,9 @@ export class DynamoDBBillingRepository implements BillingRepository {
     }
 
     const patient = await patientRepository.getById(visit.patientId);
-    if (!patient) {
+
+    // ✅ production-safe: treat deleted patient like missing
+    if (!patient || patient.isDeleted) {
       throw new BillingRuleViolationError('Cannot checkout visit for deleted or missing patient');
     }
 
@@ -357,6 +360,7 @@ export class DynamoDBBillingRepository implements BillingRepository {
     }
 
     const patient = await patientRepository.getById(visit.patientId);
+    // keep old behavior here; this is only for reading a bill
     if (!patient) {
       return null;
     }

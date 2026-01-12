@@ -1,5 +1,5 @@
+// apps/api/src/server.ts
 import express from 'express';
-import cors from 'cors';
 import cookieParser from 'cookie-parser';
 import { randomUUID } from 'node:crypto';
 import { parseEnv } from '@dms/config';
@@ -25,6 +25,7 @@ import { errorHandler } from './middlewares/errorHandler';
 import meRouter from './routes/me';
 import followupsRouter from './routes/followups';
 import adminUsersRouter from './routes/admin-users';
+import { createSecurityMiddleware } from './middlewares/securityHeaders';
 
 const env = parseEnv(process.env);
 
@@ -33,14 +34,9 @@ export const createApp = () => {
 
   app.set('trust proxy', 1);
 
-  app.use(
-    cors({
-      origin: env.CORS_ORIGIN ?? 'http://localhost:3000',
-      methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'X-Request-Id'],
-      credentials: true,
-    }),
-  );
+  // ✅ Single source of truth for CORS + security headers.
+  // Do NOT add another cors() middleware elsewhere.
+  app.use(createSecurityMiddleware(env));
 
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());

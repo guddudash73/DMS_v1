@@ -1,24 +1,23 @@
 // apps/api/test/patients.test.ts
-import { afterEach, describe, it, expect } from 'vitest';
+import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
-import { asReception } from './helpers/auth';
+import { warmAuth, asReception } from './helpers/auth';
 import { deletePatientCompletely } from './helpers/patients';
 
 const app = createApp();
 
 const createdPatients: string[] = [];
-const registerPatient = (id: string) => {
-  createdPatients.push(id);
-};
+const registerPatient = (id: string) => createdPatients.push(id);
+
+beforeAll(async () => {
+  await warmAuth();
+});
 
 afterEach(async () => {
   const ids = [...createdPatients];
   createdPatients.length = 0;
-
-  for (const id of ids) {
-    await deletePatientCompletely(id);
-  }
+  for (const id of ids) await deletePatientCompletely(id);
 });
 
 describe('Patients API', () => {
@@ -59,9 +58,7 @@ describe('Patients API', () => {
     const res = await request(app)
       .post('/patients')
       .set('Authorization', asReception())
-      .send({
-        name: '',
-      })
+      .send({ name: '' })
       .expect(400);
 
     expect(res.body.error).toBe('VALIDATION_ERROR');
@@ -97,7 +94,6 @@ describe('Patients API', () => {
     expect(Array.isArray(searchRes.body.items)).toBe(true);
 
     const found = searchRes.body.items.find((p: any) => p.patientId === patientId);
-
     expect(found).toBeDefined();
     expect(found.phone).toBe(phone);
     expect(found.name).toBe('Phone Search Patient');
