@@ -9,8 +9,15 @@ COPY . .
 
 ARG TURBO_SCOPE=@dcm/api
 
-# Use exact turbo version (no global install warning; fully reproducible)
-RUN npx -y turbo@2.6.0 prune --scope=$TURBO_SCOPE --docker
+# Optional but recommended: disable turbo telemetry in CI
+ENV TURBO_TELEMETRY_DISABLED=1
+
+# Install repo deps (without scripts) so turbo is "locally installed" and the warning goes away.
+# This does NOT run husky or any prepare/postinstall because we ignore scripts.
+RUN npm ci --ignore-scripts --no-audit --no-fund
+
+# Now prune using the local turbo from node_modules
+RUN npx turbo prune --scope=$TURBO_SCOPE --docker
 
 
 # -----------------------------------------
@@ -19,7 +26,11 @@ RUN npx -y turbo@2.6.0 prune --scope=$TURBO_SCOPE --docker
 FROM node:20 AS installer
 WORKDIR /repo
 
-# Copy only pruned manifests first (best caching)
+# Disable husky everywhere in Docker/CI so it never tries to install git hooks
+ENV HUSKY=0
+ENV TURBO_TELEMETRY_DISABLED=1
+
+# Copy only pruned manifests + lockfile first (best caching)
 COPY --from=turbo_pruner /repo/out/json/ ./
 COPY --from=turbo_pruner /repo/out/package-lock.json ./package-lock.json
 COPY --from=turbo_pruner /repo/turbo.json ./turbo.json
@@ -31,22 +42,23 @@ COPY --from=turbo_pruner /repo/tsconfig.base.json ./tsconfig.base.json
 # Native deps for bcrypt/sharp etc
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
-# Keep npm stable (optional). If you *must* pin, keep it here.
+# Keep npm stable (optional). If you must pin, keep it here.
 RUN npm -v && npm install -g npm@11.6.2 && npm -v
 
-# --- Debug sanity checks (safe to keep) ---
+# --- Debug sanity checks (optional) ---
 RUN test -f package-lock.json
 RUN node -e "JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log('package-lock.json: valid JSON')"
 RUN sed -n '1,40p' package-lock.json
 
 # ✅ Critical fix:
-# Turbo's pruned lockfile can be valid JSON but not "ci-installable" for npm.
-# Regenerate a lockfile that matches this pruned workspace, then run npm ci.
+# turbo's pruned lockfile can exist but still not be "ci-installable" for npm workspaces.
+# We regenerate a lockfile for the pruned workspace WITHOUT running scripts (avoids husky prepare),
+# then do a real npm ci (husky disabled via HUSKY=0).
 RUN rm -f package-lock.json \
-  && npm install --workspaces --include-workspace-root --package-lock-only --no-audit --no-fund \
+  && npm_config_ignore_scripts=true npm install --workspaces --include-workspace-root --package-lock-only --no-audit --no-fund \
   && npm ci --workspaces --include-workspace-root --no-audit --no-fund
 
-# Now copy full pruned source (doesn't affect npm ci cache correctness)
+# Now copy full pruned source
 COPY --from=turbo_pruner /repo/out/full/ ./
 
 
@@ -55,6 +67,8 @@ COPY --from=turbo_pruner /repo/out/full/ ./
 # ----------------------------
 FROM node:20 AS builder
 WORKDIR /repo
+ENV HUSKY=0
+ENV TURBO_TELEMETRY_DISABLED=1
 COPY --from=installer /repo ./
 RUN npx turbo run build --filter=@dcm/api...
 
@@ -64,6 +78,7 @@ RUN npx turbo run build --filter=@dcm/api...
 # ----------------------------
 FROM node:20 AS proddeps
 WORKDIR /repo
+ENV HUSKY=0
 COPY --from=installer /repo ./
 RUN npm prune --omit=dev
 
