@@ -1,103 +1,126 @@
 # Dockerfile.api
+# syntax=docker/dockerfile:1.6
+
+ARG NODE_VERSION=20
 
 # ----------------------------
 # 1) Prune monorepo with turbo
 # ----------------------------
-FROM node:20 AS pruner
+FROM node:${NODE_VERSION} AS pruner
 WORKDIR /repo
 COPY . .
 
 ENV TURBO_TELEMETRY_DISABLED=1
 ENV HUSKY=0
 
-# Install root deps (no scripts) so turbo is locally available
+# Install full repo deps without scripts so turbo is "local" (no warning)
 RUN npm ci --ignore-scripts --no-audit --no-fund
 
-ARG TURBO_SCOPE=@dcm/api
-RUN npx turbo prune --scope=$TURBO_SCOPE --docker
+# Prune the monorepo to only what the API build needs
+RUN npx turbo prune \
+  --scope=@dcm/api \
+  --scope=@dcm/config \
+  --scope=@dcm/types \
+  --docker
 
 
 # -----------------------------------------
-# 2) Install deps + build inside pruned tree
+# 2) Install deps inside the pruned workspace
 # -----------------------------------------
-FROM node:20 AS build
+FROM node:${NODE_VERSION} AS deps
 WORKDIR /repo
 
 ENV TURBO_TELEMETRY_DISABLED=1
 ENV HUSKY=0
 
-# Native deps for bcrypt/sharp etc
+# Copy pruned manifests + lockfile first for caching
+COPY --from=pruner /repo/out/json/ ./
+COPY --from=pruner /repo/out/package-lock.json ./package-lock.json
+COPY --from=pruner /repo/turbo.json ./turbo.json
+
+# TS configs used by builds (repo specific)
+COPY --from=pruner /repo/packages/tsconfig/base.json ./packages/tsconfig/base.json
+COPY --from=pruner /repo/tsconfig.base.json ./tsconfig.base.json
+
+# Native build deps for bcrypt/sharp/etc
 RUN apt-get update \
   && apt-get install -y --no-install-recommends python3 make g++ \
   && rm -rf /var/lib/apt/lists/*
 
-# Copy pruned manifests first (better caching)
-COPY --from=pruner /repo/out/json/ ./
-COPY --from=pruner /repo/out/package-lock.json ./package-lock.json
-COPY --from=pruner /repo/turbo.json ./turbo.json
-COPY --from=pruner /repo/packages/tsconfig/base.json ./packages/tsconfig/base.json
-COPY --from=pruner /repo/tsconfig.base.json ./tsconfig.base.json
-
-# Pin npm to match repo
+# Optional pin: keep npm consistent with your repo
 RUN npm install -g npm@11.6.2
 
-# turbo’s lockfile in pruned output can be non-ci-installable; regenerate lockfile safely then ci
+# turbo's pruned lockfile often isn't directly ci-installable for npm workspaces.
+# Regenerate lockfile in the pruned workspace without scripts, then npm ci.
 RUN rm -f package-lock.json \
   && npm_config_ignore_scripts=true npm install --workspaces --include-workspace-root --package-lock-only --no-audit --no-fund \
   && npm ci --workspaces --include-workspace-root --no-audit --no-fund
 
-# Copy full pruned source and build
+# Copy full pruned source after deps are installed
 COPY --from=pruner /repo/out/full/ ./
+
+
+# ----------------------------
+# 3) Build only the API target
+# ----------------------------
+FROM node:${NODE_VERSION} AS build
+WORKDIR /repo
+
+ENV TURBO_TELEMETRY_DISABLED=1
+ENV HUSKY=0
+ENV NODE_ENV=production
+
+COPY --from=deps /repo ./
+
+
+# Build API (and its dependent packages) using turbo
 RUN npx turbo run build --filter=@dcm/api...
 
-
-# -----------------------------------------
-# 3) Runtime deps install (NO npm prune)
-# -----------------------------------------
-FROM node:20 AS runtime_deps
+# ----------------------------
+# 4) Production node_modules only
+# ----------------------------
+FROM node:${NODE_VERSION} AS proddeps
 WORKDIR /repo
-
 ENV HUSKY=0
-ENV NODE_ENV=production
+COPY --from=deps /repo ./
 
-# Only need package manifests + lockfile for production install
-COPY --from=build /repo/package.json ./package.json
-COPY --from=build /repo/package-lock.json ./package-lock.json
-COPY --from=build /repo/apps/api/package.json ./apps/api/package.json
-COPY --from=build /repo/packages/config/package.json ./packages/config/package.json
-COPY --from=build /repo/packages/types/package.json ./packages/types/package.json
 
-# If your runtime needs workspace resolution, include minimal workspace metadata
-COPY --from=build /repo/turbo.json ./turbo.json
-COPY --from=build /repo/tsconfig.base.json ./tsconfig.base.json
-COPY --from=build /repo/packages/tsconfig/base.json ./packages/tsconfig/base.json
-
-RUN npm install -g npm@11.6.2
-
-# Deterministic production-only install
-RUN npm ci --omit=dev --workspaces --include-workspace-root --no-audit --no-fund
+# Remove devDependencies (keeps runtime smaller)
+RUN npm prune --omit=dev
 
 
 # ----------------------------
-# 4) Minimal runtime image
+# 5) Minimal runtime image
 # ----------------------------
-FROM node:20-slim AS runner
+FROM node:${NODE_VERSION}-slim AS runner
 WORKDIR /repo
 
 ENV NODE_ENV=production
-ENV HUSKY=0
+ENV TURBO_TELEMETRY_DISABLED=1
 
+# Add minimal OS deps
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && apt-get install -y --no-install-recommends ca-certificates openssl \
   && rm -rf /var/lib/apt/lists/*
 
-# Runtime deps
-COPY --from=runtime_deps /repo/node_modules ./node_modules
+# Create non-root user
+RUN useradd -m -u 10001 nodeapp
 
-# Built artifacts
+# Copy only runtime necessities
+COPY --from=proddeps /repo/node_modules ./node_modules
 COPY --from=build /repo/apps/api/dist ./apps/api/dist
 COPY --from=build /repo/packages/config/dist ./packages/config/dist
 COPY --from=build /repo/packages/types/dist ./packages/types/dist
 
+# If your API reads package.json at runtime, copy only the API one:
+COPY --from=build /repo/apps/api/package.json ./apps/api/package.json
+
+USER nodeapp
+
 EXPOSE 4000
+
+# Basic healthcheck (adjust /health if you have it)
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:4000/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
 CMD ["node", "--enable-source-maps", "apps/api/dist/index.js"]

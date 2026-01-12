@@ -19,8 +19,8 @@
     "@aws-sdk/client-s3": "^3.946.0",
     "@aws-sdk/lib-dynamodb": "^3.946.0",
     "@aws-sdk/s3-request-presigner": "^3.946.0",
-    "@dms/config": "file:../../packages/config",
-    "@dms/types": "file:../../packages/types",
+    "@dcm/config": "file:../../packages/config",
+    "@dcm/types": "file:../../packages/types",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -32,7 +32,7 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
-    "@dms/eslint-config": "file:../../packages/eslint-config",
+    "@dcm/eslint-config": "file:../../packages/eslint-config",
     "@types/aws-lambda": "^8.10.159",
     "@types/bcrypt": "^5.0.2",
     "@types/cookie-parser": "^1.4.7",
@@ -49,7 +49,7 @@
   },
   "eslintConfig": {
     "extends": [
-      "@dms/eslint-config"
+      "@dcm/eslint-config"
     ]
   }
 }
