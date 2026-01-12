@@ -29,6 +29,10 @@ RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt
 RUN npm -v && npm install -g npm@11.6.2 && npm -v
 
 RUN test -f package-lock.json
+
+RUN node -e "JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log('package-lock.json: valid JSON')"
+RUN sed -n '1,40p' package-lock.json
+
 RUN npm ci --workspaces --include-workspace-root
 
 # Now copy full pruned source
