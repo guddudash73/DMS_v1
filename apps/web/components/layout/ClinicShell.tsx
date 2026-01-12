@@ -1,4 +1,3 @@
-// apps/web/components/layout/ClinicShell.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
@@ -14,7 +13,7 @@ import {
   Calendar,
   Clock,
   Settings,
-  Printer, // ✅ NEW
+  Printer,
 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -64,7 +63,6 @@ const mainNav: NavItem[] = [
   { label: 'Daily Report', href: '/reports', icon: FileText },
   { label: 'WBC/Reminder Call', href: '/reminders', icon: Headphones },
 
-  // ✅ NEW: Prescription Preset Print
   { label: 'Preset Print', href: '/preset-print', icon: Printer },
 ];
 
@@ -94,7 +92,7 @@ const deriveTitleFromPath = (pathname: string): string => {
   if (pathname.startsWith('/patients')) return 'Patients';
   if (pathname.startsWith('/reports')) return 'Daily Report';
   if (pathname.startsWith('/reminders')) return 'WBC/Reminder Call';
-  if (pathname.startsWith('/preset-print')) return 'Preset Print'; // ✅ NEW
+  if (pathname.startsWith('/preset-print')) return 'Preset Print';
   if (pathname.startsWith('/settings')) return 'Settings';
   return 'Dashboard';
 };
@@ -179,16 +177,10 @@ export default function ClinicShell({ children }: ClinicShellProps) {
   const newPatientsToday = patientSummary?.newPatients;
   const followupPatientsToday = patientSummary?.followupPatients;
 
-  /**
-   * ✅ FIX:
-   * zeroBilled is a checkbox on a visit (can be N or F), so it must NOT increase total.
-   * Total patients shown in header must be: N + F only.
-   */
   const totalPatientsDerived =
     (typeof newPatientsToday === 'number' ? newPatientsToday : 0) +
     (typeof followupPatientsToday === 'number' ? followupPatientsToday : 0);
 
-  // Search state (same as your existing)
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -301,7 +293,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
 
   const isAnyModalOpen = isNewPatientOpen || Boolean(visitModalPatientId);
 
-  // Panel switcher (admins only)
   const showPanelSwitcher = auth.status === 'authenticated' && auth.role === 'ADMIN';
   const currentPanel = useMemo(() => deriveCurrentPanelFromPath(pathname), [pathname]);
 
@@ -313,7 +304,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
     if (next === 'ADMIN') router.replace('/admin');
   };
 
-  // nav: reuse chrome; only provide config
   const nav: NavItem[] = [
     ...mainNav.map((i) =>
       i.href === '/patients/new' ? { ...i, onClick: () => setIsNewPatientOpen(true) } : i,

@@ -1,4 +1,3 @@
-// apps/web/components/dashboard/DoctorQueueCard.tsx
 'use client';
 
 import * as React from 'react';
@@ -33,11 +32,6 @@ function emptyTextForColumn(status: VisitStatus): string {
   return 'No completed visits yet.';
 }
 
-function getVisitLabel(v: PatientQueueItem): string {
-  const name = v.patientName?.trim();
-  return name && name.length > 0 ? name : `Patient: ${v.patientId}`;
-}
-
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
@@ -46,6 +40,18 @@ function isOfflineQueueItem(v: PatientQueueItem): boolean {
   const rec: unknown = v;
   if (!isRecord(rec)) return false;
   return rec.isOffline === true;
+}
+
+function getDailyPatientNumber(v: PatientQueueItem): number | null {
+  const rec: unknown = v;
+  if (!isRecord(rec)) return null;
+  const raw = rec.dailyPatientNumber;
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 1 ? raw : null;
+}
+
+function getVisitLabel(v: PatientQueueItem): string {
+  const name = v.patientName?.trim();
+  return name && name.length > 0 ? name : `Patient: ${v.patientId}`;
 }
 
 /** ✅ Smaller offline badge */
@@ -65,11 +71,13 @@ function QueueItemRow({
   status,
   onClick,
   isOffline,
+  dailyPatientNumber,
 }: {
   label: string;
   status: VisitStatus;
   onClick: () => void;
   isOffline?: boolean;
+  dailyPatientNumber?: number | null;
 }) {
   return (
     <button
@@ -79,6 +87,10 @@ function QueueItemRow({
       title="Open visit"
     >
       <span className="min-w-0 truncate font-medium">
+        <span className="mr-2 inline-flex h-6 min-w-[44px] items-center justify-center rounded-lg border bg-gray-50 px-2 text-[11px] font-semibold text-gray-700">
+          {dailyPatientNumber ? `#${dailyPatientNumber}` : '—'}
+        </span>
+
         {label}
         {isOffline ? <OfflineBadge /> : null}
       </span>
@@ -178,6 +190,7 @@ export default function DoctorQueueCard() {
                           status={v.status}
                           onClick={() => openClinicVisit(v.visitId)}
                           isOffline={isOfflineQueueItem(v)}
+                          dailyPatientNumber={getDailyPatientNumber(v)}
                         />
                       ))}
 

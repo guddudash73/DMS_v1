@@ -1,4 +1,3 @@
-// apps/web/components/xray/XrayUploader.tsx
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
@@ -164,7 +163,6 @@ export function XrayUploader({ visitId, onUploaded, variant = 'default', classNa
 
       if (lastErr) throw lastErr;
 
-      // ✅ remove `as any` by using the mutation argument type
       type RegisterMetaArg = Parameters<typeof registerMeta>[0];
 
       const payload: RegisterMetaArg = {
@@ -174,7 +172,6 @@ export function XrayUploader({ visitId, onUploaded, variant = 'default', classNa
         size: file.size,
         takenAt: Date.now(),
         contentKey: presignRes.key,
-        // ✅ include when supported by API typings; cast keeps lint clean
         ...({ takenByUserId: userId } as unknown as Partial<RegisterMetaArg>),
       };
 

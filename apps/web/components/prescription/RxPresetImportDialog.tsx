@@ -1,4 +1,3 @@
-// apps/web/components/prescription/RxPresetImportDialog.tsx
 'use client';
 
 import * as React from 'react';
@@ -26,10 +25,8 @@ type Props = {
 
   disabled?: boolean;
 
-  /** UI hint only */
   append?: boolean;
 
-  /** UI hint only */
   existingCount?: number;
 
   onImport: (lines: RxLineType[]) => void;
@@ -41,7 +38,6 @@ function scopeBadge(scope?: string) {
   return { label: 'Private', className: 'bg-slate-100 text-slate-700 border border-slate-200' };
 }
 
-/** ---------- Safe helpers (replace `any` with `unknown` without changing behavior) ---------- */
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
@@ -72,15 +68,7 @@ function getStringArray(obj: unknown, key: string): string[] | undefined {
   const out = val.filter((x) => typeof x === 'string') as string[];
   return out.length ? out : undefined;
 }
-/** ----------------------------------------------------------------------------------------- */
 
-/**
- * Normalize preset lines into RxLineType used by MedicinesEditor
- *
- * IMPORTANT:
- * In this repo, RxLineType appears to have required fields: medicine, dose, frequency, duration.
- * So we always provide safe defaults for those fields to satisfy typing and keep imports stable.
- */
 function normalizePresetLines(lines: unknown[]): RxLineType[] {
   return (lines ?? [])
     .map((lUnknown) => {
@@ -184,7 +172,6 @@ export function RxPresetImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* ✅ Bigger popup/card */}
       <DialogContent className="w-[95vw] max-w-[1600px] rounded-3xl p-0 overflow-hidden">
         <div className="flex h-[78vh] flex-col">
           <DialogHeader className="px-6 pt-6 pb-4 border-b bg-linear-to-b from-white to-gray-50">
@@ -245,7 +232,6 @@ export function RxPresetImportDialog({
           </DialogHeader>
 
           <div className="flex min-h-0 flex-1 flex-col gap-0 lg:flex-row">
-            {/* Left: list */}
             <div className="min-h-0 flex-1 border-b lg:border-b-0 lg:border-r bg-white">
               <div className="px-6 py-3 text-xs font-semibold text-gray-600">
                 Presets {items.length ? `(${items.length})` : ''}
@@ -310,7 +296,6 @@ export function RxPresetImportDialog({
               </div>
             </div>
 
-            {/* Right: preview */}
             <div className="min-h-0 w-full lg:w-[42%] bg-gray-50">
               <div className="px-6 py-3 text-xs font-semibold text-gray-600">Preview</div>
 
@@ -374,7 +359,6 @@ export function RxPresetImportDialog({
             </div>
           </div>
 
-          {/* Footer */}
           <div className="border-t bg-white px-6 py-4">
             <div className="flex items-center justify-between gap-3">
               <div className="text-xs text-gray-500">

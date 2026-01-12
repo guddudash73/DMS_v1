@@ -12,13 +12,9 @@ import { CLINIC_TZ } from '@/src/lib/clinicTime';
 
 type Props = {
   visitId: string;
-  /**
-   * embedded: no internal header (best for Medicines card)
-   * standalone: includes internal title + refresh (old behavior)
-   */
+
   variant?: 'embedded' | 'standalone';
 
-  /** ✅ if false, hide delete UI (read-only mode) */
   canDelete?: boolean;
 };
 
@@ -40,7 +36,6 @@ function formatClinicDateTime(ts: number | string) {
 function getErrorMessage(err: unknown): string | undefined {
   if (!err) return undefined;
 
-  // Handle RTK Query / fetch-ish errors: { data: { message } } or { message }
   if (typeof err === 'object') {
     const e = err as Record<string, unknown>;
     const msg = e.message;
@@ -120,7 +115,6 @@ export function XrayGallery({ visitId, variant = 'standalone', canDelete = true 
 
   return (
     <div className={variant === 'embedded' ? 'rounded-xl border bg-white p-3' : 'space-y-3'}>
-      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="text-sm font-semibold text-gray-900">X-rays</div>
         <button
@@ -143,7 +137,6 @@ export function XrayGallery({ visitId, variant = 'standalone', canDelete = true 
               key={x.xrayId}
               className="group relative rounded-2xl border bg-white p-2 pb-4 transition hover:shadow-sm"
             >
-              {/* Viewer button */}
               <button
                 type="button"
                 className="relative block rounded-xl focus:outline-none focus:ring-2 focus:ring-gray-900/20"
@@ -153,7 +146,6 @@ export function XrayGallery({ visitId, variant = 'standalone', canDelete = true 
                 <Thumb xrayId={x.xrayId} />
               </button>
 
-              {/* ✅ Delete only when allowed */}
               {canDelete ? (
                 <Button
                   type="button"
@@ -193,7 +185,6 @@ export function XrayGallery({ visitId, variant = 'standalone', canDelete = true 
         />
       )}
 
-      {/* Confirm delete dialog */}
       {canDelete ? (
         <Dialog
           open={confirmOpen}

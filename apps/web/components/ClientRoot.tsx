@@ -10,7 +10,6 @@ export default function ClientRoot({ children }: { children: React.ReactNode }) 
     <StoreProvider>
       {children}
 
-      {/* Toastify container */}
       <ToastContainer
         position="top-right"
         autoClose={3000}

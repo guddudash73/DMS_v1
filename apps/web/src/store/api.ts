@@ -602,7 +602,7 @@ export const apiSlice = createApi({
         url: '/reports/daily/patients/series',
         params: { startDate, endDate },
       }),
-      providesTags: () => [{ type: 'DailyPatientSummary' as const, id: 'SERIES' }], // ✅ ADD
+      providesTags: () => [{ type: 'DailyPatientSummary' as const, id: 'SERIES' }],
     }),
 
     getDailyVisitsBreakdown: builder.query<
@@ -1151,7 +1151,6 @@ export const apiSlice = createApi({
       invalidatesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
     }),
 
-    // ✅ NEW: Doctor notes (for reception only, not printed)
     updateVisitRxDoctorNotes: builder.mutation<
       { rx: Prescription },
       { visitId: string; doctorNotes: string }

@@ -27,8 +27,6 @@ export default function AuthReadyGate({ children }: { children: React.ReactNode 
       return;
     }
 
-    // dispatch(setChecking());
-
     if (!bootstrapPromise) {
       bootstrapPromise = (async () => {
         try {

@@ -1,4 +1,3 @@
-// apps/web/components/prescription/PrescriptionPrintSheet.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -20,13 +19,8 @@ type Props = {
 
   sdId?: string;
 
-  /**
-   * NOTE:
-   * This might be current visit OPD; header will prefer anchor/new OPD from meta.
-   */
   opdNo?: string;
 
-  // kept for compatibility, but intentionally not used anymore
   doctorName?: string;
   doctorRegdLabel?: string;
   visitDateLabel?: string;
@@ -40,9 +34,6 @@ type Props = {
 
   receptionNotes?: string;
 
-  /**
-   * ✅ current visit tooth details
-   */
   toothDetails?: ToothDetail[];
 };
 
@@ -92,7 +83,6 @@ function formatAgeSex(age?: number | string, sex?: PatientSex) {
   return ageStr || sexStr || '—';
 }
 
-/** ---------- Safe meta readers (remove `any` without changing behavior) ---------- */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -117,7 +107,6 @@ function getMetaString(v: unknown, key: string): string | undefined {
   if (typeof val === 'number' || typeof val === 'boolean') return String(val);
   return undefined;
 }
-/** ----------------------------------------------------------------------------- */
 
 function getVisitOpdNo(v?: Visit): string | undefined {
   if (!v) return undefined;
@@ -138,9 +127,6 @@ function VisitRxBlock(props: {
   showOpdInline?: boolean;
   opdInlineText?: string;
 
-  /**
-   * ✅ current visit tooth details
-   */
   currentToothDetails: ToothDetail[];
 }) {
   const {
@@ -186,7 +172,6 @@ function VisitRxBlock(props: {
         </div>
       </div>
 
-      {/* ✅ Tooth details */}
       {hasToothDetails ? (
         <div className="mb-2">
           <ToothDetailsBlock toothDetails={toothDetails} />
@@ -248,20 +233,17 @@ export function PrescriptionPrintSheet(props: Props) {
     [visitMetaMapProp],
   );
 
-  // ✅ historyEnabled mirrors the preview logic: only "real history mode" when all props are present
   const historyEnabled =
     !!currentVisitIdProp &&
     !!chainVisitIdsProp &&
     chainVisitIdsProp.length > 0 &&
     !!visitMetaMapProp;
 
-  // ✅ anchor/new visit is always first (when history enabled)
   const anchorVisitId = useMemo(() => {
     if (!historyEnabled) return undefined;
     return chainVisitIds[0];
   }, [historyEnabled, chainVisitIds]);
 
-  // ✅ HEADER OPD MUST BE ANCHOR/NEW VISIT OPD (fallback to prop)
   const headerOpdNo = useMemo(() => {
     if (historyEnabled && anchorVisitId) {
       const anchorVisit = visitMetaMap.get(anchorVisitId);
@@ -274,7 +256,6 @@ export function PrescriptionPrintSheet(props: Props) {
   const currentToothDetails = useMemo(() => toothDetailsProp ?? [], [toothDetailsProp]);
   const showCurrentToothDetails = !historyEnabled && currentToothDetails.length > 0;
 
-  // ✅ Header micro-text
   const CONTACT_NUMBER = '9938942846';
   const ADDRESS_ONE_LINE = 'A-33, STALWART COMPLEX, UNIT - IV, BHUBANESWAR';
   const CLINIC_HOURS =
@@ -330,10 +311,8 @@ export function PrescriptionPrintSheet(props: Props) {
 
       <div className="rx-a4 text-black">
         <div className="flex h-full flex-col">
-          {/* Header */}
           <div className="rx-print-header shrink-0 px-10">
             <div className="flex items-start justify-between gap-4">
-              {/* Left Logo */}
               <div className="relative h-20 w-20">
                 <Image
                   src="/rx-logo-r.png"
@@ -345,7 +324,6 @@ export function PrescriptionPrintSheet(props: Props) {
                 />
               </div>
 
-              {/* Center */}
               <div className="mt-2 flex w-full flex-col items-center justify-center text-center">
                 <div className="text-[12px] font-semibold tracking-[0.25em] text-emerald-600">
                   CONTACT
@@ -360,7 +338,6 @@ export function PrescriptionPrintSheet(props: Props) {
                 </div>
               </div>
 
-              {/* Right Logo */}
               <div className="relative h-18 w-42">
                 <Image
                   src="/dashboard-logo.png"
@@ -376,7 +353,6 @@ export function PrescriptionPrintSheet(props: Props) {
 
           <div className="rx-print-sep-top mt-2 h-px w-full bg-emerald-600/60" />
 
-          {/* Doctor row */}
           <div className="rx-print-doctor shrink-0 px-4 pt-3">
             <div className="flex items-start justify-between gap-6">
               <div className="flex flex-col">
@@ -393,7 +369,6 @@ export function PrescriptionPrintSheet(props: Props) {
             </div>
           </div>
 
-          {/* Patient meta */}
           <div className="rx-print-patient shrink-0 px-4 pt-2">
             <div className="mt-1 flex w-full justify-between gap-6">
               <div className="space-y-1 text-[11px] text-gray-800">
@@ -431,7 +406,6 @@ export function PrescriptionPrintSheet(props: Props) {
                   <div className="font-semibold text-gray-900">{sdId ?? '—'}</div>
                 </div>
 
-                {/* ✅ Header OPD shows PARENT/NEW (anchor) visit OPD */}
                 <div className="flex gap-3">
                   <div className="w-28 text-gray-600">OPD. No</div>
                   <div className="text-gray-600">:</div>
@@ -443,11 +417,9 @@ export function PrescriptionPrintSheet(props: Props) {
 
           <div className="rx-print-sep-mid mt-3 h-px w-full bg-gray-900/30" />
 
-          {/* Medicines */}
           <div className="rx-print-medicines min-h-0 flex-1 pt-4">
             {!historyEnabled ? (
               <div className="px-4">
-                {/* ✅ MATCH PREVIEW: show tooth details even when not in history mode */}
                 {showCurrentToothDetails ? (
                   <div className="mb-3">
                     <ToothDetailsBlock toothDetails={currentToothDetails} />
@@ -495,7 +467,6 @@ export function PrescriptionPrintSheet(props: Props) {
             )}
           </div>
 
-          {/* Notes */}
           {hasNotes ? (
             <div className="rx-print-notes shrink-0 pb-2">
               <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">

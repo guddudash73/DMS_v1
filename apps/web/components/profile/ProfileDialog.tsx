@@ -5,7 +5,6 @@ import { useGetMeQuery, useUpdateMeMutation } from '@/src/store/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
-// shadcn dialog
 import {
   Dialog,
   DialogContent,
@@ -38,7 +37,7 @@ export default function ProfileDialog(props: {
     isLoading,
     refetch,
   } = useGetMeQuery(undefined, {
-    skip: !props.open, // only fetch when opened
+    skip: !props.open,
   });
   const [updateMe, { isLoading: isSaving }] = useUpdateMeMutation();
 

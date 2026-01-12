@@ -1,3 +1,4 @@
+// apps/web/src/lib/printing/escpos.ts
 import type { TokenPrintPayload } from '@dms/types';
 import { CLINIC_TZ } from '../clinicTime';
 
@@ -29,6 +30,49 @@ function maskPhone(phone?: string) {
   return `XXXXXX${last4}`;
 }
 
+function parseDobIso(dob?: string): { y: number; m: number; d: number } | null {
+  if (!dob) return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const da = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(da)) return null;
+  return { y, m: mo, d: da };
+}
+
+function calcAge(dobIso: string, atMs: number): number | null {
+  const p = parseDobIso(dobIso);
+  if (!p) return null;
+
+  // local date components (good enough for clinical age display)
+  const at = new Date(atMs);
+  const ay = at.getFullYear();
+  const am = at.getMonth() + 1;
+  const ad = at.getDate();
+
+  let age = ay - p.y;
+  if (am < p.m || (am === p.m && ad < p.d)) age -= 1;
+  if (!Number.isFinite(age) || age < 0) return null;
+  return age;
+}
+
+function sexShort(g?: string): string | undefined {
+  if (!g) return undefined;
+  const s = String(g).toUpperCase().trim();
+  if (s === 'MALE') return 'M';
+  if (s === 'FEMALE') return 'F';
+  if (s === 'OTHER') return 'O';
+  if (s === 'UNKNOWN') return 'U';
+  return undefined;
+}
+
+function blankLines(n: number) {
+  let out = '';
+  for (let i = 0; i < n; i++) out += LF;
+  return out;
+}
+
 export function buildTokenEscPos(p: TokenPrintPayload): string {
   const clinicName = (p.clinicName ?? 'SARANGI DENTISTRY').slice(0, 32);
   const clinicPhone = p.clinicPhone ? String(p.clinicPhone).slice(0, 32) : '';
@@ -42,11 +86,22 @@ export function buildTokenEscPos(p: TokenPrintPayload): string {
     .slice(0, 64);
 
   const tag = p.tag ?? 'N';
-  const offline = !!(p as any).isOffline;
+  const offline = !!p.isOffline;
 
   const visitNo = p.visitNumberForPatient;
-  const waitingNo = p.tokenNumber;
+
+  // ✅ stable daily patient number (fallback for safety)
+  const patientNo = typeof p.dailyPatientNumber === 'number' ? p.dailyPatientNumber : p.tokenNumber;
+
   const created = fmtDateTime(p.createdAt);
+
+  const opdNo = p.opdNo ? String(p.opdNo).slice(0, 32) : '';
+  const sdId = p.sdId ? String(p.sdId).slice(0, 32) : '';
+
+  const age = p.patientDob ? calcAge(p.patientDob, p.createdAt) : null;
+  const sx = sexShort(p.patientGender);
+
+  const ageSex = age !== null && sx ? `${age}/${sx}` : age !== null ? `${age}` : sx ? `${sx}` : '';
 
   const init = ESC + '@';
   const alignLeft = ESC + 'a' + '\x00';
@@ -72,27 +127,54 @@ export function buildTokenEscPos(p: TokenPrintPayload): string {
 
   out += hr();
   out += boldOn;
-  out += `WAITING NO: ${waitingNo}${LF}`;
+  out += `PATIENT NO: ${patientNo}${LF}`;
   out += boldOff;
   out += hr();
 
   out += alignLeft;
   out += `Name   : ${patientName}${LF}`;
   if (phoneMasked) out += `Phone  : ${phoneMasked}${LF}`;
-  out += `Reason : ${reason}${LF}`;
+  if (ageSex) out += `Age/Sex: ${ageSex}${LF}`;
+  if (sdId) out += `SD ID  : ${sdId}${LF}`;
+  if (opdNo) out += `OPD No : ${opdNo}${LF}`;
 
-  // ✅ "offline tag" on token
+  out += `Reason : ${reason}${LF}`;
   out += `Tag    : ${offline ? `${tag} / OFFLINE` : tag}${LF}`;
 
   out += `Visit# : ${visitNo}${LF}`;
-  out += `VisitId: ${p.visitId}${LF}`;
   out += `Time   : ${created}${LF}`;
   out += `Date   : ${p.visitDate}${LF}`;
 
   out += LF;
+  out += hr();
+
+  // ✅ Medical history checklist (patient ticks manually)
+  out += boldOn + `Medical History (tick):` + LF + boldOff;
+  out += `[ ] Diabetes` + LF;
+  out += `[ ] BP` + LF;
+  out += `[ ] Hepatitis` + LF;
+  out += `[ ] HIV` + LF;
+  out += `[ ] Asthma` + LF;
+  out += `[ ] Steriod` + LF;
+  out += `[ ] Blood Thinner` + LF;
+  out += `[ ] Heart Medicine` + LF;
+  out += `[ ] Drug Allergy` + LF;
+
+  out += hr();
+
+  // ✅ Procedure section with 6 lines
+  out += boldOn + `Procedure:` + LF + boldOff;
+  out += blankLines(2);
+
+  out += hr();
+
+  // ✅ Bottom notes section: divider + 8 blank lines
+  // out += `------------------` + LF;
+  out += blankLines(6);
+
   out += alignCenter;
-  out += `Please wait for your turn${LF}`;
-  out += `THANK YOU.${LF}`;
+  out += `Please wait for your turn` + LF;
+  out += `THANK YOU.` + LF;
   out += LF + LF;
 
   out += cut;

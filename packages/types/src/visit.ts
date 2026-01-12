@@ -1,3 +1,4 @@
+// packages/types/src/visit.ts
 import { z } from 'zod';
 import { PatientId } from './patient';
 
@@ -24,6 +25,10 @@ export const Visit = z.object({
 
   opdNo: z.string().min(1).optional(),
 
+  // ✅ NEW: stable daily number (1..N) for that clinic date
+  // optional to keep backward compatibility with older records
+  dailyPatientNumber: z.number().int().min(1).optional(),
+
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 
@@ -38,7 +43,7 @@ export const Visit = z.object({
   // ✅ For F visits, points to an N visitId
   anchorVisitId: VisitId.optional(),
 
-  // ✅ NEW: offline visit (no rx in DB, can go QUEUED -> DONE)
+  // ✅ offline visit (no rx in DB, can go QUEUED -> DONE)
   isOffline: z.boolean().optional(),
 
   currentRxId: z.string().min(1).optional(),
@@ -70,7 +75,7 @@ export const VisitCreate = z
     // ✅ required when tag === 'F'
     anchorVisitId: VisitId.optional(),
 
-    // ✅ NEW: offline visit creation
+    // ✅ offline visit creation
     isOffline: z.boolean().optional(),
   })
   .superRefine((val, ctx) => {

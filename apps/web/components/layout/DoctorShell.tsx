@@ -1,4 +1,3 @@
-// apps/web/components/layout/DoctorShell.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -24,7 +23,7 @@ import {
   useGetPatientsQuery,
   useGetPatientQueueQuery,
   useGetMeQuery,
-  useClinicRealtimeQuery, // ✅ add
+  useClinicRealtimeQuery,
   type ErrorResponse,
 } from '@/src/store/api';
 import LogoutButton from '@/components/auth/LogoutButton';
@@ -93,7 +92,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
 
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
-  // ✅ IMPORTANT: doctor panel now subscribes to WS invalidation too
   useClinicRealtimeQuery(undefined, { skip: !canUseApi });
 
   const { data: me } = useGetMeQuery(undefined, { skip: !canUseApi });
@@ -120,7 +118,6 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
     };
   }, [auth.userId, me?.doctorProfile?.fullName, me?.displayName]);
 
-  // 🔍 search unchanged
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);

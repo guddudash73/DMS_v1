@@ -1,3 +1,4 @@
+// apps/web/components/visits/RegisterVisitModal.tsx
 'use client';
 
 import * as React from 'react';
@@ -44,6 +45,7 @@ type VisitSummaryItem = {
   createdAt?: number;
   opdNo?: string;
   tag?: string;
+  reason?: string; // ✅ add reason for label
 };
 
 type PatientVisitsResponse = {
@@ -52,6 +54,14 @@ type PatientVisitsResponse = {
 
 function safeVisitLabel(v: VisitSummaryItem) {
   const date = v.visitDate ? String(v.visitDate) : '—';
+
+  const reason = String(v.reason ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (reason) return `${date} • ${reason}`;
+
+  // fallback (if backend doesn't send reason yet)
   const idShort = v.visitId ? `#${String(v.visitId).slice(0, 8)}` : '';
   const opd = v.opdNo ? String(v.opdNo) : idShort;
   return `${date} • ${opd}`;
@@ -110,7 +120,7 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
       tag: 'N',
       zeroBilled: false,
       anchorVisitId: undefined,
-      isOffline: false, // ✅ NEW
+      isOffline: false,
     },
   });
 
@@ -120,7 +130,7 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
 
   const selectedTag = watch('tag');
   const zeroBilled = watch('zeroBilled');
-  const isOffline = watch('isOffline'); // ✅ NEW
+  const isOffline = watch('isOffline');
 
   const anchorCandidates = React.useMemo(() => {
     const data = visitsQuery.data as unknown as PatientVisitsResponse | undefined;
@@ -163,7 +173,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
       const resp = await createVisit(values).unwrap();
       toast.success('Visit created successfully.');
 
-      // ✅ Print token (same flow)
       try {
         const settings = loadPrintSettings();
         if (settings.autoPrintToken && settings.printerName) {
@@ -176,7 +185,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
         toast.error('Visit created, but printing failed. Is QZ Tray running?');
       }
 
-      // ✅ NEW: Offline visit redirects to *blank prescription page*
       if (values.isOffline) {
         router.push(`/visits/${resp.visit.visitId}/printing/prescription-blank`);
       }
@@ -291,7 +299,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
                 </label>
               </div>
 
-              {/* ✅ Offline checkbox */}
               <div className="flex items-center justify-between gap-4 pb-1">
                 <label className="flex items-center gap-2 text-sm text-gray-700">
                   <input

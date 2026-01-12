@@ -9,7 +9,6 @@ type Props = {
 
 const POS: ToothPosition[] = ['UL', 'UR', 'LL', 'LR'];
 
-// turn on only when debugging
 const DEBUG_TEETH = false;
 
 function normalizePos(pos: unknown): ToothPosition | null {
@@ -59,7 +58,6 @@ export function ToothDetailsBlock({ toothDetails, className }: Props) {
   const noteText = uniqueNotes.length === 1 ? uniqueNotes[0] : null;
 
   if (DEBUG_TEETH && typeof window !== 'undefined') {
-    // Only runs when DEBUG_TEETH is true; no eslint disables needed.
     globalThis.console.log('[ToothDetailsBlock] raw toothDetails:', toothDetails ?? []);
     globalThis.console.log('[ToothDetailsBlock] clean:', clean);
     globalThis.console.log('[ToothDetailsBlock] grouped:', {
@@ -73,8 +71,7 @@ export function ToothDetailsBlock({ toothDetails, className }: Props) {
   return (
     <div className={['flex items-start gap-3', className ?? ''].join(' ')}>
       <div className="relative shrink-0">
-        {/* ✅ Labels removed, ✅ reduced height, ✅ bigger numbers, ✅ no outer border, ✅ darker dividers */}
-        <div className="grid h-[44px] w-[82px] grid-cols-2 rounded-md bg-white overflow-hidden">
+        <div className="grid h-11 w-[82px] grid-cols-2 rounded-md bg-white overflow-hidden">
           <div className="flex items-center justify-center border-b border-r border-gray-700 px-1">
             <div className="line-clamp-1 text-[12px] font-semibold text-gray-900">
               {(byPos.get('UL') ?? []).join(', ') || '—'}

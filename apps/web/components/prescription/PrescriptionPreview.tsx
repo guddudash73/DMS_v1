@@ -1,4 +1,3 @@
-// apps/web/components/prescription/PrescriptionPreview.tsx
 'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
@@ -13,48 +12,18 @@ type PatientSex = 'M' | 'F' | 'O' | 'U';
 type Props = {
   patientName?: string;
   patientPhone?: string;
-
   patientAge?: number | string;
   patientSex?: PatientSex;
-
   sdId?: string;
-
-  /**
-   * NOTE:
-   * This can still be passed, but header OPD will prefer the parent/new (anchor) visit OPD from meta.
-   */
   opdNo?: string;
-
-  // kept for compatibility, but intentionally not used anymore
   doctorName?: string;
   doctorRegdLabel?: string;
-
-  /**
-   * IMPORTANT:
-   * Pass ISO day only: "Visit: YYYY-MM-DD" (preferred) or "YYYY-MM-DD"
-   */
   visitDateLabel?: string;
-
-  /**
-   * Current visit lines (the visit you are editing / viewing)
-   */
   lines: RxLineType[];
-
   receptionNotes?: string;
-
-  /**
-   * ✅ OPTIONAL: pass these to show History blocks in preview, just like print sheet.
-   * - currentVisitId = the visit being edited/viewed now
-   * - chainVisitIds = [anchor, ...followups, current]
-   * - visitMetaMap = map for date + reason (+ opd fields)
-   */
   currentVisitId?: string;
   chainVisitIds?: string[];
   visitMetaMap?: Map<string, Visit>;
-
-  /**
-   * ✅ NEW: current visit tooth details (the one being edited now)
-   */
   toothDetails?: ToothDetail[];
 };
 
@@ -114,7 +83,6 @@ function extractIsoFromVisitLabel(visitDateLabel?: string): string | null {
   return null;
 }
 
-/** ---------- Safe meta readers (remove `any` without changing behavior) ---------- */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
@@ -139,12 +107,7 @@ function getMetaString(v: unknown, key: string): string | undefined {
   if (typeof val === 'number' || typeof val === 'boolean') return String(val);
   return undefined;
 }
-/** ----------------------------------------------------------------------------- */
 
-/**
- * Extract OPD number for a visit from meta, trying multiple keys.
- * Returns the number only, or undefined.
- */
 function getVisitOpdNo(v?: Visit): string | undefined {
   if (!v) return undefined;
 
@@ -160,13 +123,8 @@ function VisitRxPreviewBlock(props: {
   isCurrent: boolean;
   currentLines: RxLineType[];
   visit?: Visit;
-
   showOpdInline?: boolean;
   opdInlineText?: string;
-
-  /**
-   * ✅ current visit tooth details
-   */
   currentToothDetails: ToothDetail[];
 }) {
   const {
@@ -179,7 +137,6 @@ function VisitRxPreviewBlock(props: {
     currentToothDetails,
   } = props;
 
-  // Fetch rx only for non-current visits (history)
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: isCurrent || !visitId });
 
   const lines = isCurrent ? currentLines : (rxQuery.data?.rx?.lines ?? []);
@@ -212,7 +169,6 @@ function VisitRxPreviewBlock(props: {
         </div>
       </div>
 
-      {/* ✅ Tooth details */}
       {hasToothDetails ? (
         <div className="mb-2">
           <ToothDetailsBlock toothDetails={toothDetails} />
@@ -265,17 +221,14 @@ export function PrescriptionPreview({
   const currentVisitId = useMemo(() => currentVisitIdProp ?? 'CURRENT', [currentVisitIdProp]);
 
   const chainVisitIds = useMemo(() => {
-    // start from provided chain or fallback to [current]
     const ids = (
       chainVisitIdsProp && chainVisitIdsProp.length ? [...chainVisitIdsProp] : [currentVisitId]
     ).filter(Boolean);
 
-    // ✅ ensure current visit is always present in the chain
     if (currentVisitId && !ids.includes(currentVisitId)) {
       ids.push(currentVisitId);
     }
 
-    // de-dupe while preserving order
     const seen = new Set<string>();
     return ids.filter((x) => {
       if (seen.has(x)) return false;
@@ -295,33 +248,25 @@ export function PrescriptionPreview({
     chainVisitIdsProp.length > 0 &&
     !!visitMetaMapProp;
 
-  // ✅ anchor/new visit is first in chain
   const anchorVisitId = useMemo(() => {
     if (!historyEnabled) return undefined;
     return chainVisitIds[0];
   }, [historyEnabled, chainVisitIds]);
 
-  // ✅ HEADER OPD MUST BE THE PARENT/NEW VISIT OPD
   const headerOpdNo = useMemo(() => {
     if (historyEnabled && anchorVisitId) {
       const anchorVisit = visitMetaMap.get(anchorVisitId);
       const anchorOpd = getVisitOpdNo(anchorVisit);
       if (anchorOpd) return anchorOpd;
     }
-    // fallback to prop if meta not available
     return opdNo ?? '—';
   }, [historyEnabled, anchorVisitId, visitMetaMap, opdNo]);
 
-  // ✅ Header micro-text (match print header style)
   const CONTACT_NUMBER = '9938942846';
   const ADDRESS_ONE_LINE = 'A-33, STALWART COMPLEX, UNIT - IV, BHUBANESWAR';
   const CLINIC_HOURS =
     'Clinic hours: 10 : 00 AM - 01 : 30 PM & 06 : 00 PM - 08:00 PM, Sunday Closed';
 
-  /**
-   * ✅ Responsive shrink-to-fit:
-   * Keep fixed "design size" and scale down to fit container.
-   */
   const BASE_W = 760;
   const BASE_H = Math.round((BASE_W * 297) / 210);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -362,10 +307,8 @@ export function PrescriptionPreview({
         >
           <div className="h-full w-full overflow-hidden rounded-xl border bg-white shadow-sm">
             <div className="flex h-full flex-col">
-              {/* Header (updated like print sheet) */}
               <div className="shrink-0 px-6 pt-4">
                 <div className="flex items-start justify-between gap-4">
-                  {/* Left Logo */}
                   <div className="relative h-16 w-16">
                     <Image
                       src="/rx-logo-r.png"
@@ -377,7 +320,6 @@ export function PrescriptionPreview({
                     />
                   </div>
 
-                  {/* Center: Contact + address + clinic hours (Emergency removed) */}
                   <div className="mt-1 flex w-full flex-col items-center justify-center text-center">
                     <div className="text-[10px] font-semibold tracking-[0.30em] text-emerald-600">
                       CONTACT
@@ -392,7 +334,6 @@ export function PrescriptionPreview({
                     </div>
                   </div>
 
-                  {/* Right Logo */}
                   <div className="relative h-14 w-38">
                     <Image
                       src="/dashboard-logo.png"
@@ -408,7 +349,6 @@ export function PrescriptionPreview({
                 <div className="mt-2 h-px w-full bg-emerald-600/60" />
               </div>
 
-              {/* Doctor row */}
               <div className="shrink-0 px-6 pt-3">
                 <div className="flex items-start justify-between gap-6">
                   <div className="min-w-0 flex flex-col">
@@ -430,7 +370,6 @@ export function PrescriptionPreview({
                   </div>
                 </div>
 
-                {/* Patient meta */}
                 <div className="mt-2 flex w-full justify-between gap-6">
                   <div className="space-y-0.5 text-[0.8rem] text-gray-800">
                     <div className="flex gap-3">
@@ -465,7 +404,6 @@ export function PrescriptionPreview({
                       <div className="font-semibold text-gray-900">{sdId ?? '—'}</div>
                     </div>
 
-                    {/* ✅ Header OPD shows PARENT/NEW (anchor) visit OPD */}
                     <div className="flex gap-3">
                       <div className="w-20 text-gray-600">OPD. No</div>
                       <div className="text-gray-600">:</div>
@@ -477,11 +415,9 @@ export function PrescriptionPreview({
                 <div className="mt-3 h-px w-full bg-gray-900/30" />
               </div>
 
-              {/* Lines / History blocks */}
               <div className="min-h-0 flex-1 px-6 pt-4">
                 {!historyEnabled ? (
                   <>
-                    {/* ✅ Tooth details (current only mode) */}
                     {showCurrentToothDetails ? (
                       <div className="mb-3">
                         <ToothDetailsBlock toothDetails={currentToothDetails} />
@@ -527,7 +463,6 @@ export function PrescriptionPreview({
                 )}
               </div>
 
-              {/* Notes */}
               {hasNotes ? (
                 <div className="shrink-0 px-6 pb-2">
                   <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
@@ -538,8 +473,6 @@ export function PrescriptionPreview({
                   </div>
                 </div>
               ) : null}
-
-              {/* Footer (kept same as before in preview) */}
             </div>
           </div>
         </div>

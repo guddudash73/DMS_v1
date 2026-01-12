@@ -13,7 +13,7 @@ type Props = {
   patientSex?: PatientSex;
   sdId?: string;
   opdNo?: string;
-  visitDateLabel?: string; // expects something like "Visit: YYYY-MM-DD" (same as your current pages)
+  visitDateLabel?: string;
 };
 
 function formatAgeSex(age?: number | string, sex?: PatientSex) {
@@ -41,8 +41,6 @@ function BlankPrescriptionSheetContent({
   visitDateLabel,
 }: Props) {
   const ageSex = formatAgeSex(patientAge, patientSex);
-
-  // ✅ Header micro-text (same as your current print sheet)
   const CONTACT_NUMBER = '9938942846';
   const ADDRESS_ONE_LINE = 'A-33, STALWART COMPLEX, UNIT - IV, BHUBANESWAR';
   const CLINIC_HOURS =
@@ -51,10 +49,8 @@ function BlankPrescriptionSheetContent({
   return (
     <div className="rx-a4 text-black">
       <div className="flex h-full flex-col">
-        {/* Header */}
         <div className="rx-print-header shrink-0 px-10">
           <div className="flex items-start justify-between gap-4">
-            {/* Left Logo */}
             <div className="relative h-20 w-20">
               <Image
                 src="/rx-logo-r.png"
@@ -66,7 +62,6 @@ function BlankPrescriptionSheetContent({
               />
             </div>
 
-            {/* Center */}
             <div className="mt-2 flex w-full flex-col items-center justify-center text-center">
               <div className="text-[12px] font-semibold tracking-[0.25em] text-emerald-600">
                 CONTACT
@@ -81,7 +76,6 @@ function BlankPrescriptionSheetContent({
               </div>
             </div>
 
-            {/* Right Logo */}
             <div className="relative h-18 w-42">
               <Image
                 src="/dashboard-logo.png"
@@ -97,7 +91,6 @@ function BlankPrescriptionSheetContent({
 
         <div className="rx-print-sep-top mt-2 h-px w-full bg-emerald-600/60" />
 
-        {/* Doctor row (static, same as your current template) */}
         <div className="rx-print-doctor shrink-0 px-4 pt-3">
           <div className="flex items-start justify-between gap-6">
             <div className="flex flex-col">
@@ -112,7 +105,6 @@ function BlankPrescriptionSheetContent({
           </div>
         </div>
 
-        {/* Patient meta */}
         <div className="rx-print-patient shrink-0 px-4 pt-2">
           <div className="mt-1 flex w-full justify-between gap-6">
             <div className="space-y-1 text-[11px] text-gray-800">
@@ -161,7 +153,6 @@ function BlankPrescriptionSheetContent({
 
         <div className="rx-print-sep-mid mt-3 h-px w-full bg-gray-900/30" />
 
-        {/* ✅ Blank body area (NO "No medicines recorded.") */}
         <div className="min-h-0 flex-1 px-4 pt-4">
           <div className="h-full w-full rounded-2xl border-gray-200 bg-white" />
         </div>
@@ -213,7 +204,6 @@ export function PrescriptionBlankPrintSheet(props: Props) {
 }
 
 export function PrescriptionBlankPreview(props: Props) {
-  // Preview uses the same content block (no portal)
   return (
     <div className="w-full overflow-x-auto">
       <div className="mx-auto w-[210mm] max-w-full rounded-2xl border bg-white p-4">

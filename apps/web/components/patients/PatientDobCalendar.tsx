@@ -26,10 +26,7 @@ export default function PatientDobCalendar({
   return (
     <div
       className={cn(
-        // Container styling
         'rounded-2xl border bg-white p-3 shadow-lg',
-        // Make react-day-picker look sane with Tailwind base styles
-        // (RDP CSS gives layout; these just tweak text/spacing)
         '[&_.rdp]:m-0 [&_.rdp]:p-0',
         '[&_.rdp-caption]:mb-2 [&_.rdp-caption]:justify-center',
         '[&_.rdp-caption_label]:text-sm [&_.rdp-caption_label]:font-semibold',

@@ -1,4 +1,3 @@
-// apps/web/components/patients/NewPatientModal.tsx
 'use client';
 
 import * as React from 'react';
@@ -23,19 +22,16 @@ import { useCreatePatientMutation, type ErrorResponse } from '@/src/store/api';
 type Props = { onClose: () => void };
 type ApiError = { status?: number; data?: unknown };
 
-// ✅ local form schema (stable with RHF)
-// - phone REQUIRED (shows red when blank on submit)
-// - address OPTIONAL (no error when empty)
 const PatientCreateFormSchema = z.object({
   name: z.string().trim().min(1, 'Name is required'),
   phone: z
     .string()
     .trim()
-    .min(1, 'Contact number is required') // ✅ required + shows error on submit
+    .min(1, 'Contact number is required')
     .min(6, 'Contact number is too short'),
-  dob: z.string().trim().optional(), // YYYY-MM-DD
+  dob: z.string().trim().optional(),
   gender: z.enum(['MALE', 'FEMALE', 'OTHER', 'UNKNOWN']).optional(),
-  address: z.string().trim().optional(), // ✅ optional (no transform here)
+  address: z.string().trim().optional(),
 });
 
 type PatientCreateFormValues = z.infer<typeof PatientCreateFormSchema>;
@@ -77,7 +73,6 @@ export default function NewPatientModal({ onClose }: Props) {
   const [mounted, setMounted] = React.useState(false);
   const [closing, setClosing] = React.useState(false);
 
-  // ✅ controlled popover
   const [dobOpen, setDobOpen] = React.useState(false);
 
   React.useEffect(() => {
@@ -102,11 +97,6 @@ export default function NewPatientModal({ onClose }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [handleClose]);
 
-  /**
-   * ✅ IMPORTANT:
-   * Do NOT pass a generic to useForm when using zodResolver,
-   * otherwise you get the same resolver/type mismatch again.
-   */
   const {
     register,
     handleSubmit,
@@ -115,14 +105,14 @@ export default function NewPatientModal({ onClose }: Props) {
     formState: { errors, isSubmitting },
   } = useForm({
     resolver: zodResolver(PatientCreateFormSchema),
-    mode: 'onSubmit', // ✅ show errors when trying to submit
+    mode: 'onSubmit',
     reValidateMode: 'onChange',
     defaultValues: {
       name: '',
       phone: '',
       dob: undefined,
       gender: undefined,
-      address: '', // user can type; we will send undefined if empty
+      address: '',
     },
   });
 
@@ -133,10 +123,9 @@ export default function NewPatientModal({ onClose }: Props) {
     try {
       const payload = {
         name: values.name.trim(),
-        phone: values.phone.trim(), // ✅ required
+        phone: values.phone.trim(),
         dob: values.dob?.trim() ? values.dob.trim() : undefined,
         gender: values.gender,
-        // ✅ optional: if empty string, send undefined
         address: values.address?.trim() ? values.address.trim() : undefined,
       };
 

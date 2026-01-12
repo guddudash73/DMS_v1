@@ -22,7 +22,6 @@ type Props = {
   onPick: (item: MedicineTypeaheadItem) => void;
   placeholder?: string;
 
-  // optional (for keyboard flow in MedicinesEditor)
   inputRef?: React.RefObject<HTMLInputElement | null>;
   triggerRef?: React.RefObject<HTMLButtonElement | null>;
   onEnterPicked?: () => void;

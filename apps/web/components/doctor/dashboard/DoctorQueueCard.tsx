@@ -1,4 +1,3 @@
-// apps/web/components/doctor/dashboard/DoctorQueueCard.tsx
 'use client';
 
 import * as React from 'react';
@@ -47,6 +46,12 @@ function getIsOffline(v: PatientQueueItem): boolean {
   return isRecord(v) && v['isOffline'] === true;
 }
 
+function getDailyPatientNumber(v: PatientQueueItem): number | null {
+  if (!isRecord(v)) return null;
+  const raw = v['dailyPatientNumber'];
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 1 ? raw : null;
+}
+
 /** ✅ Tiny offline badge */
 function OfflineBadge() {
   return (
@@ -64,11 +69,13 @@ function QueueItemRow({
   status,
   onClick,
   isOffline,
+  dailyPatientNumber,
 }: {
   label: string;
   status: VisitStatus;
   onClick: () => void;
   isOffline?: boolean;
+  dailyPatientNumber?: number | null;
 }) {
   return (
     <button
@@ -78,6 +85,10 @@ function QueueItemRow({
       title="Open visit"
     >
       <span className="min-w-0 truncate font-medium">
+        <span className="mr-2 inline-flex h-6 min-w-[44px] items-center justify-center rounded-lg border bg-gray-50 px-2 text-[11px] font-semibold text-gray-700">
+          {dailyPatientNumber ? `#${dailyPatientNumber}` : '—'}
+        </span>
+
         {label}
         {isOffline ? <OfflineBadge /> : null}
       </span>
@@ -206,6 +217,7 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
                         status={v.status}
                         onClick={() => openDoctorVisit(v.visitId)}
                         isOffline={getIsOffline(v)}
+                        dailyPatientNumber={getDailyPatientNumber(v)}
                       />
                     ))}
 

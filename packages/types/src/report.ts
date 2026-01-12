@@ -18,10 +18,6 @@ export const DailyReport = z.object({
   visitCountsByStatus: DailyVisitStatusCounts,
   totalRevenue: z.number().nonnegative(),
 
-  /**
-   * ✅ NEW: Payment received totals for the day
-   * These come from stored billing flags + billing.total
-   */
   onlineReceivedTotal: z.number().nonnegative(),
   offlineReceivedTotal: z.number().nonnegative(),
 
@@ -60,7 +56,6 @@ export const ClinicVisitBreakdownItem = z.object({
   status: VisitStatus,
   tag: VisitTag.optional(),
 
-  // ✅ new
   zeroBilled: z.boolean().optional(),
 
   reason: z.string().optional(),

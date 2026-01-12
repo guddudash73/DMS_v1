@@ -174,13 +174,6 @@ function MedicinesReadOnly({ lines }: { lines: RxLineType[] }) {
   );
 }
 
-/**
- * ✅ UPDATED:
- * View Rx dialog now shows:
- * - selected visit
- * - all visits UP TO the selected visit (inclusive)
- * - toothDetails (even when medicines are empty)
- */
 function VisitPrescriptionQuickLookDialog(props: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -213,14 +206,12 @@ function VisitPrescriptionQuickLookDialog(props: {
   const visitQuery = useGetVisitByIdQuery(visitId ?? '', { skip: !open || !visitId });
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !open || !patientId });
 
-  // ✅ bring patient visits for history blocks
   const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', {
     skip: !open || !patientId,
     refetchOnMountOrArgChange: true,
   });
   const allVisitsRaw = (visitsQuery.data?.items ?? []) as Visit[];
 
-  // current visit meta/date label
   const visitCreatedAtDate = useMemo(() => {
     const dUnknown: unknown = visitQuery.data;
     const createdAt = isRecord(dUnknown) ? dUnknown.createdAt : undefined;
@@ -232,7 +223,6 @@ function VisitPrescriptionQuickLookDialog(props: {
     return ms ? `Visit: ${clinicDateISOFromMs(ms)}` : '';
   }, [visitCreatedAtDate]);
 
-  // Patient sex/age from fetched patient record (fallbacks remain)
   const patientSex = useMemo(() => {
     const pUnknown: unknown = patientQuery.data;
     const rec: Record<string, unknown> = isRecord(pUnknown) ? pUnknown : {};
@@ -258,7 +248,6 @@ function VisitPrescriptionQuickLookDialog(props: {
     return calcAgeYears(dob, at);
   }, [patientQuery.data, visitCreatedAtDate]);
 
-  // ✅ current visit (selected) rx lines + teeth
   const currentLines = rxQuery.data?.rx?.lines ?? [];
   const currentToothDetails = useMemo<ToothDetail[]>(() => {
     const rUnknown: unknown = rxQuery.data?.rx;
@@ -267,7 +256,6 @@ function VisitPrescriptionQuickLookDialog(props: {
     return Array.isArray(td) ? (td as ToothDetail[]) : [];
   }, [rxQuery.data]);
 
-  // ✅ LIMITED chain: anchor + followups up to selected visit (inclusive)
   const rxChain = useMemo(() => {
     const selectedId = visitId ?? '';
     const meta = new Map<string, Visit>();
@@ -293,11 +281,9 @@ function VisitPrescriptionQuickLookDialog(props: {
 
     const chain: Visit[] = [];
 
-    // anchor
     const anchor = meta.get(anchorId);
     if (anchor) chain.push(anchor);
 
-    // followups for anchor
     const followups: Visit[] = [];
     for (const v of meta.values()) {
       const vRec: Record<string, unknown> = isRecord(v)
@@ -309,16 +295,13 @@ function VisitPrescriptionQuickLookDialog(props: {
     followups.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
     chain.push(...followups);
 
-    // ensure selected exists
     if (selectedId && !chain.some((x) => x.visitId === selectedId)) {
       const cur = meta.get(selectedId);
       chain.push(cur ?? ({ visitId: selectedId } as Visit));
     }
 
-    // sort overall old->new
     chain.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
 
-    // de-dupe
     const seen = new Set<string>();
     const chainIdsOrdered = chain
       .map((x) => x.visitId)
@@ -329,14 +312,12 @@ function VisitPrescriptionQuickLookDialog(props: {
         return true;
       });
 
-    // ✅ limit up to selectedId (inclusive)
     const idx = selectedId ? chainIdsOrdered.indexOf(selectedId) : -1;
     const limitedIds = idx >= 0 ? chainIdsOrdered.slice(0, idx + 1) : chainIdsOrdered;
 
     return { visitIds: limitedIds, meta, currentVisitId: selectedId };
   }, [allVisitsRaw, visitId, visitQuery.data]);
 
-  // use selected visit OPD if available (header will prefer anchor OPD from meta anyway)
   const selectedVisitOpdNo = useMemo(() => {
     const vUnknown: unknown = visitQuery.data;
     const v = isRecord(vUnknown) ? vUnknown : {};
@@ -371,9 +352,7 @@ function VisitPrescriptionQuickLookDialog(props: {
               doctorRegdLabel={doctorRegdLabel}
               visitDateLabel={visitDateLabelComputed}
               lines={currentLines as PreviewProps['lines']}
-              // ✅ teeth (even when no medicines)
               toothDetails={currentToothDetails}
-              // ✅ history up to selected visit
               currentVisitId={rxChain.currentVisitId}
               chainVisitIds={rxChain.visitIds}
               visitMetaMap={rxChain.meta}
@@ -405,7 +384,6 @@ function VisitXrayQuickLookDialog(props: {
   );
 }
 
-// Grouping helpers
 function anchorIdFromVisit(v: Visit): string | undefined {
   const rec: Record<string, unknown> = isRecord(v) ? (v as unknown as Record<string, unknown>) : {};
   return getString(rec.anchorVisitId) ?? getString(rec.anchorId) ?? undefined;
@@ -455,7 +433,6 @@ export function PrescriptionWorkspace(props: Props) {
 
   const router = useRouter();
 
-  // /me: doctor details
   const meQuery = useGetMeQuery();
 
   const doctorNameFromMe =
@@ -474,7 +451,6 @@ export function PrescriptionWorkspace(props: Props) {
     return undefined;
   }, [doctorRegdNoFromMe]);
 
-  // Fetch visit + patient for createdAt + dob/sex
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
@@ -517,11 +493,9 @@ export function PrescriptionWorkspace(props: Props) {
     return calcAgeYears(dob, at);
   }, [patientQuery.data, visitCreatedAtDate]);
 
-  // Prescription editor state
   const [lines, setLines] = useState<RxLineType[]>([]);
   const [toothDetails, setToothDetails] = useState<ToothDetail[]>([]);
 
-  // ✅ NEW: doctorNotes (internal for reception)
   const [doctorNotes, setDoctorNotes] = useState<string>('');
 
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
@@ -545,14 +519,12 @@ export function PrescriptionWorkspace(props: Props) {
     onRevisionModeChange?.(enabled);
   };
 
-  // Rx Preset Import
   const [importOpen, setImportOpen] = useState(false);
 
   const handleImportPreset = (presetLines: RxLineType[]) => {
     setLines((prev) => [...prev, ...presetLines]);
   };
 
-  // Hydrate once
   useEffect(() => {
     if (hydratedRef.current) return;
     if (!rxQuery.isSuccess) return;
@@ -566,7 +538,7 @@ export function PrescriptionWorkspace(props: Props) {
     if (rx) {
       setLines(rx.lines ?? []);
       setToothDetails(Array.isArray(td) ? (td as ToothDetail[]) : []);
-      setDoctorNotes(typeof dn === 'string' ? dn : ''); // ✅ hydrate
+      setDoctorNotes(typeof dn === 'string' ? dn : '');
       setActiveRxId(rx.rxId);
 
       lastHash.current = JSON.stringify({
@@ -603,7 +575,6 @@ export function PrescriptionWorkspace(props: Props) {
     debounce.current = setTimeout(async () => {
       setState('saving');
       try {
-        // ✅ Option 2: ALWAYS save via /visits/:visitId/rx
         const res = await upsert({ visitId, lines, toothDetails, doctorNotes }).unwrap();
         setActiveRxId(res.rxId);
 
@@ -638,7 +609,6 @@ export function PrescriptionWorkspace(props: Props) {
 
     setState('saving');
     try {
-      // ✅ Option 2: ALWAYS save via /visits/:visitId/rx
       const res = await upsert({ visitId, lines, toothDetails, doctorNotes }).unwrap();
       setActiveRxId(res.rxId);
 
@@ -651,7 +621,6 @@ export function PrescriptionWorkspace(props: Props) {
     }
   };
 
-  // Visits (bottom)
   const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', { skip: !patientId });
   const allVisitsRaw = (visitsQuery.data?.items ?? []) as Visit[];
 
@@ -855,7 +824,6 @@ export function PrescriptionWorkspace(props: Props) {
   return (
     <div className="relative w-full min-w-0">
       <div className="grid w-full min-w-0 grid-cols-1 gap-4 lg:grid-cols-10">
-        {/* Prescription */}
         <div className="min-w-0 rounded-2xl bg-white p-4 lg:col-span-4">
           <div className="flex items-center justify-between">
             <div className="text-lg font-semibold text-gray-900">Prescription</div>
@@ -899,7 +867,6 @@ export function PrescriptionWorkspace(props: Props) {
             </div>
           </div>
 
-          {/* ✅ NEW: Doctor Notes */}
           <div className="mt-4 rounded-2xl border bg-white p-4">
             <div className="text-base font-semibold text-gray-900">Doctor Notes</div>
             <div className="mt-1 text-sm text-gray-500">
@@ -935,7 +902,6 @@ export function PrescriptionWorkspace(props: Props) {
           </div>
         </div>
 
-        {/* Medicines */}
         <Card className="w-full min-w-0 rounded-2xl border bg-white p-4 lg:col-span-6">
           <div className="flex items-center justify-between border-b pb-3">
             <div className="text-lg font-semibold text-gray-900">Medicines</div>
@@ -980,7 +946,6 @@ export function PrescriptionWorkspace(props: Props) {
           </div>
         </Card>
 
-        {/* Bottom Visits section */}
         <Card className="w-full rounded-2xl border bg-white p-4 lg:col-span-10">
           <div className="flex items-center justify-between gap-3">
             <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
@@ -1136,7 +1101,7 @@ export function PrescriptionWorkspace(props: Props) {
                             <TableRow key={f.visitId} className="hover:bg-gray-50/60">
                               <TableCell className="px-6 py-2 align-top">
                                 <div className="flex items-center gap-3">
-                                  <div className="ml-1 h-7 w-[2px] rounded-full bg-gray-200" />
+                                  <div className="ml-1 h-7 w-0.5 rounded-full bg-gray-200" />
                                   <div className="text-sm text-gray-900">
                                     {formatClinicDateShort(f.visitDate)}
                                   </div>
@@ -1145,7 +1110,7 @@ export function PrescriptionWorkspace(props: Props) {
 
                               <TableCell className="px-6 py-2 align-top">
                                 <div className="flex items-start gap-3">
-                                  <div className="ml-1 h-7 w-[2px] rounded-full bg-gray-200" />
+                                  <div className="ml-1 h-7 w-0.5 rounded-full bg-gray-200" />
                                   <div className="min-w-0 flex-1">
                                     {renderReasonCell(f, { kind: 'FOLLOWUP', anchor })}
                                   </div>

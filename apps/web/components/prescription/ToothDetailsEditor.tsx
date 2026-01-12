@@ -1,4 +1,3 @@
-// apps/web/components/prescription/ToothDetailsEditor.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -50,7 +49,6 @@ function mapFromValue(value: ToothDetail[]) {
     byPos[pos] = [...(byPos[pos] ?? []), ...(d.toothNumbers ?? [])].filter(Boolean);
   }
 
-  // de-dupe per quadrant
   for (const p of POSITIONS) {
     const seen = new Set<string>();
     const out: string[] = [];
@@ -76,7 +74,6 @@ export function ToothDetailsEditor({ value, onChange, disabled }: Props) {
   const [lr, setLr] = useState('');
   const [notes, setNotes] = useState('');
 
-  // hydrate local inputs from prop
   useEffect(() => {
     const { byPos, note } = mapFromValue(value ?? []);
     setUl(joinTokens(byPos.UL));
@@ -126,7 +123,6 @@ export function ToothDetailsEditor({ value, onChange, disabled }: Props) {
     onChange([]);
   };
 
-  // shared tiny input style for the 2x2 grid
   const tinyInput =
     'h-7 w-full rounded-none border-0 bg-transparent px-1 text-center text-[12px] font-semibold leading-none text-gray-900 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0';
 
@@ -135,13 +131,10 @@ export function ToothDetailsEditor({ value, onChange, disabled }: Props) {
       <div className="bg-white px-3 py-3">
         <div className="mb-2 text-sm font-semibold text-gray-900">Teeth</div>
 
-        {/* Top row: tiny 2x2 grid on left, notes on right */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
-          {/* Tiny 2x2 quadrant grid (like your 2nd image) */}
           <div className="shrink-0">
             <div className="inline-block overflow-hidden rounded-[6px] border border-gray-400">
               <div className="grid grid-cols-2">
-                {/* UL */}
                 <div className="border-b border-r border-gray-700">
                   <Input
                     disabled={disabled}
@@ -152,7 +145,6 @@ export function ToothDetailsEditor({ value, onChange, disabled }: Props) {
                   />
                 </div>
 
-                {/* UR */}
                 <div className="border-b border-gray-700">
                   <Input
                     disabled={disabled}
@@ -163,7 +155,6 @@ export function ToothDetailsEditor({ value, onChange, disabled }: Props) {
                   />
                 </div>
 
-                {/* LL */}
                 <div className="border-r border-gray-700">
                   <Input
                     disabled={disabled}
@@ -174,7 +165,6 @@ export function ToothDetailsEditor({ value, onChange, disabled }: Props) {
                   />
                 </div>
 
-                {/* LR */}
                 <div>
                   <Input
                     disabled={disabled}
@@ -186,11 +176,8 @@ export function ToothDetailsEditor({ value, onChange, disabled }: Props) {
                 </div>
               </div>
             </div>
-
-            {/* optional tiny hint row (kept minimal) */}
           </div>
 
-          {/* Notes */}
           <div className="min-w-0 flex-1">
             <div className="mb-1 text-[11px] font-semibold text-gray-700">Notes (single)</div>
             <Textarea
@@ -203,7 +190,6 @@ export function ToothDetailsEditor({ value, onChange, disabled }: Props) {
           </div>
         </div>
 
-        {/* Actions row */}
         <div className="mt-3 flex items-center gap-2">
           <Button
             type="button"
@@ -232,7 +218,6 @@ export function ToothDetailsEditor({ value, onChange, disabled }: Props) {
         </div>
       </div>
 
-      {/* lightweight preview */}
       <div className="border-t px-3 py-2 text-sm">
         {value?.length ? (
           <div className="text-gray-700">

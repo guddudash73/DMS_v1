@@ -1,5 +1,3 @@
-// apps/web/components/layout/shellUtils.ts
-
 const CLINIC_TIMEZONE = 'Asia/Kolkata';
 
 export const getDaySuffix = (day: number) => {
@@ -23,13 +21,6 @@ export const deriveCurrentPanelFromPath = (pathname: string) => {
 };
 
 export const buildDateTimeLabels = (now: Date) => {
-  /**
-   * IMPORTANT:
-   * - We NEVER read date parts directly from `Date`
-   * - We ALWAYS format using Asia/Kolkata
-   * - This prevents midnight drift & browser timezone bugs
-   */
-
   const dateParts = new Intl.DateTimeFormat('en-IN', {
     timeZone: CLINIC_TIMEZONE,
     weekday: 'short',

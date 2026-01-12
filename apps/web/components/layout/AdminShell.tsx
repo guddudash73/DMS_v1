@@ -1,4 +1,3 @@
-// apps/web/components/layout/AdminShell.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';

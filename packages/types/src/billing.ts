@@ -25,17 +25,8 @@ export const BillingCheckoutInput = z
     taxAmount: z.number().nonnegative().default(0),
     followUp: CheckoutFollowUpInput.optional(),
 
-    /**
-     * ✅ By default, billing is blocked for visits with zeroBilled=true.
-     * To override, the client must explicitly set allowZeroBilled=true.
-     */
     allowZeroBilled: z.boolean().optional(),
 
-    /**
-     * ✅ Payment received tags
-     * - Either one may be true, or both false/undefined (not marked yet)
-     * - Both true is NOT allowed (mutually exclusive)
-     */
     receivedOnline: z.boolean().optional(),
     receivedOffline: z.boolean().optional(),
   })
@@ -70,9 +61,6 @@ export const Billing = z.object({
   currency: z.string().min(1).max(16).default('INR'),
   createdAt: z.number().int().nonnegative(),
 
-  /**
-   * ✅ Stored tags on billing record
-   */
   receivedOnline: z.boolean().optional(),
   receivedOffline: z.boolean().optional(),
 });

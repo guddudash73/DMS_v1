@@ -1,4 +1,3 @@
-// packages/types/src/prescription.ts
 import { z } from 'zod';
 import { VisitId } from './visit';
 
@@ -8,17 +7,12 @@ const Timing = z.enum(['BEFORE_MEAL', 'AFTER_MEAL', 'ANY']);
 export const ToothPosition = z.enum(['UL', 'UR', 'LL', 'LR']);
 export type ToothPosition = z.infer<typeof ToothPosition>;
 
-/**
- * ✅ Store tooth "numbers" as raw strings.
- * - Accept anything user types (single digit, letters, ranges, etc.)
- * - Trim, keep length bounded.
- */
 export const ToothNumber = z.string().min(1).max(20);
 export type ToothNumber = z.infer<typeof ToothNumber>;
 
 export const ToothDetail = z.object({
   position: ToothPosition,
-  toothNumbers: z.array(ToothNumber).min(1).max(8), // now string[]
+  toothNumbers: z.array(ToothNumber).min(1).max(8),
   notes: z.string().max(500).optional(),
 });
 export type ToothDetail = z.infer<typeof ToothDetail>;
@@ -40,10 +34,6 @@ export const Prescription = z.object({
   rxId: RxId,
   visitId: VisitId,
 
-  /**
-   * ✅ Allow empty lines if toothDetails exist
-   * (store as [] by default)
-   */
   lines: z.array(RxLine).default([]),
 
   version: z.number().int().min(1).default(1),
@@ -51,16 +41,8 @@ export const Prescription = z.object({
 
   toothDetails: z.array(ToothDetail).optional(),
 
-  /**
-   * ✅ NEW: internal note from doctor to reception
-   * - NOT printed
-   * - Only shown in reception visit panel
-   */
   doctorNotes: z.string().max(2000).optional(),
 
-  /**
-   * Existing: shown/printed as reception notes
-   */
   receptionNotes: z.string().max(2000).optional(),
 
   createdAt: z.number().int().nonnegative(),

@@ -1,4 +1,3 @@
-// apps/web/components/layout/AppShell.tsx
 'use client';
 
 import Image from 'next/image';
@@ -66,7 +65,6 @@ export type ShellChromeProps = {
   footerUser?: {
     user: ShellUser;
     rightSlot?: React.ReactNode;
-    /** Optional override; defaults to /profile */
     profileHref?: string;
   };
 
@@ -153,12 +151,9 @@ export function AppShellChrome(props: ShellChromeProps) {
 
   return (
     <div className={`flex h-screen overflow-hidden ${shellBg}`}>
-      {/* ✅ Profile popup lives at shell root so it overlays correctly */}
       <ProfileDialog open={profileOpen} onOpenChange={setProfileOpen} />
 
-      {/* Sidebar */}
       <aside className={`flex ${layout.sidebarWidthClass} flex-col bg-white pb-5.5`}>
-        {/* Brand + DateTime + Switcher */}
         <div className="flex w-full flex-col items-center justify-center px-6 pb-4 pt-6">
           {props.brand ? (
             <div className="relative h-18 w-32">
@@ -174,7 +169,6 @@ export function AppShellChrome(props: ShellChromeProps) {
             </div>
           ) : null}
 
-          {/* ✅ Center as a block, but LEFT-align the date/time lines inside */}
           {props.dateTimeSlot ? (
             <div className="w-full pb-4 text-xs text-gray-500">
               <div className="flex justify-center">
@@ -214,7 +208,6 @@ export function AppShellChrome(props: ShellChromeProps) {
           ) : null}
         </div>
 
-        {/* Nav */}
         <nav className="w-full flex-1 space-y-4 px-3">
           <div>
             {props.nav.title ? (
@@ -239,11 +232,9 @@ export function AppShellChrome(props: ShellChromeProps) {
           ) : null}
         </nav>
 
-        {/* User footer */}
         {props.footerUser ? (
           <div className="mt-auto px-4">
             <Card className="flex flex-row items-center justify-between rounded-2xl border px-3 py-2 shadow-none">
-              {/* ✅ Open popup instead of routing */}
               <button
                 type="button"
                 className="flex min-w-0 flex-1 items-center gap-2 text-left cursor-pointer"
@@ -270,7 +261,6 @@ export function AppShellChrome(props: ShellChromeProps) {
         ) : null}
       </aside>
 
-      {/* Content */}
       <div
         className={[
           'flex h-full min-w-0 grow items-center justify-start',

@@ -1,3 +1,4 @@
+// apps/api/src/repositories/visitRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
@@ -116,7 +117,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
     if (from === 'QUEUED' && to === 'IN_PROGRESS') return true;
     if (from === 'IN_PROGRESS' && to === 'DONE') return true;
 
-    // ✅ NEW: offline visits can skip directly to DONE
+    // ✅ offline visits can skip directly to DONE
     if (isOffline && from === 'QUEUED' && to === 'DONE') return true;
 
     return false;
@@ -146,6 +147,7 @@ export class DynamoDBVisitRepository implements VisitRepository {
       }
     }
 
+    // ✅ daily patient number for the date (stable, never changes)
     const dailySeq = await nextCounter(buildOpdDailyCounterKey(visitDate));
 
     const tagForCounter: VisitTag = tag ?? 'N';
@@ -159,6 +161,10 @@ export class DynamoDBVisitRepository implements VisitRepository {
       status,
       visitDate,
       opdNo,
+
+      // ✅ NEW: stable daily number (use this in queue + token)
+      dailyPatientNumber: dailySeq,
+
       createdAt: now,
       updatedAt: now,
 

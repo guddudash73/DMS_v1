@@ -28,11 +28,27 @@ const statusBadgeClass: Record<Visit['status'], string> = {
   QUEUED: 'bg-pink-50 text-pink-700 border-pink-200',
 };
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+function getDailyPatientNumber(v: QueueVisit): number | null {
+  const rec: unknown = v;
+  if (!isRecord(rec)) return null;
+  const raw = rec.dailyPatientNumber;
+  return typeof raw === 'number' && Number.isFinite(raw) && raw >= 1 ? raw : null;
+}
+
 function Row({ v }: { v: QueueVisit }) {
+  const dpn = getDailyPatientNumber(v);
+
   return (
     <div className="flex items-center justify-between gap-3 rounded-xl border bg-white px-4 py-3">
       <div className="min-w-0">
         <div className="truncate text-sm font-medium text-gray-900">
+          <span className="mr-2 inline-flex h-6 min-w-[44px] items-center justify-center rounded-lg border bg-gray-50 px-2 text-[11px] font-semibold text-gray-700">
+            {dpn ? `#${dpn}` : '—'}
+          </span>
           {v.patientName || `Patient: ${v.patientId}`}
         </div>
 

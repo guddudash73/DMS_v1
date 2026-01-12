@@ -115,16 +115,24 @@ router.post(
     return res.status(201).json({
       visit,
       tokenPrint: {
+        // existing
         tokenNumber,
         visitId: visit.visitId,
         patientName: patient?.name ?? '—',
         patientPhone: patient?.phone ?? undefined,
         reason: visit.reason,
         tag: visit.tag,
-        isOffline: (visit as VisitWithOffline).isOffline === true, // ✅ NEW
+        isOffline: (visit as VisitWithOffline).isOffline === true,
         visitNumberForPatient,
         createdAt: visit.createdAt,
         visitDate: visit.visitDate,
+
+        // ✅ NEW: stable daily patient number + OPD + SD + DOB/Gender for Age/Sex printing
+        dailyPatientNumber: visit.dailyPatientNumber,
+        opdNo: visit.opdNo,
+        sdId: patient?.sdId,
+        patientDob: patient?.dob,
+        patientGender: patient?.gender,
       },
     });
   }),

@@ -1,4 +1,3 @@
-// packages/types/src/user.ts
 import { z } from 'zod';
 
 export const Role = z.enum(['RECEPTION', 'DOCTOR', 'ADMIN', 'VIEWER']);
@@ -59,7 +58,6 @@ export const AdminDoctorListItem = DoctorProfile.extend({
 });
 export type AdminDoctorListItem = z.infer<typeof AdminDoctorListItem>;
 
-/** ✅ NEW: Admin user management schemas */
 export const AdminCreateUserRequest = z.object({
   email: z.email(),
   displayName: z.string().min(1),
