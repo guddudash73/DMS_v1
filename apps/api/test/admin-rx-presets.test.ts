@@ -4,7 +4,7 @@ import request from 'supertest';
 import bcrypt from 'bcrypt';
 import { createApp } from '../src/server';
 import { userRepository } from '../src/repositories/userRepository';
-import type { RxLineType } from '@dms/types';
+import type { RxLineType } from '@dcm/types';
 
 const app = createApp();
 

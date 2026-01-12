@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildPrescriptionSummary } from '../src/lib/rxSummary';
-import type { RxLineType } from '@dms/types';
+import type { RxLineType } from '@dcm/types';
 
 describe('buildPrescriptionSummary', () => {
   it('groups lines by medicine and aggregates durations', () => {

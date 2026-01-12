@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { VisitCreate, VisitStatusUpdate, VisitQueueQuery, PatientId } from '@dms/types';
+import { VisitCreate, VisitStatusUpdate, VisitQueueQuery, PatientId } from '@dcm/types';
 
 describe('Visit schemas', () => {
   it('validates Visitcreate payloads', () => {

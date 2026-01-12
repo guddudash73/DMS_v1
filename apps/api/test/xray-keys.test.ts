@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { XrayContentType } from '@dms/types';
+import type { XrayContentType } from '@dcm/types';
 import { buildXrayObjectKey } from '../src/routes/xray';
 
 describe('X-ray key layout', () => {

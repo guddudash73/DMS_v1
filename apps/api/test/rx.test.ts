@@ -3,7 +3,7 @@ import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
 import { prescriptionRepository } from '../src/repositories/prescriptionRepository';
-import type { Prescription } from '@dms/types';
+import type { Prescription } from '@dcm/types';
 import { warmAuth, asDoctor, asReception } from './helpers/auth';
 import { deletePatientCompletely } from './helpers/patients';
 

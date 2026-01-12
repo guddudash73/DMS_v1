@@ -2,7 +2,7 @@
 import { beforeAll, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
-import type { MedicinePreset } from '@dms/types';
+import type { MedicinePreset } from '@dcm/types';
 import { warmAuth, asDoctor } from './helpers/auth';
 
 const app = createApp();
