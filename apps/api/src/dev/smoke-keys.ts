@@ -1,5 +1,5 @@
 import process from 'node:process';
-import { key } from '@dms/types';
+import { key } from '@dcm/types';
 
 function sample() {
   const patientId = '01HYPA';

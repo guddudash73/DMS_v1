@@ -2,8 +2,8 @@
 import jwt from 'jsonwebtoken';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { JwtClaims, RefreshTokenClaims } from '@dms/types';
-import type { Role } from '@dms/types';
+import { JwtClaims, RefreshTokenClaims } from '@dcm/types';
+import type { Role } from '@dcm/types';
 
 export interface TokenPair {
   access: { token: string; exp: number };

@@ -9,7 +9,7 @@ import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-import type { BillingCheckoutInput } from '@dms/types';
+import type { BillingCheckoutInput } from '@dcm/types';
 
 import {
   useGetVisitByIdQuery,

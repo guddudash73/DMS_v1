@@ -4,7 +4,7 @@ import AuthReadyGate from '@/components/AuthReadyGate';
 import ClientRoot from '@/components/ClientRoot';
 
 export const metadata: Metadata = {
-  title: 'DMS - Dental Management System',
+  title: 'DCM - Dental Management System',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -1,6 +1,6 @@
 'use client';
 
-import type { Visit } from '@dms/types';
+import type { Visit } from '@dcm/types';
 
 export type DoctorQueueEvent =
   | { type: 'visitAdded'; visit: Visit }

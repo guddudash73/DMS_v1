@@ -6,7 +6,7 @@ import {
   AdminUpdateMedicineRequest,
   type AdminMedicineListResponse,
   QuickAddMedicineInput,
-} from '@dms/types';
+} from '@dcm/types';
 import { medicinePresetRepository } from '../repositories/medicinePresetRepository';
 import { sendZodValidationError } from '../lib/validation';
 import { logAudit } from '../lib/logger';

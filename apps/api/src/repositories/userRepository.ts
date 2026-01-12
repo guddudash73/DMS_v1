@@ -9,7 +9,7 @@ import {
   DeleteCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
-import type { Role, User, DoctorProfile } from '@dms/types';
+import type { Role, User, DoctorProfile } from '@dcm/types';
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: { removeUndefinedValues: true },

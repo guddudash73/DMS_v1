@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
-import type { RxLineType, Visit, ToothDetail } from '@dms/types';
+import type { RxLineType, Visit, ToothDetail } from '@dcm/types';
 import { clinicDateISO, formatClinicDateShort } from '@/src/lib/clinicTime';
 import { useGetVisitRxQuery } from '@/src/store/api';
 import { ToothDetailsBlock } from './ToothDetailsBlock';

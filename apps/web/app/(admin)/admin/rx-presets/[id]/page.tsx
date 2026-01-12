@@ -7,7 +7,7 @@ import RxPresetEditor from '@/components/admin/rx-presets/RxPresetEditor';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useAdminGetRxPresetByIdQuery, useAdminUpdateRxPresetMutation } from '@/src/store/api';
 
-import type { RxLineType } from '@dms/types';
+import type { RxLineType } from '@dcm/types';
 
 export default function AdminRxPresetEditPage() {
   const auth = useAuth();

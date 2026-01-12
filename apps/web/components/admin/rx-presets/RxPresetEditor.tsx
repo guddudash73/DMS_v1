@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge';
 
 import { ArrowLeft, Loader2, Pencil, Plus, Trash2, Save } from 'lucide-react';
 
-import type { RxLineType, MedicineTypeaheadItem } from '@dms/types';
+import type { RxLineType, MedicineTypeaheadItem } from '@dcm/types';
 
 import { MedicineCombobox } from '@/components/prescription/MedicineCombobox';
 

@@ -23,7 +23,7 @@ import {
   useDeleteRxPresetMutation,
   useUpdateRxPresetMutation,
 } from '@/src/store/api';
-import type { PrescriptionPreset, RxPresetFilter } from '@dms/types';
+import type { PrescriptionPreset, RxPresetFilter } from '@dcm/types';
 
 type RxPresetScope = 'ADMIN' | 'PUBLIC' | 'PRIVATE';
 

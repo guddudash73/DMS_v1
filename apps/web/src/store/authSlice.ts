@@ -1,5 +1,5 @@
 import { createSlice, type PayloadAction } from '@reduxjs/toolkit';
-import type { LoginResponse, RefreshResponse } from '@dms/types';
+import type { LoginResponse, RefreshResponse } from '@dcm/types';
 
 export type Role = LoginResponse['role'];
 

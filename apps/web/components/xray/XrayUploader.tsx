@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import type { XrayContentType } from '@dms/types';
+import type { XrayContentType } from '@dcm/types';
 import { Button } from '@/components/ui/button';
 import { toast } from 'react-toastify';
 import { usePresignXrayUploadMutation, useRegisterXrayMetadataMutation } from '@/src/store/api';

@@ -1,4 +1,4 @@
-import { LoginRequest, RefreshRequest, LoginResponse, RefreshResponse } from '@dms/types';
+import { LoginRequest, RefreshRequest, LoginResponse, RefreshResponse } from '@dcm/types';
 
 export { LoginRequest, RefreshRequest, LoginResponse, RefreshResponse };
 

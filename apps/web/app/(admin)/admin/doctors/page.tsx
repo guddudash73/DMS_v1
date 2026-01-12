@@ -11,7 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 
 import { Loader2, Pencil, Plus, Search } from 'lucide-react';
 
-import type { AdminDoctorListItem } from '@dms/types';
+import type { AdminDoctorListItem } from '@dcm/types';
 import {
   useAdminGetDoctorsQuery,
   useAdminCreateDoctorMutation,

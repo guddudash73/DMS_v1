@@ -16,7 +16,7 @@ import {
   type MedicinePreset,
   type MedicineTypeaheadItem,
   type QuickAddMedicineInput,
-} from '@dms/types';
+} from '@dcm/types';
 
 type DynamoCursor = Record<string, unknown>;
 

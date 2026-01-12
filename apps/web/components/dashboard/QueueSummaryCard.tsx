@@ -7,7 +7,7 @@ import { useAuth } from '@/src/hooks/useAuth';
 import { clinicDateISO } from '@/src/lib/clinicTime';
 import { useGetPatientQueueQuery } from '@/src/store/api';
 
-import type { PatientQueueItem } from '@dms/types';
+import type { PatientQueueItem } from '@dcm/types';
 
 function getTodayIso(): string {
   return clinicDateISO(new Date());

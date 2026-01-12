@@ -1,5 +1,5 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
-import { PatientCreate, PatientUpdate, PatientSearchQuery, PatientId } from '@dms/types';
+import { PatientCreate, PatientUpdate, PatientSearchQuery, PatientId } from '@dcm/types';
 import { patientRepository, DuplicatePatientError } from '../repositories/patientRepository';
 import { visitRepository } from '../repositories/visitRepository';
 import type { ZodError } from 'zod';

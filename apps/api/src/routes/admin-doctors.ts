@@ -2,8 +2,8 @@
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';
-import { AdminCreateDoctorRequest, AdminUpdateDoctorRequest } from '@dms/types';
-import type { AdminDoctorListItem, DoctorProfile } from '@dms/types';
+import { AdminCreateDoctorRequest, AdminUpdateDoctorRequest } from '@dcm/types';
+import type { AdminDoctorListItem, DoctorProfile } from '@dcm/types';
 import { userRepository } from '../repositories/userRepository';
 import { logAudit } from '../lib/logger';
 import { pString } from '../lib/httpParams';

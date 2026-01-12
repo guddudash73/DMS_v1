@@ -1,6 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import type { ZodError } from 'zod';
-import { UpdateMeRequest, UserPreferences } from '@dms/types';
+import { UpdateMeRequest, UserPreferences } from '@dcm/types';
 import { userPreferencesRepository } from '../repositories/userPreferencesRepository';
 import { userRepository } from '../repositories/userRepository';
 import { sendZodValidationError } from '../lib/validation';

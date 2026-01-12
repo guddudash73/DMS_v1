@@ -22,7 +22,7 @@ import {
   useGetDoctorsQuery,
 } from '@/src/store/api';
 
-import type { RxPresetFilter } from '@dms/types';
+import type { RxPresetFilter } from '@dcm/types';
 
 function formatWhen(ts?: number) {
   if (!ts || !Number.isFinite(ts)) return '—';

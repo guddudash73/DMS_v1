@@ -18,7 +18,7 @@ import {
 
 import { Pencil, Trash2, Plus, Search, Loader2, Lock } from 'lucide-react';
 
-import type { MedicinePreset, MedicineForm } from '@dms/types';
+import type { MedicinePreset, MedicineForm } from '@dcm/types';
 
 import {
   useGetMeQuery,

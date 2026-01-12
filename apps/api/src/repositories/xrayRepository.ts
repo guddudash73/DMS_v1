@@ -8,8 +8,8 @@ import {
   QueryCommand,
   TransactWriteCommand,
 } from '@aws-sdk/lib-dynamodb';
-import type { Visit, Xray, XrayContentType } from '@dms/types';
-import { key } from '@dms/types';
+import type { Visit, Xray, XrayContentType } from '@dcm/types';
+import { key } from '@dcm/types';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {

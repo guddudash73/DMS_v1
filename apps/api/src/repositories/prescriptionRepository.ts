@@ -12,7 +12,7 @@ import {
   type Prescription,
   type RxId,
   type RxLineType,
-} from '@dms/types';
+} from '@dcm/types';
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
   marshallOptions: { removeUndefinedValues: true },

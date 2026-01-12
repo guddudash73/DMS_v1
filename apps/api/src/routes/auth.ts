@@ -2,8 +2,8 @@
 import { Router, type Response } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';
-import type { LoginResponse, RefreshResponse, RefreshTokenClaims } from '@dms/types';
-import { LoginRequest, RefreshRequest } from '@dms/types';
+import type { LoginResponse, RefreshResponse, RefreshTokenClaims } from '@dcm/types';
+import { LoginRequest, RefreshRequest } from '@dcm/types';
 import { userRepository } from '../repositories/userRepository';
 import { refreshTokenRepository } from '../repositories/refreshTokenRepository';
 import { getEnv } from '../config/env';

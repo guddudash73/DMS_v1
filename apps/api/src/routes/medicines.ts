@@ -6,8 +6,8 @@ import {
   QuickAddMedicineInput,
   MedicineCatalogSearchQuery,
   DoctorUpdateMedicineRequest,
-} from '@dms/types';
-import type { MedicineTypeaheadItem } from '@dms/types';
+} from '@dcm/types';
+import type { MedicineTypeaheadItem } from '@dcm/types';
 import { medicinePresetRepository } from '../repositories/medicinePresetRepository';
 import { logAudit } from '../lib/logger';
 import { sendZodValidationError } from '../lib/validation';

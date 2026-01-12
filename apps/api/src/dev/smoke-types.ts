@@ -9,7 +9,7 @@ import {
   User,
   Role,
   AuditEvent,
-} from '@dms/types';
+} from '@dcm/types';
 
 function assertOk(label: string, ok: boolean, msg?: string) {
   if (!ok) {

@@ -1,7 +1,7 @@
 // apps/api/src/routes/xray.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
-import { VisitId, XrayId, XrayContentType } from '@dms/types';
+import { VisitId, XrayId, XrayContentType } from '@dcm/types';
 import { visitRepository } from '../repositories/visitRepository';
 import {
   xrayRepository,

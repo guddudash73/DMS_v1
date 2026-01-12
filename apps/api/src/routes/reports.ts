@@ -4,13 +4,13 @@ import {
   DailyPatientSummaryRangeQuery,
   DailyVisitsBreakdownQuery,
   RecentCompletedQuery,
-} from '@dms/types';
+} from '@dcm/types';
 import type {
   Patient,
   DailyPatientSummary,
   DailyVisitsBreakdownResponse,
   RecentCompletedResponse,
-} from '@dms/types';
+} from '@dcm/types';
 
 import { visitRepository } from '../repositories/visitRepository';
 import { patientRepository } from '../repositories/patientRepository';

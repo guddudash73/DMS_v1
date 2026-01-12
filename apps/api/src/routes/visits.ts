@@ -15,7 +15,7 @@ import {
   FollowUpStatusUpdate,
   FollowUpId,
   ToothDetail,
-} from '@dms/types';
+} from '@dcm/types';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 
 import {

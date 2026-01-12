@@ -8,7 +8,7 @@ import {
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
-import type { Visit, VisitCreate, VisitStatus, VisitQueueQuery, VisitTag } from '@dms/types';
+import type { Visit, VisitCreate, VisitStatus, VisitQueueQuery, VisitTag } from '@dcm/types';
 import { clinicDateISOFromMs } from '../lib/date';
 
 export class InvalidStatusTransitionError extends Error {

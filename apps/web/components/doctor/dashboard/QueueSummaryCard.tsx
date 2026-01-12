@@ -4,7 +4,7 @@ import { useMemo } from 'react';
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useGetPatientQueueQuery } from '@/src/store/api';
-import type { Visit } from '@dms/types';
+import type { Visit } from '@dcm/types';
 import { clinicDateISO } from '@/src/lib/clinicTime';
 
 function getTodayIso(): string {

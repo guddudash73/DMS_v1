@@ -8,7 +8,7 @@ import {
   LoginRequest as LoginRequestSchema,
   type LoginRequest,
   type LoginResponse,
-} from '@dms/types';
+} from '@dcm/types';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';

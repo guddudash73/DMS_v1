@@ -6,8 +6,8 @@ import {
   AdminCreateUserRequest,
   AdminUpdateUserRequest,
   AdminResetUserPasswordRequest,
-} from '@dms/types';
-import type { AdminUserListItem, Role } from '@dms/types';
+} from '@dcm/types';
+import type { AdminUserListItem, Role } from '@dcm/types';
 import { userRepository } from '../repositories/userRepository';
 import { logAudit } from '../lib/logger';
 import { requireRole } from '../middlewares/auth';

@@ -1,6 +1,6 @@
 // apps/api/src/middlewares/auth.ts
 import type { Request, Response, NextFunction } from 'express';
-import type { Role } from '@dms/types';
+import type { Role } from '@dcm/types';
 import { verifyAccessToken } from '../lib/authTokens';
 import { userRepository } from '../repositories/userRepository';
 

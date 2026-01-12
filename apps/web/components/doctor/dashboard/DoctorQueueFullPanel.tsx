@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useGetPatientQueueQuery } from '@/src/store/api';
-import type { Visit } from '@dms/types';
+import type { Visit } from '@dcm/types';
 import { ArrowLeft } from 'lucide-react';
 import { clinicDateISO } from '@/src/lib/clinicTime';
 

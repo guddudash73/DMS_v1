@@ -6,7 +6,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { toast } from 'react-toastify';
 import type { z } from 'zod';
 
-import { PatientCreate as PatientCreateSchema, type PatientCreate } from '@dms/types';
+import { PatientCreate as PatientCreateSchema, type PatientCreate } from '@dcm/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';

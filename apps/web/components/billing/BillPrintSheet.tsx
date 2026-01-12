@@ -3,7 +3,7 @@
 import * as React from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
-import type { Billing } from '@dms/types';
+import type { Billing } from '@dcm/types';
 
 type Props = {
   open?: boolean;

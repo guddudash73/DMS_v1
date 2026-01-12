@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Rnd } from 'react-rnd';
-import type { RxLineType } from '@dms/types';
+import type { RxLineType } from '@dcm/types';
 
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';

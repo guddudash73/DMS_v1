@@ -31,7 +31,7 @@ import {
   Stethoscope,
 } from 'lucide-react';
 
-import type { ToothDetail, Visit } from '@dms/types';
+import type { ToothDetail, Visit } from '@dcm/types';
 
 import {
   Table,

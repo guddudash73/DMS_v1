@@ -1,7 +1,7 @@
 // apps/api/src/routes/rx.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
-import { RxId } from '@dms/types';
+import { RxId } from '@dcm/types';
 import { prescriptionRepository } from '../repositories/prescriptionRepository';
 import { getEnv } from '../config/env';
 import { getPresignedDownloadUrl } from '../lib/s3';
@@ -9,7 +9,7 @@ import { visitRepository } from '../repositories/visitRepository';
 import { patientRepository } from '../repositories/patientRepository';
 import { sendZodValidationError } from '../lib/validation';
 import { logError } from '../lib/logger';
-import { RxLine, ToothDetail } from '@dms/types';
+import { RxLine, ToothDetail } from '@dcm/types';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { s3Client } from '../config/aws';
 import { requireRole } from '../middlewares/auth'; // ✅ ADD

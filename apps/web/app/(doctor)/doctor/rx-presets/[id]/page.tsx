@@ -6,7 +6,7 @@ import RxPresetEditor from '@/components/admin/rx-presets/RxPresetEditor';
 import { useAuth } from '@/src/hooks/useAuth';
 import { useGetRxPresetByIdQuery, useUpdateRxPresetMutation } from '@/src/store/api';
 
-import type { RxLineType } from '@dms/types';
+import type { RxLineType } from '@dcm/types';
 
 function asRxLines(lines: unknown): RxLineType[] {
   return Array.isArray(lines) ? (lines as RxLineType[]) : [];

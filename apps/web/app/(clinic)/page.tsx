@@ -10,7 +10,7 @@ import QueueSummaryCard from '@/components/dashboard/QueueSummaryCard';
 import DailyVisitsBreakdownPanel from '@/components/dashboard/DailyVisitsBreakdownPanel';
 
 import { useGetPatientQueueQuery } from '@/src/store/api';
-import type { PatientQueueItem } from '@dms/types';
+import type { PatientQueueItem } from '@dcm/types';
 import type { PatientsPanelItem } from '@/components/dashboard/PatientsPanel';
 
 import { useAuth } from '@/src/hooks/useAuth';

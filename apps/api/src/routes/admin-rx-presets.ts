@@ -7,8 +7,8 @@ import {
   AdminRxPresetSearchQuery,
   AdminUpdateRxPresetRequest,
   type AdminRxPresetListResponse,
-} from '@dms/types';
-import type { PrescriptionPresetId, RxLineType } from '@dms/types';
+} from '@dcm/types';
+import type { PrescriptionPresetId, RxLineType } from '@dcm/types';
 import { prescriptionPresetRepository } from '../repositories/prescriptionPresetRepository';
 import { logAudit } from '../lib/logger';
 import { sendZodValidationError } from '../lib/validation';

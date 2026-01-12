@@ -2,8 +2,8 @@
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { randomUUID } from 'node:crypto';
-import { parseEnv } from '@dms/config';
-import type { HealthResponse } from '@dms/types';
+import { parseEnv } from '@dcm/config';
+import type { HealthResponse } from '@dcm/types';
 
 import authRoutes from './routes/auth';
 import patientRoutes from './routes/patients';

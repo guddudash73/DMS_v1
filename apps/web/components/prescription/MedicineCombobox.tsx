@@ -14,7 +14,7 @@ import {
   CommandList,
 } from '@/components/ui/command';
 
-import type { MedicineTypeaheadItem, QuickAddMedicineInput } from '@dms/types';
+import type { MedicineTypeaheadItem, QuickAddMedicineInput } from '@dcm/types';
 import { useLazySearchMedicinesQuery, useQuickAddMedicineMutation } from '@/src/store/api';
 
 type Props = {

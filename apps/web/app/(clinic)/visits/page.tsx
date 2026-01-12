@@ -4,7 +4,7 @@ import * as React from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'react-toastify';
 
-import type { PatientId, VisitCreate } from '@dms/types';
+import type { PatientId, VisitCreate } from '@dcm/types';
 import {
   useGetPatientByIdQuery,
   useGetPatientVisitsQuery,

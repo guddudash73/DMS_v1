@@ -8,7 +8,7 @@ import { useAuth } from '@/src/hooks/useAuth';
 import { clinicDateISO } from '@/src/lib/clinicTime';
 import { useGetPatientQueueQuery } from '@/src/store/api';
 
-import type { PatientQueueItem, Visit } from '@dms/types';
+import type { PatientQueueItem, Visit } from '@dcm/types';
 
 type VisitStatus = Visit['status'];
 

@@ -11,7 +11,7 @@ import {
   PrescriptionBlankPreview,
 } from '@/components/prescription/PrescriptionBlankPrintSheet';
 
-import type { Visit } from '@dms/types';
+import type { Visit } from '@dcm/types';
 import { useGetVisitByIdQuery, useGetPatientByIdQuery } from '@/src/store/api';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';

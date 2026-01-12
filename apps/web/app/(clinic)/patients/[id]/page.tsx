@@ -4,7 +4,7 @@
 import * as React from 'react';
 import { useParams, useRouter } from 'next/navigation';
 
-import type { PatientId, Visit } from '@dms/types';
+import type { PatientId, Visit } from '@dcm/types';
 import {
   useGetPatientByIdQuery,
   useGetPatientVisitsQuery,

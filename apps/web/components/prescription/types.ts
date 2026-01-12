@@ -1,4 +1,4 @@
-import type { RxLineType } from '@dms/types';
+import type { RxLineType } from '@dcm/types';
 
 export type RxDraft = {
   lines: RxLineType[];

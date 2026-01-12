@@ -4,7 +4,7 @@ import {
   QueryCommand,
   UpdateCommand,
 } from '@aws-sdk/lib-dynamodb';
-import { FollowUpContactMethod } from '@dms/types';
+import { FollowUpContactMethod } from '@dcm/types';
 import type {
   FollowUp,
   FollowUpCreate,
@@ -14,7 +14,7 @@ import type {
   VisitId,
   FollowUpId,
   FollowUpContactMethod as FollowUpContactMethodType,
-} from '@dms/types';
+} from '@dcm/types';
 import { v4 as randomUUID } from 'uuid';
 import { visitRepository } from './visitRepository';
 import { dynamoClient, TABLE_NAME } from '../config/aws';

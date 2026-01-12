@@ -2,7 +2,7 @@
 
 import * as React from 'react';
 import { Button } from '@/components/ui/button';
-import type { TokenPrintPayload } from '@dms/types';
+import type { TokenPrintPayload } from '@dcm/types';
 import { buildTokenEscPos } from '@/src/lib/printing/escpos';
 import { loadPrintSettings } from '@/src/lib/printing/settings';
 import { printRaw } from '@/src/lib/printing/qz';

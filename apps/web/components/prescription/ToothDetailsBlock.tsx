@@ -1,6 +1,6 @@
 'use client';
 
-import type { ToothDetail, ToothPosition } from '@dms/types';
+import type { ToothDetail, ToothPosition } from '@dcm/types';
 
 type Props = {
   toothDetails?: ToothDetail[];

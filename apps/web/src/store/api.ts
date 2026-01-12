@@ -47,7 +47,7 @@ import type {
   PatientQueueResponse,
   RecentCompletedResponse,
   ToothDetail,
-} from '@dms/types';
+} from '@dcm/types';
 
 import { createClinicQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
 import type { RootState } from './index';

@@ -12,7 +12,7 @@ import {
   TransactWriteCommand,
   type TransactWriteCommandInput,
 } from '@aws-sdk/lib-dynamodb';
-import type { Patient, PatientCreate, PatientUpdate } from '@dms/types';
+import type { Patient, PatientCreate, PatientUpdate } from '@dcm/types';
 import { normalizePhone } from '../utils/phone';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 import { isoDateInTimeZone } from '../lib/date';

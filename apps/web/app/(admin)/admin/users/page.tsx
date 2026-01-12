@@ -12,7 +12,7 @@ import { Label } from '@/components/ui/label';
 
 import { Loader2, Plus, Search, Trash2, KeyRound } from 'lucide-react';
 
-import type { Role } from '@dms/types';
+import type { Role } from '@dcm/types';
 import {
   useAdminListUsersQuery,
   useAdminCreateUserMutation,

@@ -2,7 +2,7 @@ import type { ErrorRequestHandler } from 'express';
 import { ZodError } from 'zod';
 import { logInfo, logError } from '../lib/logger';
 import { AuthError } from './auth';
-import { errorResponseSchema, type ErrorResponse } from '@dms/types';
+import { errorResponseSchema, type ErrorResponse } from '@dcm/types';
 
 type DomainError = Error & {
   code?: string;

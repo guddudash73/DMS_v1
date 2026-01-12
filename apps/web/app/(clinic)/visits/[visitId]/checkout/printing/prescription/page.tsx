@@ -10,7 +10,7 @@ import { Card } from '@/components/ui/card';
 import { PrescriptionPreview } from '@/components/prescription/PrescriptionPreview';
 import { PrescriptionPrintSheet } from '@/components/prescription/PrescriptionPrintSheet';
 
-import type { ToothDetail, Visit } from '@dms/types';
+import type { ToothDetail, Visit } from '@dcm/types';
 
 import {
   useGetVisitByIdQuery,

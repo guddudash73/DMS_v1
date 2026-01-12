@@ -11,7 +11,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { PrescriptionPreview } from '@/components/prescription/PrescriptionPreview';
 import { XrayTrayReadOnly } from '@/components/xray/XrayTrayReadOnly';
 
-import type { ToothDetail, Visit } from '@dms/types';
+import type { ToothDetail, Visit } from '@dcm/types';
 
 import {
   useGetVisitByIdQuery,

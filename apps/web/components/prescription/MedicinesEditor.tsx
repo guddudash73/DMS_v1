@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useRef, useState } from 'react';
-import type { RxLineType } from '@dms/types';
+import type { RxLineType } from '@dcm/types';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {

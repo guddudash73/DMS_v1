@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import React from 'react';
-import type { RxLineType, Visit } from '@dms/types';
+import type { RxLineType, Visit } from '@dcm/types';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -42,7 +42,7 @@ import { Calendar as CalendarIcon } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 import { clinicDateISO, clinicDateISOFromMs, formatClinicDateShort } from '@/src/lib/clinicTime';
-import type { ToothDetail } from '@dms/types';
+import type { ToothDetail } from '@dcm/types';
 import { ToothDetailsEditor } from './ToothDetailsEditor';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';

@@ -6,7 +6,7 @@ import {
   UpdateRxPresetRequest,
   PrescriptionPresetId,
   type PrescriptionPresetScope,
-} from '@dms/types';
+} from '@dcm/types';
 import { prescriptionPresetRepository } from '../repositories/prescriptionPresetRepository';
 import { sendZodValidationError } from '../lib/validation';
 

@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import type { RxLineType, PrescriptionPreset, RxPresetFilter } from '@dms/types';
+import type { RxLineType, PrescriptionPreset, RxPresetFilter } from '@dcm/types';
 import { useGetRxPresetsQuery } from '@/src/store/api';
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';

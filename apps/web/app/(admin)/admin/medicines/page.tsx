@@ -21,7 +21,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Pencil, Trash2, Plus, Search, CheckCircle2, Loader2 } from 'lucide-react';
 
-import type { MedicinePreset, MedicineForm } from '@dms/types';
+import type { MedicinePreset, MedicineForm } from '@dcm/types';
 
 import {
   useAdminListMedicinesQuery,

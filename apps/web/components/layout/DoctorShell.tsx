@@ -17,7 +17,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 
-import type { Patient } from '@dms/types';
+import type { Patient } from '@dcm/types';
 import { useAuth } from '@/src/hooks/useAuth';
 import {
   useGetPatientsQuery,

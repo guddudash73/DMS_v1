@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
-import type { RxLineType, Visit, ToothDetail } from '@dms/types';
+import type { RxLineType, Visit, ToothDetail } from '@dcm/types';
 import { useGetVisitRxQuery } from '@/src/store/api';
 import { formatClinicDateShort } from '@/src/lib/clinicTime';
 import { ToothDetailsBlock } from './ToothDetailsBlock';

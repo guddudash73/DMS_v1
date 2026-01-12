@@ -18,7 +18,7 @@ import {
   type RxLineType,
   type PrescriptionPresetScope,
   type RxPresetFilter,
-} from '@dms/types';
+} from '@dcm/types';
 
 type DynamoCursor = Record<string, unknown>;
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;

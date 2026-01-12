@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { AuditEvent as AuditEventSchema } from '@dms/types';
-import type { AuditEvent as AuditEventType } from '@dms/types';
+import { AuditEvent as AuditEventSchema } from '@dcm/types';
+import type { AuditEvent as AuditEventType } from '@dcm/types';
 
 type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 

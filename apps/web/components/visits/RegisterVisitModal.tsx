@@ -7,7 +7,7 @@ import { useForm, type SubmitErrorHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useRouter } from 'next/navigation';
 
-import { VisitCreate as VisitCreateSchema, type VisitCreate, type VisitTag } from '@dms/types';
+import { VisitCreate as VisitCreateSchema, type VisitCreate, type VisitTag } from '@dcm/types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';

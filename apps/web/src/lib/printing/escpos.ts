@@ -1,5 +1,5 @@
 // apps/web/src/lib/printing/escpos.ts
-import type { TokenPrintPayload } from '@dms/types';
+import type { TokenPrintPayload } from '@dcm/types';
 import { CLINIC_TZ } from '../clinicTime';
 
 const ESC = '\x1B';

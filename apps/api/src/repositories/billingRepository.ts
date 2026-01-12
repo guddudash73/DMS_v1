@@ -1,6 +1,6 @@
 // apps/api/src/repositories/billingRepository.ts
 import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
-import type { Billing, BillingCheckoutInput, Visit, VisitId } from '@dms/types';
+import type { Billing, BillingCheckoutInput, Visit, VisitId } from '@dcm/types';
 import { visitRepository } from './visitRepository';
 import { patientRepository } from './patientRepository';
 import { FollowUpRuleViolationError } from './followupRepository';
