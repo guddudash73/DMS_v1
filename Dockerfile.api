@@ -8,22 +8,29 @@ RUN npx turbo prune --scope=$TURBO_SCOPE --docker
 FROM node:20 AS installer
 WORKDIR /repo
 
+# 1) Copy only pruned package.json files + lockfile first (best caching + correctness)
 COPY --from=pruner /repo/out/json/ ./
 COPY --from=pruner /repo/out/package-lock.json ./package-lock.json
-COPY --from=pruner /repo/out/full/ ./
 COPY --from=pruner /repo/turbo.json ./turbo.json
 
+# If you rely on these TS configs during install/build steps
 COPY --from=pruner /repo/packages/tsconfig/base.json ./packages/tsconfig/base.json
 COPY --from=pruner /repo/tsconfig.base.json ./tsconfig.base.json
 
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
+# Hard fail early if lockfile isn't where we expect
+RUN test -f package-lock.json
+
+# 2) Install deps using lockfile
 RUN npm ci --workspaces --include-workspace-root
+
+# 3) Now copy full source (won't affect npm ci correctness)
+COPY --from=pruner /repo/out/full/ ./
 
 FROM node:20 AS builder
 WORKDIR /repo
 COPY --from=installer /repo ./
-
 RUN npx turbo run build --filter=@dcm/api...
 
 FROM node:20 AS proddeps
