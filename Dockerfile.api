@@ -9,14 +9,14 @@ COPY . .
 
 ARG TURBO_SCOPE=@dcm/api
 
-# Optional but recommended: disable turbo telemetry in CI
+# Disable turbo telemetry in CI
 ENV TURBO_TELEMETRY_DISABLED=1
 
-# Install repo deps (without scripts) so turbo is "locally installed" and the warning goes away.
-# This does NOT run husky or any prepare/postinstall because we ignore scripts.
+# Install repo deps (without scripts) so turbo is "locally installed"
+# and we avoid husky/prepare hooks during this stage.
 RUN npm ci --ignore-scripts --no-audit --no-fund
 
-# Now prune using the local turbo from node_modules
+# Prune using the local turbo from node_modules
 RUN npx turbo prune --scope=$TURBO_SCOPE --docker
 
 
@@ -26,7 +26,7 @@ RUN npx turbo prune --scope=$TURBO_SCOPE --docker
 FROM node:20 AS installer
 WORKDIR /repo
 
-# Disable husky everywhere in Docker/CI so it never tries to install git hooks
+# Disable husky everywhere in Docker/CI
 ENV HUSKY=0
 ENV TURBO_TELEMETRY_DISABLED=1
 
@@ -42,18 +42,17 @@ COPY --from=turbo_pruner /repo/tsconfig.base.json ./tsconfig.base.json
 # Native deps for bcrypt/sharp etc
 RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
 
-# Keep npm stable (optional). If you must pin, keep it here.
+# Pin npm if your repo expects it (optional)
 RUN npm -v && npm install -g npm@11.6.2 && npm -v
 
-# --- Debug sanity checks (optional) ---
+# --- Sanity checks (optional) ---
 RUN test -f package-lock.json
 RUN node -e "JSON.parse(require('fs').readFileSync('package-lock.json','utf8')); console.log('package-lock.json: valid JSON')"
 RUN sed -n '1,40p' package-lock.json
 
 # ✅ Critical fix:
-# turbo's pruned lockfile can exist but still not be "ci-installable" for npm workspaces.
-# We regenerate a lockfile for the pruned workspace WITHOUT running scripts (avoids husky prepare),
-# then do a real npm ci (husky disabled via HUSKY=0).
+# Regenerate a lockfile that matches this pruned workspace (turbo lockfile can break npm ci with workspaces),
+# without running scripts (avoids husky prepare), then run npm ci.
 RUN rm -f package-lock.json \
   && npm_config_ignore_scripts=true npm install --workspaces --include-workspace-root --package-lock-only --no-audit --no-fund \
   && npm ci --workspaces --include-workspace-root --no-audit --no-fund
@@ -92,13 +91,13 @@ RUN apt-get update && apt-get install -y openssl ca-certificates && rm -rf /var/
 ENV NODE_ENV=production
 
 COPY --from=proddeps /repo/node_modules ./node_modules
+
+# App build output
 COPY --from=builder /repo/apps/api/dist ./apps/api/dist
 
-COPY --from=installer /repo/packages/config/package.json ./packages/config/package.json
-COPY --from=builder   /repo/packages/config/dist          ./packages/config/dist
-
-COPY --from=installer /repo/packages/types/package.json ./packages/types/package.json
-COPY --from=builder   /repo/packages/types/dist          ./packages/types/dist
+# ✅ Copy compiled internal packages (runtime needs dist, not package.json)
+COPY --from=builder /repo/packages/config/dist ./packages/config/dist
+COPY --from=builder /repo/packages/types/dist  ./packages/types/dist
 
 EXPOSE 4000
 CMD ["node", "--enable-source-maps", "apps/api/dist/index.js"]
