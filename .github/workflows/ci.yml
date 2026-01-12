@@ -36,7 +36,6 @@ jobs:
           node-version: '20'
           cache: 'npm'
 
-      # Align npm with repo packageManager to avoid lockfile/ci inconsistencies
       - name: Pin npm version
         run: |
           npm -v
@@ -63,18 +62,29 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # ✅ Build the API Docker image explicitly (no bake), ensuring "pruner" is treated as a stage
+      - name: 'Preflight: show key files'
+        run: |
+          set -euxo pipefail
+          ls -la
+          test -f Dockerfile.api
+          test -f package-lock.json
+          echo "Dockerfile.api sha:"
+          sha256sum Dockerfile.api
+          echo "First 30 lines of Dockerfile.api:"
+          sed -n '1,30p' Dockerfile.api
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build API Docker image (Dockerfile.api)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile.api
-          target: runner
-          push: false
-          tags: dcm-api:ci
+      - name: Build API Docker image (plain logs)
+        run: |
+          set -euxo pipefail
+          docker buildx build \
+            --progress=plain \
+            --file Dockerfile.api \
+            --target runner \
+            --tag dcm-api:ci \
+            .
 
       - name: Start emulators (DynamoDB Local / S3)
         run: npm run dev:emulators:up
