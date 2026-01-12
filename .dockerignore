@@ -30,10 +30,6 @@ apps/**/.env.*
 *.swp
 *.log
 
-# Docker meta
-Dockerfile*
-.dockerignore
-
 # Misc
 *.tsbuildinfo
 **/tsconfig.tsbuildinfo
