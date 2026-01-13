@@ -49,6 +49,7 @@ export type BillingCheckoutInput = z.infer<typeof BillingCheckoutInput>;
 
 export const Billing = z.object({
   visitId: VisitId,
+  billNo: z.string().min(1),
   items: z.array(
     BillingLine.extend({
       lineTotal: z.number().nonnegative(),
@@ -66,3 +67,6 @@ export const Billing = z.object({
 });
 
 export type Billing = z.infer<typeof Billing>;
+
+export const BillingUpdateInput = BillingCheckoutInput;
+export type BillingUpdateInput = z.infer<typeof BillingUpdateInput>;

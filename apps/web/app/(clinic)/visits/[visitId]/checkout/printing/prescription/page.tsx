@@ -314,14 +314,13 @@ export default function PrescriptionPrintPreviewPage() {
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="text-lg font-semibold text-gray-900">Prescription Print Preview</div>
-          <div className="text-xs text-gray-500">Visit ID: {visitId}</div>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button
             type="button"
             variant="outline"
-            className="rounded-xl"
+            className="rounded-xl cursor-pointer"
             onClick={() => router.back()}
           >
             Back
@@ -329,7 +328,7 @@ export default function PrescriptionPrintPreviewPage() {
 
           <Button
             variant="outline"
-            className="rounded-xl"
+            className="rounded-xl cursor-pointer"
             disabled={!canPrint}
             onClick={() => setPrintWithHistory((v) => !v)}
             title="Toggle printing previous visit blocks"
@@ -339,7 +338,7 @@ export default function PrescriptionPrintPreviewPage() {
 
           <Button
             variant="default"
-            className="rounded-xl bg-black text-white hover:bg-black/90"
+            className="rounded-xl bg-black text-white hover:bg-black/90 cursor-pointer"
             onClick={printPrescription}
             disabled={!canPrint}
             title={!canPrint ? 'No medicines or tooth details to print' : 'Print prescription'}

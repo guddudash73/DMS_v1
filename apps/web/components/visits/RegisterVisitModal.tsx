@@ -16,6 +16,7 @@ import {
   useGetPatientByIdQuery,
   useGetPatientVisitsQuery,
   useCreateVisitMutation,
+  useUnavoidPatientMutation, // ✅ NEW
 } from '@/src/store/api';
 import { loadPrintSettings } from '@/src/lib/printing/settings';
 import { buildTokenEscPos } from '@/src/lib/printing/escpos';
@@ -45,7 +46,7 @@ type VisitSummaryItem = {
   createdAt?: number;
   opdNo?: string;
   tag?: string;
-  reason?: string; // ✅ add reason for label
+  reason?: string;
 };
 
 type PatientVisitsResponse = {
@@ -61,7 +62,6 @@ function safeVisitLabel(v: VisitSummaryItem) {
 
   if (reason) return `${date} • ${reason}`;
 
-  // fallback (if backend doesn't send reason yet)
   const idShort = v.visitId ? `#${String(v.visitId).slice(0, 8)}` : '';
   const opd = v.opdNo ? String(v.opdNo) : idShort;
   return `${date} • ${opd}`;
@@ -73,6 +73,10 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
 
   const [mounted, setMounted] = React.useState(false);
   const [closing, setClosing] = React.useState(false);
+
+  // ✅ NEW: avoid warning state
+  const [avoidWarningOpen, setAvoidWarningOpen] = React.useState(false);
+  const pendingSubmitRef = React.useRef<VisitCreate | null>(null);
 
   React.useEffect(() => {
     const r = requestAnimationFrame(() => setMounted(true));
@@ -104,6 +108,7 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
   });
 
   const [createVisit, { isLoading }] = useCreateVisitMutation();
+  const [unavoidPatient, { isLoading: unavoidLoading }] = useUnavoidPatientMutation(); // ✅ NEW
 
   const {
     register,
@@ -158,7 +163,7 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
     }
   }, [selectedTag, anchorCandidates, setValue, watch]);
 
-  const onSubmit = async (values: VisitCreate) => {
+  const doCreateVisit = async (values: VisitCreate) => {
     if (!canUseApi) {
       toast.error('Please login to create a visit.');
       return;
@@ -194,6 +199,18 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
       console.error(e);
       toast.error('Unable to create visit. Please try again.');
     }
+  };
+
+  const onSubmit = async (values: VisitCreate) => {
+    // ✅ If patient is avoided → show warning popup first
+    const isAvoided = (patient as any)?.isAvoided === true;
+    if (isAvoided) {
+      pendingSubmitRef.current = values;
+      setAvoidWarningOpen(true);
+      return;
+    }
+
+    await doCreateVisit(values);
   };
 
   const onSubmitError: SubmitErrorHandler<VisitCreate> = (formErrors) => {
@@ -374,6 +391,73 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
             </form>
           </CardContent>
         </Card>
+
+        {/* ✅ Avoid warning popup */}
+        {avoidWarningOpen ? (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
+            role="dialog"
+            aria-modal="true"
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) setAvoidWarningOpen(false);
+            }}
+          >
+            <Card className="w-full max-w-lg rounded-2xl border-none bg-white shadow-xl">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-lg font-semibold text-red-700">
+                  ⚠️ Avoid Patient Warning
+                </CardTitle>
+              </CardHeader>
+
+              <CardContent className="space-y-4 pt-0">
+                <p className="text-sm text-gray-800">
+                  This patient is marked as{' '}
+                  <span className="font-semibold text-red-700">AVOID</span>. Please confirm before
+                  registering a visit.
+                </p>
+
+                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-10 rounded-xl"
+                    disabled={unavoidLoading}
+                    onClick={async () => {
+                      try {
+                        await unavoidPatient({ patientId }).unwrap();
+                        toast.success('Patient un-avoided.');
+                        setAvoidWarningOpen(false);
+
+                        const pending = pendingSubmitRef.current;
+                        pendingSubmitRef.current = null;
+
+                        if (pending) await doCreateVisit(pending);
+                      } catch (e) {
+                        console.error(e);
+                        toast.error('Unable to un-avoid patient.');
+                      }
+                    }}
+                  >
+                    {unavoidLoading ? 'Un-avoiding…' : 'Un-avoid patient'}
+                  </Button>
+
+                  <Button
+                    type="button"
+                    className="h-10 rounded-xl bg-red-600 text-white hover:bg-red-700"
+                    onClick={async () => {
+                      setAvoidWarningOpen(false);
+                      const pending = pendingSubmitRef.current;
+                      pendingSubmitRef.current = null;
+                      if (pending) await doCreateVisit(pending);
+                    }}
+                  >
+                    OK, continue
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        ) : null}
       </div>
     </div>
   );

@@ -271,7 +271,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
             >
               <SelectTrigger
                 ref={freqTriggerRef}
-                className="h-10 rounded-xl w-full"
+                className="h-10 rounded-xl w-full cursor-pointer"
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter') return;
                   if (frequency) {
@@ -284,7 +284,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
               </SelectTrigger>
               <SelectContent>
                 {FREQUENCY.map((f) => (
-                  <SelectItem key={f} value={f}>
+                  <SelectItem key={f} value={f} className="cursor-pointer">
                     {f}
                   </SelectItem>
                 ))}
@@ -318,7 +318,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
             >
               <SelectTrigger
                 ref={timingTriggerRef}
-                className="h-10 rounded-xl"
+                className="h-10 rounded-xl cursor-pointer"
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter') return;
                   if (timingUi) {
@@ -331,7 +331,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
               </SelectTrigger>
               <SelectContent>
                 {TIMING_UI.map((t) => (
-                  <SelectItem key={t} value={t}>
+                  <SelectItem key={t} value={t} className="cursor-pointer">
                     {t}
                   </SelectItem>
                 ))}
@@ -354,7 +354,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
                     type="button"
                     variant="outline"
                     size="icon"
-                    className="h-10 w-12 rounded-xl"
+                    className="h-10 w-12 rounded-xl cursor-pointer"
                     aria-label="Add notes"
                     onClick={() => openNotesPopover()}
                     onKeyDown={(e) => {
@@ -390,7 +390,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
                   <Button
                     type="button"
                     variant="ghost"
-                    className="h-8 rounded-xl px-3 text-xs"
+                    className="h-8 rounded-xl px-3 text-xs cursor-pointer"
                     onClick={() => closeNotesPopoverToAdd()}
                   >
                     Done
@@ -405,7 +405,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
               <Button
                 ref={addBtnRef}
                 type="button"
-                className="h-10 w-10 rounded-xl"
+                className="h-10 w-10 rounded-xl cursor-pointer"
                 disabled={!canAdd}
                 onClick={add}
                 aria-label="Add medicine"

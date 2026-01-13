@@ -728,6 +728,21 @@ router.get(
   }),
 );
 
+router.patch(
+  '/:visitId/bill',
+  requireRole('ADMIN'),
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    if (!id.success) return handleValidationError(req, res, id.error.issues);
+
+    const parsedBody = BillingCheckoutInput.safeParse(req.body);
+    if (!parsedBody.success) return handleValidationError(req, res, parsedBody.error.issues);
+
+    const updated = await billingRepository.updateBill(id.data, parsedBody.data);
+    return res.status(200).json(updated);
+  }),
+);
+
 router.get(
   '/:visitId/rx',
   requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),

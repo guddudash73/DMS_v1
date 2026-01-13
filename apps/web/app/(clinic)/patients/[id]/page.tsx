@@ -11,6 +11,8 @@ import {
   useGetDoctorsQuery,
   useGetPatientSummaryQuery,
   useGetMeQuery,
+  useAvoidPatientMutation,
+  useUnavoidPatientMutation,
   type ErrorResponse,
 } from '@/src/store/api';
 
@@ -35,6 +37,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { ArrowRight, Calendar as CalendarIcon } from 'lucide-react';
 import { clinicDateISO, formatClinicDateShort } from '@/src/lib/clinicTime';
 import { PrescriptionPrintSheet } from '@/components/prescription/PrescriptionPrintSheet';
+import EditPatientModal from '@/components/patients/EditPatientModal';
 
 type ApiError = {
   status?: number;
@@ -190,6 +193,8 @@ export default function PatientDetailPage() {
 
   const [printMounted, setPrintMounted] = React.useState(false);
   React.useEffect(() => setPrintMounted(true), []);
+
+  const [editOpen, setEditOpen] = React.useState(false);
 
   if (!rawId || typeof rawId !== 'string') {
     return (
@@ -420,8 +425,13 @@ export default function PatientDetailPage() {
 
   const hasRows = pageAnchors.length > 0 || groups.orphanGroups.length > 0;
 
+  const [avoidPatient, { isLoading: avoidLoading }] = useAvoidPatientMutation();
+  const [unavoidPatient, { isLoading: unavoidLoading }] = useUnavoidPatientMutation();
+
+  const isAvoided = (patient as any)?.isAvoided === true;
+
   return (
-    <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
+    <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10 w-full">
       <div className="flex flex-col gap-4">
         <div className="flex flex-row items-center justify-end gap-6">
           <div className="text-sm">
@@ -437,8 +447,15 @@ export default function PatientDetailPage() {
           </div>
         </div>
 
-        <Card className="rounded-2xl border-none bg-white px-8 py-6 shadow-sm">
-          <h2 className="mb-4 text-lg font-semibold text-gray-900">Patient Details:</h2>
+        <Card className="rounded-2xl border-none bg-white px-8 py-6 shadow-sm w-full">
+          <div className="flex gap-4">
+            <h2 className="mb-4 text-lg font-semibold text-gray-900">Patient Details:</h2>
+            {patient && isAvoided ? (
+              <div className="mb-3 inline-flex items-center rounded-full border border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-700">
+                AVOID PATIENT
+              </div>
+            ) : null}
+          </div>
 
           {patientLoading && (
             <div className="space-y-2 text-sm text-gray-600" aria-busy="true">
@@ -502,10 +519,46 @@ export default function PatientDetailPage() {
           )}
 
           <div className="mt-5 flex justify-end gap-2">
+            {/* ✅ NEW: Avoid / Un-avoid */}
             <Button
               type="button"
               variant="outline"
-              className="rounded-2xl"
+              className="rounded-2xl cursor-pointer"
+              disabled={!patient || avoidLoading || unavoidLoading}
+              onClick={async () => {
+                if (!patient) return;
+                try {
+                  if ((patient as any)?.isAvoided) {
+                    await unavoidPatient({ patientId }).unwrap();
+                  } else {
+                    await avoidPatient({ patientId }).unwrap();
+                  }
+                } catch (e) {
+                  console.error(e);
+                }
+              }}
+            >
+              {(patient as any)?.isAvoided ? 'Un-avoid' : 'Avoid'}
+            </Button>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-2xl cursor-pointer"
+              onClick={() => setEditOpen(true)}
+              disabled={!patient}
+            >
+              Edit details
+            </Button>
+
+            {editOpen && patient ? (
+              <EditPatientModal patient={patient} onClose={() => setEditOpen(false)} />
+            ) : null}
+
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-2xl cursor-pointer"
               onClick={printBlankRx}
               disabled={!patient || !!patientErrorMessage}
               title={!patient ? 'Patient not loaded' : 'Print blank prescription'}
@@ -515,7 +568,7 @@ export default function PatientDetailPage() {
 
             <Button
               type="button"
-              className="rounded-2xl"
+              className="rounded-2xl cursor-pointer"
               onClick={() => setRegisterOpen(true)}
               disabled={!patient || !!patientErrorMessage}
             >
@@ -536,7 +589,7 @@ export default function PatientDetailPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="h-9 rounded-full border-gray-200 bg-white px-4 text-xs text-gray-800 hover:bg-gray-100"
+                className="h-9 rounded-full border-gray-200 bg-white px-4 text-xs text-gray-800 hover:bg-gray-100 cursor-pointer"
               >
                 <CalendarIcon className="mr-2 h-4 w-4" />
                 {selectedDate ? formatVisitDate(selectedDate) : 'Pick a date'}
@@ -678,7 +731,7 @@ export default function PatientDetailPage() {
                               <Button
                                 type="button"
                                 variant="outline"
-                                className="h-9 rounded-xl px-3 text-xs"
+                                className="h-9 rounded-xl px-3 text-xs cursor-pointer"
                                 onClick={() => router.push(`/visits/${anchor.visitId}`)}
                               >
                                 View <ArrowRight className="ml-1 h-4 w-4" />

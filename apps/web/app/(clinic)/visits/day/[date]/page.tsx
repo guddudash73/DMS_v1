@@ -203,7 +203,7 @@ export default function VisitsByDayPage() {
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-9 w-9 rounded-xl"
+                className="h-9 w-9 rounded-xl cursor-pointer"
                 onClick={() => router.back()}
                 title="Back"
               >
@@ -224,7 +224,7 @@ export default function VisitsByDayPage() {
             </div>
 
             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-              <div className="relative w-full sm:w-[280px]">
+              <div className="relative w-full sm:w-70">
                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
                 <Input
                   value={query}
@@ -240,7 +240,10 @@ export default function VisitsByDayPage() {
                     key={k}
                     type="button"
                     variant={status === k ? 'default' : 'secondary'}
-                    className={cn('h-10 rounded-xl px-3 text-[12px]', status !== k && 'bg-gray-50')}
+                    className={cn(
+                      'h-10 rounded-xl px-3 text-[12px] cursor-pointer',
+                      status !== k && 'bg-gray-50',
+                    )}
                     onClick={() => setStatus(k)}
                   >
                     {k === 'ALL'
@@ -306,7 +309,7 @@ export default function VisitsByDayPage() {
                               type="button"
                               onClick={() => goVisit(r.visitId)}
                               className={cn(
-                                'w-full rounded-2xl px-3 py-3 text-left',
+                                'w-full rounded-2xl px-3 py-3 text-left cursor-pointer',
                                 'transition-colors hover:bg-gray-50',
                                 'focus:outline-none focus-visible:ring-2 focus-visible:ring-black/10',
                               )}

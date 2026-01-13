@@ -237,6 +237,9 @@ export class DynamoDBVisitRepository implements VisitRepository {
       // ✅ stable daily number (use this in queue + token)
       dailyPatientNumber: dailySeq,
 
+      checkedOut: false,
+      checkedOutAt: undefined,
+
       createdAt: now,
       updatedAt: now,
 

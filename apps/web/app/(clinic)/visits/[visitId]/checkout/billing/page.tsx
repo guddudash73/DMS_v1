@@ -15,9 +15,8 @@ import {
   useGetVisitByIdQuery,
   useGetPatientByIdQuery,
   useGetVisitBillQuery,
+  useUpdateVisitBillMutation,
   useCheckoutVisitMutation,
-
-  // ✅ FIX: this exists in api.ts
   useUpdateVisitStatusMutation,
 } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
@@ -29,7 +28,6 @@ const money = (n: unknown) => {
   return Number.isFinite(v) ? v : 0;
 };
 
-// ✅ helpers to avoid `any`
 type UnknownRecord = Record<string, unknown>;
 const isRecord = (v: unknown): v is UnknownRecord => typeof v === 'object' && v !== null;
 
@@ -45,7 +43,12 @@ const getBool = (obj: unknown, key: string): boolean | undefined => {
   return typeof v === 'boolean' ? v : undefined;
 };
 
-// ✅ NEW: safely read message from unknown (no `any`)
+const getNum = (obj: unknown, key: string): number | undefined => {
+  if (!isRecord(obj)) return undefined;
+  const v = obj[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+};
+
 const getErrorMessage = (err: unknown): string | undefined => {
   if (err instanceof Error) return err.message;
   if (isRecord(err) && typeof err.message === 'string') return err.message;
@@ -82,6 +85,22 @@ function IconX(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
+type BillItemLike = { description?: unknown; unitAmount?: unknown };
+type BillLike = {
+  items?: unknown;
+  discountAmount?: unknown;
+  taxAmount?: unknown;
+  receivedOnline?: unknown;
+  receivedOffline?: unknown;
+};
+
+const getBillItems = (bill: unknown): BillItemLike[] => {
+  if (!isRecord(bill)) return [];
+  const b = bill as BillLike;
+  if (!Array.isArray(b.items)) return [];
+  return b.items as BillItemLike[];
+};
+
 export default function VisitCheckoutBillingPage() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -92,45 +111,48 @@ export default function VisitCheckoutBillingPage() {
   const visitId = String(params?.visitId ?? '');
 
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
-  const visit = visitQuery.data;
+  const visit: unknown = visitQuery.data;
+
+  // ✅ bill existence signal from visit meta (no 404 spam)
+  const billExists =
+    getBool(visit, 'checkedOut') === true ||
+    getNum(visit, 'billingAmount') !== undefined ||
+    getNum(visit, 'billingAmount') === 0;
 
   const isOfflineVisit = getBool(visit, 'isOffline') === true;
 
-  const patientId = visit?.patientId;
+  // ✅ fetch bill only when it exists + admin (admin edits)
+  const shouldFetchBill = !!visitId && !!visit && billExists && isAdmin;
+
+  const patientId = getStr(visit, 'patientId');
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
-  const billQuery = useGetVisitBillQuery({ visitId }, { skip: !visitId });
-  const bill = billQuery.data ?? null;
+  const billQuery = useGetVisitBillQuery({ visitId }, { skip: !shouldFetchBill });
+  const bill: unknown = billQuery.data ?? null;
 
-  // ✅ no `any`: read error status safely from RTK Query error union
-  const billNotFound = (() => {
-    if (!('error' in billQuery)) return false;
-    const err = billQuery.error;
-    if (isRecord(err) && typeof err.status === 'number') return err.status === 404;
-    return false;
-  })();
+  const billNotFound = !billExists;
 
   React.useEffect(() => {
     if (!visitId) return;
-    if (billQuery.isLoading || billQuery.isFetching) return;
-    if (bill && !isAdmin) {
+    if (!visit) return;
+    if (!isAdmin && billExists) {
       router.replace(`/visits/${visitId}/checkout/printing`);
     }
-  }, [bill, isAdmin, visitId, router, billQuery.isLoading, billQuery.isFetching]);
+  }, [visitId, visit, isAdmin, billExists, router]);
 
-  const isZeroBilled = visit?.zeroBilled === true;
+  const isZeroBilled = getBool(visit, 'zeroBilled') === true;
   const [billingEnabledForZero, setBillingEnabledForZero] = React.useState(false);
+
+  const [updateVisitBill, updateBillState] = useUpdateVisitBillMutation();
 
   React.useEffect(() => {
     setBillingEnabledForZero(false);
   }, [visitId]);
 
-  // ✅ offline can save even if not DONE (we will mark DONE first on Save)
-  const canCheckout = !!visitId && !!visit && (visit.status === 'DONE' || isOfflineVisit);
+  const status = getStr(visit, 'status');
+  const canCheckout = !!visitId && !!visit && (status === 'DONE' || isOfflineVisit);
 
   const [checkoutVisit, checkoutState] = useCheckoutVisitMutation();
-
-  // ✅ FIX
   const [updateVisitStatus, updateVisitStatusState] = useUpdateVisitStatusMutation();
 
   const [lines, setLines] = React.useState<LineDraft[]>([]);
@@ -144,7 +166,6 @@ export default function VisitCheckoutBillingPage() {
   const [editService, setEditService] = React.useState('');
   const [editAmount, setEditAmount] = React.useState('');
 
-  // ✅ NEW: payment received flags (mutually exclusive)
   const [receivedOnline, setReceivedOnline] = React.useState(false);
   const [receivedOffline, setReceivedOffline] = React.useState(false);
 
@@ -154,18 +175,23 @@ export default function VisitCheckoutBillingPage() {
     if (hydratedRef.current) return;
     hydratedRef.current = true;
 
+    const items = getBillItems(bill);
+
     setLines(
-      (bill.items ?? []).map((it) => ({
-        description: it.description,
-        unitAmount: it.unitAmount,
+      items.map((it) => ({
+        description: typeof it.description === 'string' ? it.description : '',
+        unitAmount: money(it.unitAmount),
       })),
     );
-    setDiscountAmount(bill.discountAmount ?? 0);
-    setTaxAmount(bill.taxAmount ?? 0);
 
-    // ✅ hydrate flags from bill
-    setReceivedOnline(bill.receivedOnline === true);
-    setReceivedOffline(bill.receivedOffline === true);
+    setDiscountAmount(money(isRecord(bill) ? (bill as BillLike).discountAmount : 0));
+    setTaxAmount(money(isRecord(bill) ? (bill as BillLike).taxAmount : 0));
+
+    const ro = isRecord(bill) ? (bill as BillLike).receivedOnline : undefined;
+    const rf = isRecord(bill) ? (bill as BillLike).receivedOffline : undefined;
+
+    setReceivedOnline(ro === true);
+    setReceivedOffline(rf === true);
   }, [bill]);
 
   const billingMuted = isZeroBilled && !billingEnabledForZero;
@@ -279,24 +305,24 @@ export default function VisitCheckoutBillingPage() {
   const onSave = async () => {
     if (!visit) return;
 
-    // ✅ OFFLINE: if not DONE, mark DONE first
-    if (isOfflineVisit && visit.status !== 'DONE') {
+    const currentStatus = getStr(visit, 'status');
+
+    if (isOfflineVisit && currentStatus !== 'DONE') {
       try {
         await updateVisitStatus({ visitId, status: 'DONE' }).unwrap();
         await visitQuery.refetch();
       } catch (err: unknown) {
         const e = err as ApiError;
+
         const msg =
-          (isRecord(e.data) && typeof e.data.message === 'string' && e.data.message) ||
-          getErrorMessage(err) ||
-          'Failed to mark visit DONE.';
+          getStr(e.data, 'message') || getErrorMessage(err) || 'Failed to mark visit DONE.';
+
         toast.error(msg);
         return;
       }
     }
 
-    // ✅ normal rule still applies for non-offline
-    if (!isOfflineVisit && visit.status !== 'DONE') {
+    if (!isOfflineVisit && currentStatus !== 'DONE') {
       toast.error('Checkout is only allowed when visit is DONE.');
       return;
     }
@@ -332,17 +358,19 @@ export default function VisitCheckoutBillingPage() {
         };
 
     try {
-      await checkoutVisit({ visitId, input: payload }).unwrap();
-      toast.success(bill ? 'Bill updated.' : 'Checkout saved.');
+      if (billExists) {
+        await updateVisitBill({ visitId, input: payload }).unwrap(); // ✅ PATCH
+        toast.success('Bill updated.');
+      } else {
+        await checkoutVisit({ visitId, input: payload }).unwrap(); // ✅ POST
+        toast.success('Checkout saved.');
+      }
+
       router.replace(`/visits/${visitId}/checkout/printing`);
     } catch (err: unknown) {
       const e = err as ApiError;
-      const code =
-        isRecord(e.data) && typeof e.data.error === 'string' ? (e.data.error as string) : undefined;
-      const msg =
-        (isRecord(e.data) && typeof e.data.message === 'string' && e.data.message) ||
-        getErrorMessage(err) ||
-        'Checkout failed.';
+      const code = getStr(e.data, 'error');
+      const msg = getStr(e.data, 'message') || getErrorMessage(err) || 'Checkout failed.';
 
       if (code === 'VISIT_NOT_DONE') toast.error('Visit must be DONE before checkout.');
       else if (code === 'DUPLICATE_CHECKOUT') toast.error('This visit is already checked out.');
@@ -352,7 +380,11 @@ export default function VisitCheckoutBillingPage() {
 
   if (bill && !isAdmin) return <div className="p-6 text-sm text-gray-600">Redirecting…</div>;
 
-  const saveDisabled = !canCheckout || checkoutState.isLoading || updateVisitStatusState.isLoading;
+  const saveDisabled =
+    !canCheckout ||
+    checkoutState.isLoading ||
+    updateBillState.isLoading ||
+    updateVisitStatusState.isLoading;
 
   return (
     <section className="p-4 2xl:p-8">
@@ -362,8 +394,8 @@ export default function VisitCheckoutBillingPage() {
             {bill ? 'Edit Bill' : 'Billing'}
           </div>
           <div className="text-xs text-gray-500">
-            Visit ID: {visitId} · Tag: {getStr(visit, 'tag') ?? '—'} · Zero billed:{' '}
-            {isZeroBilled ? 'Yes' : 'No'} · Status: {visit?.status ?? '—'}
+            Tag: {getStr(visit, 'tag') ?? '—'} · Zero billed: {isZeroBilled ? 'Yes' : 'No'} ·
+            Status: {getStr(visit, 'status') ?? '—'}
             {isOfflineVisit ? ' · Offline: Yes' : ''}
           </div>
         </div>
@@ -372,7 +404,7 @@ export default function VisitCheckoutBillingPage() {
           <Button
             type="button"
             variant="outline"
-            className="rounded-xl"
+            className="rounded-xl cursor-pointer"
             onClick={() => router.back()}
           >
             Back
@@ -381,11 +413,13 @@ export default function VisitCheckoutBillingPage() {
           <Button
             type="button"
             variant="default"
-            className="rounded-xl bg-black text-white hover:bg-black/90"
+            className="rounded-xl bg-black text-white hover:bg-black/90 cursor-pointer"
             onClick={() => void onSave()}
             disabled={saveDisabled}
           >
-            {checkoutState.isLoading || updateVisitStatusState.isLoading
+            {checkoutState.isLoading ||
+            updateBillState.isLoading ||
+            updateVisitStatusState.isLoading
               ? 'Saving…'
               : bill
                 ? 'Save changes'
@@ -470,7 +504,7 @@ export default function VisitCheckoutBillingPage() {
               <label className="flex items-center gap-2 text-sm text-gray-800">
                 <input
                   type="checkbox"
-                  className="h-4 w-4"
+                  className="h-4 w-4 cursor-pointer"
                   checked={receivedOnline}
                   onChange={(e) => {
                     const next = e.target.checked;
@@ -484,7 +518,7 @@ export default function VisitCheckoutBillingPage() {
               <label className="flex items-center gap-2 text-sm text-gray-800">
                 <input
                   type="checkbox"
-                  className="h-4 w-4"
+                  className="h-4 w-4 cursor-pointer"
                   checked={receivedOffline}
                   onChange={(e) => {
                     const next = e.target.checked;
@@ -573,7 +607,7 @@ export default function VisitCheckoutBillingPage() {
                 ref={addBtnRef}
                 type="button"
                 variant="default"
-                className="w-11 rounded-xl bg-black p-0 text-white hover:bg-black/90"
+                className="w-11 rounded-xl bg-black p-0 text-white hover:bg-black/90 cursor-pointer"
                 onClick={addLineFromDraft}
                 title="Add"
               >
@@ -595,7 +629,7 @@ export default function VisitCheckoutBillingPage() {
               return (
                 <div key={`${idx}-${l.description}`} className="rounded-2xl border bg-white p-4">
                   {isEditing ? (
-                    <div className="grid grid-cols-12 items-end gap-3">
+                    <div className="grid grid-cols-13 items-end gap-3">
                       <div className="col-span-12 md:col-span-7">
                         <Label className="text-xs text-gray-600">Service</Label>
                         <Input
@@ -633,7 +667,7 @@ export default function VisitCheckoutBillingPage() {
                         />
                       </div>
 
-                      <div className="col-span-2 md:col-span-1 flex justify-end gap-2">
+                      <div className="col-span-2 md:col-span-1 flex justify-start gap-2">
                         <Button
                           type="button"
                           variant="default"
@@ -670,7 +704,7 @@ export default function VisitCheckoutBillingPage() {
                         <div className="flex items-center gap-1">
                           <button
                             type="button"
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
                             onClick={() => startEdit(idx)}
                             disabled={billingMuted}
                             title="Edit"
@@ -680,7 +714,7 @@ export default function VisitCheckoutBillingPage() {
 
                           <button
                             type="button"
-                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
                             onClick={() => removeLine(idx)}
                             disabled={billingMuted}
                             title="Delete"

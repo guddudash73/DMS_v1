@@ -303,7 +303,7 @@ export default function PatientsPanel({
           type="button"
           variant="ghost"
           size="sm"
-          className="h-8 rounded-xl px-2 text-[12px] text-gray-700 hover:bg-gray-50"
+          className="h-8 rounded-xl px-2 text-[12px] text-gray-700 hover:bg-gray-50 cursor-pointer"
           onClick={goToViewAll}
           disabled={loading || !canUseApi}
           title="View all visits for this day"

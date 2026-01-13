@@ -1,5 +1,10 @@
 // apps/api/src/repositories/billingRepository.ts
-import { DynamoDBDocumentClient, GetCommand, TransactWriteCommand } from '@aws-sdk/lib-dynamodb';
+import {
+  DynamoDBDocumentClient,
+  GetCommand,
+  TransactWriteCommand,
+  UpdateCommand,
+} from '@aws-sdk/lib-dynamodb';
 import type { Billing, BillingCheckoutInput, Visit, VisitId } from '@dcm/types';
 import { visitRepository } from './visitRepository';
 import { patientRepository } from './patientRepository';
@@ -65,10 +70,43 @@ const buildFollowUpKey = (visitId: string, followupId: string) => ({
   SK: `FOLLOWUP#${followupId}`,
 });
 
+/* ------------------------- Bill number counter (daily) ------------------------- */
+
+const buildBillDailyCounterKey = (visitDate: string) => ({
+  PK: `COUNTER#BILL#${visitDate}`,
+  SK: 'META',
+});
+
+async function nextBillCounter(visitDate: string): Promise<number> {
+  const { Attributes } = await docClient.send(
+    new UpdateCommand({
+      TableName: TABLE_NAME,
+      Key: buildBillDailyCounterKey(visitDate),
+      UpdateExpression: 'ADD #last :inc SET #updatedAt = :now',
+      ExpressionAttributeNames: { '#last': 'last', '#updatedAt': 'updatedAt' },
+      ExpressionAttributeValues: { ':inc': 1, ':now': Date.now() },
+      ReturnValues: 'UPDATED_NEW',
+    }),
+  );
+
+  return Number((Attributes?.last as number | undefined) ?? 0);
+}
+
+function formatBillNo(visitDate: string, seq: number) {
+  const yy = visitDate.slice(2, 4);
+  const mm = visitDate.slice(5, 7);
+  const dd = visitDate.slice(8, 10);
+  return `BL/${yy}/${mm}/${dd}/${String(seq).padStart(3, '0')}`;
+}
+
+/* -------------------------------- Followup GSI -------------------------------- */
+
 const gsi3PK_date = (dateISO: string) => `DATE#${dateISO}`;
 const gsi3SK_typeId = (type: 'FOLLOWUP', id: string) => `TYPE#${type}#ID#${id}`;
 
 const todayDateString = (): string => isoDateInTimeZone(new Date(), 'Asia/Kolkata');
+
+/* -------------------------------- Computations -------------------------------- */
 
 interface ComputedBillingTotals {
   billing: Billing;
@@ -106,6 +144,8 @@ const computeTotals = (visitId: VisitId, input: BillingCheckoutInput): ComputedB
 
   const billing: Billing = {
     visitId,
+    // billNo is set by checkout/updateBill (not here)
+    billNo: '',
     items,
     subtotal,
     discountAmount,
@@ -146,6 +186,7 @@ type TransactItem =
 
 export interface BillingRepository {
   checkout(visitId: VisitId, input: BillingCheckoutInput): Promise<Billing>;
+  updateBill(visitId: VisitId, input: BillingCheckoutInput): Promise<Billing>; // ✅ Option 2 admin edit
   getByVisitId(visitId: VisitId): Promise<Billing | null>;
 }
 
@@ -179,13 +220,24 @@ export class DynamoDBBillingRepository implements BillingRepository {
       );
     }
 
-    const { billing, total } = computeTotals(visitId, input);
-    const now = billing.createdAt;
+    // ✅ Generate stable bill number once
+    const billSeq = await nextBillCounter(visit.visitDate);
+    const billNo = formatBillNo(visit.visitDate, billSeq);
 
-    // ✅ Hard enforcement: for all zero-billed visits, total must be 0 (<= 0)
+    const { billing, total } = computeTotals(visitId, input);
+
+    // ✅ Hard enforcement: for all zero-billed visits, total must be 0
     if (visit.zeroBilled === true && total > 0) {
       throw new BillingRuleViolationError('Zero-billed (Z) visits must have total = 0.');
     }
+
+    const now = billing.createdAt;
+
+    const billingWithNo: Billing = {
+      ...billing,
+      billNo,
+      createdAt: now,
+    };
 
     let followUpItem: TransactItem | undefined;
 
@@ -229,7 +281,6 @@ export class DynamoDBBillingRepository implements BillingRepository {
             GSI3PK: gsi3PK_date(followUpDate),
             GSI3SK: gsi3SK_typeId('FOLLOWUP', followupId),
           },
-
           ConditionExpression: 'attribute_not_exists(PK)',
         },
       };
@@ -246,20 +297,26 @@ export class DynamoDBBillingRepository implements BillingRepository {
           TableName: TABLE_NAME,
           Key: buildVisitMetaKey(visitId),
           UpdateExpression:
-            'SET #billingAmount = :billingAmount, #updatedAt = :updatedAt' +
+            'SET #billingAmount = :billingAmount, #billNo = :billNo, #updatedAt = :updatedAt, #checkedOut = :true, #checkedOutAt = :checkedOutAt' +
             (typeof receivedOnline === 'boolean' ? ', #receivedOnline = :receivedOnline' : '') +
             (typeof receivedOffline === 'boolean' ? ', #receivedOffline = :receivedOffline' : ''),
           ExpressionAttributeNames: {
             '#billingAmount': 'billingAmount',
+            '#billNo': 'billNo',
             '#updatedAt': 'updatedAt',
             '#status': 'status',
             '#receivedOnline': 'receivedOnline',
             '#receivedOffline': 'receivedOffline',
+            '#checkedOut': 'checkedOut',
+            '#checkedOutAt': 'checkedOutAt',
           },
           ExpressionAttributeValues: {
             ':billingAmount': total,
+            ':billNo': billNo,
             ':updatedAt': now,
             ':done': 'DONE',
+            ':true': true,
+            ':checkedOutAt': now,
             ...(typeof receivedOnline === 'boolean' ? { ':receivedOnline': receivedOnline } : {}),
             ...(typeof receivedOffline === 'boolean'
               ? { ':receivedOffline': receivedOffline }
@@ -274,18 +331,24 @@ export class DynamoDBBillingRepository implements BillingRepository {
           TableName: TABLE_NAME,
           Key: buildPatientVisitKey(visit.patientId, visit.visitId),
           UpdateExpression:
-            'SET #billingAmount = :billingAmount, #updatedAt = :updatedAt' +
+            'SET #billingAmount = :billingAmount, #billNo = :billNo, #updatedAt = :updatedAt, #checkedOut = :true, #checkedOutAt = :checkedOutAt' +
             (typeof receivedOnline === 'boolean' ? ', #receivedOnline = :receivedOnline' : '') +
             (typeof receivedOffline === 'boolean' ? ', #receivedOffline = :receivedOffline' : ''),
           ExpressionAttributeNames: {
             '#billingAmount': 'billingAmount',
+            '#billNo': 'billNo',
             '#updatedAt': 'updatedAt',
             '#receivedOnline': 'receivedOnline',
             '#receivedOffline': 'receivedOffline',
+            '#checkedOut': 'checkedOut',
+            '#checkedOutAt': 'checkedOutAt',
           },
           ExpressionAttributeValues: {
             ':billingAmount': total,
+            ':billNo': billNo,
             ':updatedAt': now,
+            ':true': true,
+            ':checkedOutAt': now,
             ...(typeof receivedOnline === 'boolean' ? { ':receivedOnline': receivedOnline } : {}),
             ...(typeof receivedOffline === 'boolean'
               ? { ':receivedOffline': receivedOffline }
@@ -300,16 +363,14 @@ export class DynamoDBBillingRepository implements BillingRepository {
           Item: {
             ...buildBillingKey(visitId),
             entityType: 'BILLING',
-            ...billing,
+            ...billingWithNo, // ✅ STORE billNo
           },
           ConditionExpression: 'attribute_not_exists(PK)',
         },
       },
     ];
 
-    if (followUpItem) {
-      transactItems.push(followUpItem);
-    }
+    if (followUpItem) transactItems.push(followUpItem);
 
     try {
       await docClient.send(
@@ -334,11 +395,167 @@ export class DynamoDBBillingRepository implements BillingRepository {
       visitId,
       patientId: visit.patientId,
       total,
-      receivedOnline: billing.receivedOnline ?? false,
-      receivedOffline: billing.receivedOffline ?? false,
+      billNo,
+      receivedOnline: billingWithNo.receivedOnline ?? false,
+      receivedOffline: billingWithNo.receivedOffline ?? false,
     });
 
-    return billing;
+    return billingWithNo; // ✅ return billNo
+  }
+
+  /**
+   * ✅ Option 2:
+   * Admin edits an existing bill:
+   * - billNo stays the same (stable)
+   * - totals/items can change
+   * - visit.billingAmount updates accordingly
+   */
+  async updateBill(visitId: VisitId, input: BillingCheckoutInput): Promise<Billing> {
+    const existingBill = await this.getByVisitId(visitId);
+    if (!existingBill) {
+      throw new BillingRuleViolationError('Billing not found');
+    }
+
+    const visit = await visitRepository.getById(visitId);
+    if (!visit) {
+      throw new BillingRuleViolationError('Visit not found');
+    }
+
+    if (visit.status !== 'DONE') {
+      throw new VisitNotDoneError('Bill update is only allowed when visit status is DONE');
+    }
+
+    const patient = await patientRepository.getById(visit.patientId);
+    if (!patient || patient.isDeleted) {
+      throw new BillingRuleViolationError('Cannot update bill for deleted or missing patient');
+    }
+
+    // ✅ Z rule still applies
+    if (visit.zeroBilled === true && input.allowZeroBilled !== true) {
+      throw new BillingRuleViolationError(
+        'Billing is disabled for zero-billed (Z) visits. Enable billing to proceed.',
+      );
+    }
+
+    const { billing, total } = computeTotals(visitId, input);
+
+    if (visit.zeroBilled === true && total > 0) {
+      throw new BillingRuleViolationError('Zero-billed (Z) visits must have total = 0.');
+    }
+
+    const now = Date.now();
+
+    const updatedBill: Billing = {
+      ...billing,
+      billNo: existingBill.billNo, // ✅ keep stable
+      createdAt: existingBill.createdAt, // ✅ keep original time
+    };
+
+    const receivedOnline =
+      typeof input.receivedOnline === 'boolean' ? input.receivedOnline : undefined;
+    const receivedOffline =
+      typeof input.receivedOffline === 'boolean' ? input.receivedOffline : undefined;
+
+    // ✅ Replace BILLING item + update billingAmount on visit records
+    try {
+      await docClient.send(
+        new TransactWriteCommand({
+          TransactItems: [
+            {
+              Put: {
+                TableName: TABLE_NAME,
+                Item: {
+                  ...buildBillingKey(visitId),
+                  entityType: 'BILLING',
+                  ...updatedBill,
+                },
+              },
+            },
+            {
+              Update: {
+                TableName: TABLE_NAME,
+                Key: buildVisitMetaKey(visitId),
+                UpdateExpression:
+                  'SET #billingAmount = :billingAmount, #billNo = :billNo, #updatedAt = :updatedAt' +
+                  (typeof receivedOnline === 'boolean'
+                    ? ', #receivedOnline = :receivedOnline'
+                    : '') +
+                  (typeof receivedOffline === 'boolean'
+                    ? ', #receivedOffline = :receivedOffline'
+                    : ''),
+                ExpressionAttributeNames: {
+                  '#billingAmount': 'billingAmount',
+                  '#billNo': 'billNo',
+                  '#updatedAt': 'updatedAt',
+                  '#receivedOnline': 'receivedOnline',
+                  '#receivedOffline': 'receivedOffline',
+                },
+                ExpressionAttributeValues: {
+                  ':billingAmount': total,
+                  ':billNo': existingBill.billNo,
+                  ':updatedAt': now,
+                  ...(typeof receivedOnline === 'boolean'
+                    ? { ':receivedOnline': receivedOnline }
+                    : {}),
+                  ...(typeof receivedOffline === 'boolean'
+                    ? { ':receivedOffline': receivedOffline }
+                    : {}),
+                },
+                ConditionExpression: 'attribute_exists(PK)',
+              },
+            },
+            {
+              Update: {
+                TableName: TABLE_NAME,
+                Key: buildPatientVisitKey(visit.patientId, visit.visitId),
+                UpdateExpression:
+                  'SET #billingAmount = :billingAmount, #billNo = :billNo, #updatedAt = :updatedAt' +
+                  (typeof receivedOnline === 'boolean'
+                    ? ', #receivedOnline = :receivedOnline'
+                    : '') +
+                  (typeof receivedOffline === 'boolean'
+                    ? ', #receivedOffline = :receivedOffline'
+                    : ''),
+                ExpressionAttributeNames: {
+                  '#billingAmount': 'billingAmount',
+                  '#billNo': 'billNo',
+                  '#updatedAt': 'updatedAt',
+                  '#receivedOnline': 'receivedOnline',
+                  '#receivedOffline': 'receivedOffline',
+                },
+                ExpressionAttributeValues: {
+                  ':billingAmount': total,
+                  ':billNo': existingBill.billNo,
+                  ':updatedAt': now,
+                  ...(typeof receivedOnline === 'boolean'
+                    ? { ':receivedOnline': receivedOnline }
+                    : {}),
+                  ...(typeof receivedOffline === 'boolean'
+                    ? { ':receivedOffline': receivedOffline }
+                    : {}),
+                },
+                ConditionExpression: 'attribute_exists(PK)',
+              },
+            },
+          ],
+        }),
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Unknown error during bill update';
+      logError('billing_update_failed', { visitId, error: message });
+      throw new BillingRuleViolationError('Unable to update bill');
+    }
+
+    logInfo('billing_update_success', {
+      visitId,
+      patientId: visit.patientId,
+      total,
+      billNo: existingBill.billNo,
+      receivedOnline: updatedBill.receivedOnline ?? false,
+      receivedOffline: updatedBill.receivedOffline ?? false,
+    });
+
+    return updatedBill;
   }
 
   async getByVisitId(visitId: VisitId): Promise<Billing | null> {
@@ -350,7 +567,8 @@ export class DynamoDBBillingRepository implements BillingRepository {
       }),
     );
 
-    if (!Item || Item.entityType !== 'BILLING') {
+    const entityType = (Item as { entityType?: unknown } | undefined)?.entityType;
+    if (!Item || entityType !== 'BILLING') {
       return null;
     }
 

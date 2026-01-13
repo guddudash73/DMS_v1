@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { createApp } from '../../src/server';
-import type { Role } from '@dms/types';
+import type { Role } from '@dcm/types';
 import { TEST_USERS, seedTestUsers } from './testUsers';
 
 const app = createApp();

@@ -29,21 +29,20 @@ export const Visit = z.object({
   // optional to keep backward compatibility with older records
   dailyPatientNumber: z.number().int().min(1).optional(),
 
+  checkedOut: z.boolean().optional(),
+  checkedOutAt: z.number().int().nonnegative().optional(),
+
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 
   billingAmount: z.number().nonnegative().optional(),
 
-  // ✅ N/F only
   tag: VisitTag.optional(),
 
-  // ✅ Z is a boolean flag now
   zeroBilled: z.boolean().optional(),
 
-  // ✅ For F visits, points to an N visitId
   anchorVisitId: VisitId.optional(),
 
-  // ✅ offline visit (no rx in DB, can go QUEUED -> DONE)
   isOffline: z.boolean().optional(),
 
   currentRxId: z.string().min(1).optional(),
@@ -66,16 +65,12 @@ export const VisitCreate = z
     patientId: PatientId,
     reason: z.string().min(1).max(500),
 
-    // ✅ N/F only
     tag: VisitTag.optional(),
 
-    // ✅ checkbox flag
     zeroBilled: z.boolean().optional(),
 
-    // ✅ required when tag === 'F'
     anchorVisitId: VisitId.optional(),
 
-    // ✅ offline visit creation
     isOffline: z.boolean().optional(),
   })
   .superRefine((val, ctx) => {
@@ -104,8 +99,6 @@ export const VisitQueueQuery = z.object({
   status: VisitStatus.optional(),
 });
 export type VisitQueueQuery = z.infer<typeof VisitQueueQuery>;
-
-/* ----------------------------- Followups (unchanged) ----------------------------- */
 
 export const FollowUpContactMethod = z.enum(['CALL', 'SMS', 'WHATSAPP', 'OTHER']);
 export type FollowUpContactMethod = z.infer<typeof FollowUpContactMethod>;

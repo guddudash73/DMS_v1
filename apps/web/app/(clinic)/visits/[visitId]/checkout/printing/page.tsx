@@ -1,3 +1,4 @@
+// apps/web/app/(clinic)/visits/[visitId]/checkout/printing/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -8,6 +9,10 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+
+// ✅ Calendar UI (shadcn-style)
+import { Calendar } from '@/components/ui/calendar';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
 import { PrescriptionPrintSheet } from '@/components/prescription/PrescriptionPrintSheet';
 import { XrayPrintSheet } from '@/components/xray/XrayPrintSheet';
@@ -22,6 +27,7 @@ import {
   useGetDoctorsQuery,
 } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
+import type { Billing } from '@dcm/types';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 type FollowUpContact = 'CALL' | 'SMS' | 'WHATSAPP' | 'OTHER';
@@ -40,7 +46,9 @@ function IconCheck(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-function isRecord(v: unknown): v is Record<string, unknown> {
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is UnknownRecord {
   return typeof v === 'object' && v !== null;
 }
 
@@ -50,6 +58,22 @@ function getString(v: unknown): string | undefined {
 
 function getNumber(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+function getBool(v: unknown): boolean | undefined {
+  return typeof v === 'boolean' ? v : undefined;
+}
+
+function getStrFromRecord(rec: UnknownRecord, key: string): string | undefined {
+  return getString(rec[key]);
+}
+
+function getNumFromRecord(rec: UnknownRecord, key: string): number | undefined {
+  return getNumber(rec[key]);
+}
+
+function getBoolFromRecordOpt(rec: UnknownRecord, key: string): boolean | undefined {
+  return getBool(rec[key]);
 }
 
 function toLocalISODate(d: Date): string {
@@ -129,6 +153,17 @@ function parseFollowUpContact(v: string): FollowUpContact {
   return 'CALL';
 }
 
+// ✅ NEW: ISO date (YYYY-MM-DD) → Date (local safe)
+function isoToDate(iso: string): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const da = Number(m[3]);
+  const d = new Date(y, mo, da);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
 export default function VisitCheckoutPrintingPage() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -139,9 +174,11 @@ export default function VisitCheckoutPrintingPage() {
   const isAdmin = role === 'ADMIN';
 
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
-  const visit = visitQuery.data;
+  const visit: unknown = visitQuery.data;
 
-  const patientId = visit?.patientId;
+  const visitRec: UnknownRecord = isRecord(visit) ? visit : {};
+
+  const patientId = getStrFromRecord(visitRec, 'patientId');
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: !visitId });
@@ -150,8 +187,21 @@ export default function VisitCheckoutPrintingPage() {
   const xraysQuery = useListVisitXraysQuery({ visitId }, { skip: !visitId });
   const xrayIds = (xraysQuery.data?.items ?? []).map((x) => x.xrayId);
 
-  const billQuery = useGetVisitBillQuery({ visitId }, { skip: !visitId });
-  const bill = billQuery.data ?? null;
+  // ✅ Only fetch bill if it exists according to visit meta
+  const billExists =
+    !!visit &&
+    (getBoolFromRecordOpt(visitRec, 'checkedOut') === true ||
+      getNumFromRecord(visitRec, 'billingAmount') !== undefined);
+
+  const shouldFetchBill = !!visitId && !!visit && billExists;
+
+  const billQuery = useGetVisitBillQuery({ visitId }, { skip: !shouldFetchBill });
+
+  const billData: unknown = billQuery.data ?? null;
+
+  // keep runtime safe: only pass a valid Billing object (or null)
+  const billingForPrint: Billing | null =
+    isRecord(billData) && getStrFromRecord(billData, 'billNo') ? (billData as Billing) : null;
 
   const doctorsQuery = useGetDoctorsQuery(undefined);
 
@@ -162,17 +212,17 @@ export default function VisitCheckoutPrintingPage() {
   const patientName = patientQuery.data?.name;
   const patientPhone = patientQuery.data?.phone;
 
-  const patientRec: Record<string, unknown> = isRecord(patientQuery.data) ? patientQuery.data : {};
-  const visitRec: Record<string, unknown> = isRecord(visit)
-    ? (visit as unknown as Record<string, unknown>)
+  const patientRec: UnknownRecord = isRecord(patientQuery.data)
+    ? (patientQuery.data as UnknownRecord)
     : {};
 
-  const patientSdId = getString(patientRec.sdId) ?? getString(visitRec.sdId) ?? undefined;
+  const patientSdId =
+    getStrFromRecord(patientRec, 'sdId') ?? getStrFromRecord(visitRec, 'sdId') ?? undefined;
 
   const opdNo =
-    getString(visitRec.opdNo) ??
-    getString(visitRec.opdId) ??
-    getString(visitRec.opdNumber) ??
+    getStrFromRecord(visitRec, 'opdNo') ??
+    getStrFromRecord(visitRec, 'opdId') ??
+    getStrFromRecord(visitRec, 'opdNumber') ??
     undefined;
 
   const patientDobRaw =
@@ -182,12 +232,11 @@ export default function VisitCheckoutPrintingPage() {
 
   const patientDob = safeParseDobToDate(patientDobRaw);
 
-  const visitCreatedAtMs = getNumber(visitRec.createdAt) ?? Date.now();
-
+  const visitCreatedAtMs = getNumFromRecord(visitRec, 'createdAt') ?? Date.now();
   const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
   const patientSex = normalizeSex(patientSexRaw);
 
-  const doctorId = getString(visitRec.doctorId);
+  const doctorId = getStrFromRecord(visitRec, 'doctorId');
 
   const doctorFromList = React.useMemo(() => {
     const listUnknown: unknown = doctorsQuery.data ?? [];
@@ -195,26 +244,27 @@ export default function VisitCheckoutPrintingPage() {
     if (!doctorId) return null;
 
     for (const item of list) {
-      const rec = isRecord(item) ? item : {};
-      if (getString(rec.doctorId) === doctorId) return rec;
+      const rec: UnknownRecord = isRecord(item) ? item : {};
+      if (getStrFromRecord(rec, 'doctorId') === doctorId) return rec;
     }
     return null;
   }, [doctorsQuery.data, doctorId]);
 
+  const doctorFromListRec: UnknownRecord = isRecord(doctorFromList) ? doctorFromList : {};
+
   const doctorNameResolved =
-    getString(doctorFromList?.fullName) ??
-    getString(doctorFromList?.name) ??
-    getString(doctorFromList?.displayName) ??
+    getStrFromRecord(doctorFromListRec, 'fullName') ??
+    getStrFromRecord(doctorFromListRec, 'name') ??
+    getStrFromRecord(doctorFromListRec, 'displayName') ??
     undefined;
 
-  const doctorRegNoResolved = getString(doctorFromList?.registrationNumber) ?? undefined;
+  const doctorRegNoResolved =
+    getStrFromRecord(doctorFromListRec, 'registrationNumber') ?? undefined;
 
   const resolvedDoctorName = React.useMemo(() => {
     if (doctorNameResolved && !looksLikeDoctorIdLabel(doctorNameResolved))
       return doctorNameResolved;
-
     if (doctorsQuery.isLoading || doctorsQuery.isFetching) return undefined;
-
     return doctorId ? `Doctor (${doctorId})` : undefined;
   }, [doctorNameResolved, doctorsQuery.isLoading, doctorsQuery.isFetching, doctorId]);
 
@@ -230,7 +280,7 @@ export default function VisitCheckoutPrintingPage() {
     ? `Visit: ${toLocalISODate(new Date(visitCreatedAtMs))}`
     : undefined;
 
-  const visitDateLabel = getString(visitRec.visitDate)
+  const visitDateLabel = getStrFromRecord(visitRec, 'visitDate')
     ? `Visit: ${String(visitRec.visitDate)}`
     : undefined;
 
@@ -243,14 +293,25 @@ export default function VisitCheckoutPrintingPage() {
 
   const rxAvailable = !!rx;
   const xraysAvailable = xrayIds.length > 0;
-  const billAvailable = !!bill;
+
+  // ✅ readiness now uses billExists + actual bill (or loading state)
+  const billAvailable = billExists && !!billingForPrint;
 
   const [followUpEnabled, setFollowUpEnabled] = React.useState(false);
+
+  // ✅ keep ISO string in state (for querystring), but drive UI using Calendar Date
   const [followUpDate, setFollowUpDate] = React.useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 7);
     return toLocalISODate(d);
   });
+  const [followUpCalendarOpen, setFollowUpCalendarOpen] = React.useState(false);
+
+  const followUpDateObj = React.useMemo(
+    () => isoToDate(followUpDate) ?? new Date(),
+    [followUpDate],
+  );
+
   const [followUpContact, setFollowUpContact] = React.useState<FollowUpContact>('CALL');
   const [followUpReason, setFollowUpReason] = React.useState('');
 
@@ -290,10 +351,7 @@ export default function VisitCheckoutPrintingPage() {
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="text-lg font-semibold text-gray-900">Documents</div>
-          <div className="text-xs text-gray-500">
-            Visit ID: {visitId} · Tag: {getString(visitRec.tag) ?? '—'} · Status:{' '}
-            {getString(visitRec.status) ?? '—'}
-          </div>
+          <div className="text-xs text-gray-500">{getStrFromRecord(visitRec, 'status') ?? '—'}</div>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -302,7 +360,7 @@ export default function VisitCheckoutPrintingPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-xl"
+                className="rounded-xl cursor-pointer"
                 onClick={() => router.back()}
               >
                 Back
@@ -310,7 +368,7 @@ export default function VisitCheckoutPrintingPage() {
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-xl"
+                className="rounded-xl cursor-pointer"
                 onClick={() => router.push(`/visits/${visitId}/checkout/billing`)}
               >
                 Billing
@@ -321,7 +379,7 @@ export default function VisitCheckoutPrintingPage() {
           <Button
             type="button"
             variant="default"
-            className="rounded-xl bg-black text-white hover:bg-black/90"
+            className="rounded-xl bg-black text-white hover:bg-black/90 cursor-pointer"
             onClick={onDone}
             disabled={doneSuccess}
           >
@@ -379,8 +437,20 @@ export default function VisitCheckoutPrintingPage() {
             </div>
             <div className="flex items-center justify-between">
               <span className="text-gray-700">Bill</span>
-              <span className={billAvailable ? 'text-emerald-700 font-semibold' : 'text-gray-400'}>
-                {billAvailable ? 'Ready' : 'Not Available'}
+              <span
+                className={
+                  billAvailable
+                    ? 'text-emerald-700 font-semibold'
+                    : billExists && billQuery.isLoading
+                      ? 'text-gray-700'
+                      : 'text-gray-400'
+                }
+              >
+                {billAvailable
+                  ? 'Ready'
+                  : billExists && billQuery.isLoading
+                    ? 'Loading…'
+                    : 'Not Available'}
               </span>
             </div>
           </div>
@@ -398,7 +468,7 @@ export default function VisitCheckoutPrintingPage() {
             <Button
               type="button"
               variant="outline"
-              className="w-full max-w-sm rounded-2xl py-6 text-base"
+              className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
               onClick={() => router.push(`/visits/${visitId}/checkout/printing/prescription`)}
               disabled={!rxAvailable}
               title={!rxAvailable ? 'No prescription available' : 'Open print preview'}
@@ -409,7 +479,7 @@ export default function VisitCheckoutPrintingPage() {
             <Button
               type="button"
               variant="outline"
-              className="w-full max-w-sm rounded-2xl py-6 text-base"
+              className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
               onClick={() => {
                 if (!xraysAvailable) {
                   toast.info('No X-rays uploaded for this visit.');
@@ -426,7 +496,7 @@ export default function VisitCheckoutPrintingPage() {
             <Button
               type="button"
               variant="outline"
-              className="w-full max-w-sm rounded-2xl py-6 text-base"
+              className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
               onClick={() => {
                 if (!billAvailable) {
                   toast.info('No bill found for this visit.');
@@ -442,6 +512,7 @@ export default function VisitCheckoutPrintingPage() {
           </div>
         </Card>
 
+        {/* Follow-up card */}
         <Card className="lg:col-span-5 rounded-2xl border bg-white p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -452,7 +523,7 @@ export default function VisitCheckoutPrintingPage() {
             <Button
               type="button"
               variant="outline"
-              className="rounded-xl"
+              className="rounded-xl cursor-pointer"
               onClick={() => setFollowUpEnabled((v) => !v)}
             >
               {followUpEnabled ? 'Disable' : 'Enable'}
@@ -465,32 +536,60 @@ export default function VisitCheckoutPrintingPage() {
                 <div className="space-y-3">
                   <div>
                     <div className="text-xs font-semibold text-gray-700">Follow-up date</div>
-                    <Input
-                      type="date"
-                      className="mt-1 h-10 rounded-xl bg-white"
-                      value={followUpDate}
-                      onChange={(e) => setFollowUpDate(e.target.value)}
-                    />
+
+                    {/* ✅ Calendar popover */}
+                    <Popover open={followUpCalendarOpen} onOpenChange={setFollowUpCalendarOpen}>
+                      <PopoverTrigger asChild>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="mt-1 h-10 w-full justify-start rounded-xl bg-white px-3 text-sm font-normal cursor-pointer"
+                        >
+                          {followUpDate ? followUpDate : 'Select a date'}
+                        </Button>
+                      </PopoverTrigger>
+
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={followUpDateObj}
+                          onSelect={(d) => {
+                            if (!d) return;
+                            setFollowUpDate(toLocalISODate(d));
+                            setFollowUpCalendarOpen(false);
+                          }}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
                   </div>
 
                   <div>
                     <div className="text-xs font-semibold text-gray-700">Contact method</div>
                     <select
-                      className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm"
+                      className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm cursor-pointer"
                       value={followUpContact}
                       onChange={(e) => setFollowUpContact(parseFollowUpContact(e.target.value))}
                     >
-                      <option value="CALL">CALL</option>
-                      <option value="SMS">SMS</option>
-                      <option value="WHATSAPP">WHATSAPP</option>
-                      <option value="OTHER">OTHER</option>
+                      <option value="CALL" className="cursor-pointer">
+                        CALL
+                      </option>
+                      <option value="SMS" className="cursor-pointer">
+                        SMS
+                      </option>
+                      <option value="WHATSAPP" className="cursor-pointer">
+                        WHATSAPP
+                      </option>
+                      <option value="OTHER" className="cursor-pointer">
+                        OTHER
+                      </option>
                     </select>
                   </div>
 
                   <div>
                     <div className="text-xs font-semibold text-gray-700">Reason / notes</div>
                     <Textarea
-                      className="mt-1 min-h-[90px] rounded-xl bg-white"
+                      className="mt-1 min-h-22.5 rounded-xl bg-white"
                       placeholder="e.g., stitch removal / review pain / follow-up check"
                       value={followUpReason}
                       onChange={(e) => setFollowUpReason(e.target.value)}
@@ -500,7 +599,7 @@ export default function VisitCheckoutPrintingPage() {
                   <div className="flex flex-col gap-2">
                     <Button
                       type="button"
-                      className="w-full rounded-2xl bg-black py-5 text-white hover:bg-black/90"
+                      className="w-full rounded-2xl bg-black py-5 text-white hover:bg-black/90 cursor-pointer"
                       onClick={() => {
                         if (!/^\d{4}-\d{2}-\d{2}$/.test(followUpDate)) {
                           toast.error('Follow-up date must be YYYY-MM-DD.');
@@ -515,7 +614,7 @@ export default function VisitCheckoutPrintingPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      className="w-full rounded-2xl py-5"
+                      className="w-full rounded-2xl py-5 cursor-pointer"
                       onClick={() => goToFollowups('list')}
                     >
                       View Follow-ups
@@ -554,7 +653,7 @@ export default function VisitCheckoutPrintingPage() {
 
       <BillPrintSheet
         open={billPrintOpen}
-        billing={bill}
+        billing={billingForPrint}
         patientName={patientName}
         patientPhone={patientPhone}
         doctorName={doctorLabelForCards}

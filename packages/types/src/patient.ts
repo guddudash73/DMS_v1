@@ -1,3 +1,4 @@
+// packages/types/src/patient.ts
 import { z } from 'zod';
 
 export const PatientId = z.string().min(1);
@@ -36,8 +37,14 @@ export const Patient = z.object({
 
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
+
   isDeleted: z.boolean().default(false),
   deletedAt: z.number().int().nonnegative().optional(),
+
+  // ✅ NEW: Avoid patient flag
+  isAvoided: z.boolean().optional().default(false),
+  avoidedAt: z.number().int().nonnegative().optional(),
+  unavoidedAt: z.number().int().nonnegative().optional(),
 });
 export type Patient = z.infer<typeof Patient>;
 

@@ -1,3 +1,4 @@
+// apps/api/src/repositories/patientRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   ConditionalCheckFailedException,
@@ -91,6 +92,10 @@ export interface PatientRepository {
   search(params: { query?: string; limit: number }): Promise<Patient[]>;
   softDelete(patientId: string): Promise<boolean>;
   restore(patientId: string): Promise<Patient | null>;
+
+  // ✅ NEW
+  avoid(patientId: string): Promise<Patient | null>;
+  unavoid(patientId: string): Promise<Patient | null>;
 }
 
 export class DynamoDBPatientRepository implements PatientRepository {
@@ -123,6 +128,12 @@ export class DynamoDBPatientRepository implements PatientRepository {
       updatedAt: now,
       isDeleted: false,
       deletedAt: undefined,
+
+      // ✅ NEW: default avoid state
+      isAvoided: false,
+      avoidedAt: undefined,
+      unavoidedAt: undefined,
+
       searchText,
       ...(normalizedPhone ? { normalizedPhone } : {}),
       normalizedName,
@@ -192,7 +203,11 @@ export class DynamoDBPatientRepository implements PatientRepository {
     const { isDeleted = false, ...rest } = Item as Partial<Patient>;
     if (isDeleted) return null;
 
-    return { ...rest, isDeleted } as Patient;
+    // ✅ ensure isAvoided defaults to false if missing
+    const p = { ...rest, isDeleted } as Patient;
+    if (typeof (p as any).isAvoided !== 'boolean') (p as any).isAvoided = false;
+
+    return p;
   }
 
   async update(patientId: string, patch: PatientUpdate): Promise<Patient | null> {
@@ -223,7 +238,6 @@ export class DynamoDBPatientRepository implements PatientRepository {
     add('phone');
     add('dob');
     add('gender');
-
     add('address');
 
     const mergedName = (patch.name ?? existing.name)!;
@@ -325,11 +339,7 @@ export class DynamoDBPatientRepository implements PatientRepository {
         });
       }
 
-      await docClient.send(
-        new TransactWriteCommand({
-          TransactItems: transactItems,
-        }),
-      );
+      await docClient.send(new TransactWriteCommand({ TransactItems: transactItems }));
     } catch (err) {
       if (
         err instanceof ConditionalCheckFailedException ||
@@ -340,8 +350,7 @@ export class DynamoDBPatientRepository implements PatientRepository {
       throw err;
     }
 
-    const updated = await this.getById(patientId);
-    return updated;
+    return await this.getById(patientId);
   }
 
   async search(params: { query?: string; limit: number }): Promise<Patient[]> {
@@ -441,6 +450,71 @@ export class DynamoDBPatientRepository implements PatientRepository {
           ExpressionAttributeValues: {
             ':false': false,
             ':updatedAt': now,
+          },
+          ConditionExpression: 'attribute_exists(PK)',
+          ReturnValues: 'ALL_NEW',
+        }),
+      );
+
+      if (!Attributes) return null;
+      return Attributes as Patient;
+    } catch (err) {
+      if (err instanceof ConditionalCheckFailedException) return null;
+      throw err;
+    }
+  }
+
+  // ✅ NEW: Avoid / Unavoid
+  async avoid(patientId: string): Promise<Patient | null> {
+    const now = Date.now();
+
+    try {
+      const { Attributes } = await docClient.send(
+        new UpdateCommand({
+          TableName: TABLE_NAME,
+          Key: buildPatientKeys(patientId),
+          UpdateExpression: 'SET #isAvoided = :true, #avoidedAt = :now, #updatedAt = :now',
+          ExpressionAttributeNames: {
+            '#isAvoided': 'isAvoided',
+            '#avoidedAt': 'avoidedAt',
+            '#updatedAt': 'updatedAt',
+          },
+          ExpressionAttributeValues: {
+            ':true': true,
+            ':now': now,
+          },
+          ConditionExpression: 'attribute_exists(PK)',
+          ReturnValues: 'ALL_NEW',
+        }),
+      );
+
+      if (!Attributes) return null;
+      return Attributes as Patient;
+    } catch (err) {
+      if (err instanceof ConditionalCheckFailedException) return null;
+      throw err;
+    }
+  }
+
+  async unavoid(patientId: string): Promise<Patient | null> {
+    const now = Date.now();
+
+    try {
+      const { Attributes } = await docClient.send(
+        new UpdateCommand({
+          TableName: TABLE_NAME,
+          Key: buildPatientKeys(patientId),
+          UpdateExpression:
+            'SET #isAvoided = :false, #unavoidedAt = :now, #updatedAt = :now REMOVE #avoidedAt',
+          ExpressionAttributeNames: {
+            '#isAvoided': 'isAvoided',
+            '#avoidedAt': 'avoidedAt',
+            '#unavoidedAt': 'unavoidedAt',
+            '#updatedAt': 'updatedAt',
+          },
+          ExpressionAttributeValues: {
+            ':false': false,
+            ':now': now,
           },
           ConditionExpression: 'attribute_exists(PK)',
           ReturnValues: 'ALL_NEW',

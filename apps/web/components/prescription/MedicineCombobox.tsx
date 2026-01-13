@@ -123,7 +123,7 @@ export function MedicineCombobox({
           ref={triggerRef}
           variant="outline"
           role="combobox"
-          className="w-full justify-between rounded-xl"
+          className="w-full justify-between rounded-xl cursor-pointer"
         >
           <span className="truncate text-left">{value || placeholder || 'Select medicine'}</span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />

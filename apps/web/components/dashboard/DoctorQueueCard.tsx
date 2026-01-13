@@ -1,3 +1,4 @@
+// apps/web/components/dashboard/DoctorQueueCard.tsx
 'use client';
 
 import * as React from 'react';
@@ -37,15 +38,12 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 function isOfflineQueueItem(v: PatientQueueItem): boolean {
-  const rec: unknown = v;
-  if (!isRecord(rec)) return false;
-  return rec.isOffline === true;
+  return isRecord(v) && v['isOffline'] === true;
 }
 
 function getDailyPatientNumber(v: PatientQueueItem): number | null {
-  const rec: unknown = v;
-  if (!isRecord(rec)) return null;
-  const raw = rec.dailyPatientNumber;
+  if (!isRecord(v)) return null;
+  const raw = v['dailyPatientNumber'];
   return typeof raw === 'number' && Number.isFinite(raw) && raw >= 1 ? raw : null;
 }
 
@@ -108,7 +106,11 @@ const PlaceholderBlock = ({ text }: { text: string }) => (
   </div>
 );
 
-export default function DoctorQueueCard() {
+type ClinicQueueCardProps = {
+  onViewAll?: () => void;
+};
+
+export default function DoctorQueueCard({ onViewAll }: ClinicQueueCardProps) {
   const router = useRouter();
   const auth = useAuth();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
@@ -134,12 +136,24 @@ export default function DoctorQueueCard() {
   const loading = queueQ.isLoading || queueQ.isFetching;
   const error = !!queueQ.isError;
 
+  // ✅ Reception route
   const openClinicVisit = (visitId: string) => router.push(`/visits/${visitId}`);
 
   return (
     <Card className="w-full rounded-2xl border-none bg-white px-4 pb-4 pt-2 shadow-sm">
       <div className="mb-1 flex items-center justify-between">
         <h2 className="text-lg font-semibold text-gray-900">Patient Queue</h2>
+
+        {onViewAll ? (
+          <button
+            type="button"
+            onClick={onViewAll}
+            className="rounded-full bg-gray-50 px-3 py-1 text-[11px] font-medium text-gray-800 transition hover:bg-black hover:text-white cursor-pointer"
+            title="View full queue"
+          >
+            View all
+          </button>
+        ) : null}
       </div>
 
       {!canUseApi ? (

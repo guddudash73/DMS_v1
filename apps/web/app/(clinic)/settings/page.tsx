@@ -44,9 +44,7 @@ export default function SettingPage() {
       <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 2xl:gap-10">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
-          <div className="mt-1 text-xs text-gray-500">
-            Configure printing and token behavior for reception.
-          </div>
+          <div className="mt-1 text-xs text-gray-500">Configure printing and token behavior.</div>
         </div>
 
         <Card className="rounded-2xl border bg-white p-6 shadow-sm">
@@ -56,11 +54,12 @@ export default function SettingPage() {
                 <div className="text-sm font-medium text-gray-900">
                   Auto-print token on Visit creation
                 </div>
-                <div className="mt-1 text-xs text-gray-500">
-                  Requires QZ Tray on the reception PC.
-                </div>
               </div>
-              <Switch checked={autoPrintToken} onCheckedChange={setAutoPrintToken} />
+              <Switch
+                checked={autoPrintToken}
+                onCheckedChange={setAutoPrintToken}
+                className="cursor-pointer"
+              />
             </div>
 
             <div className="h-px w-full bg-gray-100" />
@@ -74,16 +73,22 @@ export default function SettingPage() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" onClick={refreshPrinters} disabled={busy}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={refreshPrinters}
+                  disabled={busy}
+                  className="cursor-pointer"
+                >
                   {busy ? 'Loading…' : 'Detect printers'}
                 </Button>
-                <Button type="button" onClick={save} disabled={busy}>
+                <Button type="button" onClick={save} disabled={busy} className="cursor-pointer">
                   Save
                 </Button>
               </div>
 
               <select
-                className="h-10 w-full rounded-xl border bg-white px-3 text-sm"
+                className="h-10 w-full rounded-xl border bg-white px-3 text-sm cursor-pointer"
                 value={printerName}
                 onChange={(e) => setPrinterName(e.target.value)}
               >

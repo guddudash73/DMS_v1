@@ -867,7 +867,7 @@ export function PrescriptionWorkspace(props: Props) {
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border bg-white p-4">
+          <div className="mt-4 rounded-2xl border bg-white p-4 ">
             <div className="text-base font-semibold text-gray-900">Doctor Notes</div>
             <div className="mt-1 text-sm text-gray-500">
               Internal note from doctor for reception. This will NOT print.
@@ -882,7 +882,7 @@ export function PrescriptionWorkspace(props: Props) {
             />
           </div>
 
-          <div className="mt-3 min-w-0 overflow-x-hidden">
+          <div className="mt-4 min-w-full overflow-x-hidden flex justify-center items-center">
             <PrescriptionPreview
               patientName={patientName}
               patientPhone={patientPhone}

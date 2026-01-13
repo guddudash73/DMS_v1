@@ -1,3 +1,4 @@
+// apps/web/components/billing/BillPrintSheet.tsx
 'use client';
 
 import * as React from 'react';
@@ -16,6 +17,12 @@ type Props = {
   onAfterPrint?: () => void;
 };
 
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(v: unknown): v is UnknownRecord {
+  return typeof v === 'object' && v !== null;
+}
+
 function formatMoney(amount: number, currency: string) {
   try {
     return new Intl.NumberFormat('en-IN', {
@@ -26,6 +33,14 @@ function formatMoney(amount: number, currency: string) {
   } catch {
     return `${currency} ${Math.round(amount)}`;
   }
+}
+
+function getBillingItems(billing: Billing): Billing['items'] {
+  // Billing type already guarantees `items`, but keep it defensive in case runtime drift happens.
+  const unknownBilling: unknown = billing;
+  if (!isRecord(unknownBilling)) return [];
+  const raw = unknownBilling.items;
+  return Array.isArray(raw) ? (raw as Billing['items']) : [];
 }
 
 export function BillPrintSheet(props: Props) {
@@ -45,6 +60,9 @@ export function BillPrintSheet(props: Props) {
 
   const currency = billing?.currency ?? 'INR';
 
+  // billNo + createdAt are part of Billing, but still read defensively.
+  const billNo = billing?.billNo;
+
   const createdAtLabel = React.useMemo(() => {
     const ts = billing?.createdAt;
     if (!ts) return '—';
@@ -62,7 +80,7 @@ export function BillPrintSheet(props: Props) {
     } catch {
       return '—';
     }
-  }, [billing?.createdAt]);
+  }, [billing]);
 
   React.useEffect(() => {
     if (!mounted) return;
@@ -89,6 +107,8 @@ export function BillPrintSheet(props: Props) {
   }, [mounted, open, billing, onAfterPrint]);
 
   if (!mounted) return null;
+
+  const items = billing ? getBillingItems(billing) : [];
 
   return createPortal(
     <div className={`bill-print-root ${open ? '' : 'hidden'}`}>
@@ -138,6 +158,10 @@ export function BillPrintSheet(props: Props) {
               <div>
                 <div className="text-[16px] font-semibold text-gray-900">Sarangi Dentistry</div>
                 <div className="text-[11px] text-gray-600">Receipt / Bill</div>
+                <div className="mt-1 text-[11px] text-gray-700">
+                  <span className="text-gray-500">Bill No:</span>{' '}
+                  <span className="font-semibold">{billNo ?? '—'}</span>
+                </div>
               </div>
             </div>
 
@@ -195,7 +219,7 @@ export function BillPrintSheet(props: Props) {
                 </div>
 
                 <div className="px-3 py-2 text-[12px]">
-                  {billing.items.map((it, idx) => (
+                  {items.map((it, idx) => (
                     <div
                       key={`${it.description}-${idx}`}
                       className="grid grid-cols-12 gap-2 border-b border-gray-900/5 py-2 last:border-b-0"

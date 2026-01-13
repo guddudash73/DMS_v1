@@ -19,7 +19,6 @@ import {
   useGetVisitRxQuery,
   useGetVisitRxVersionsQuery,
   useUpdateVisitRxReceptionNotesMutation,
-  useGetVisitBillQuery,
   useGetDoctorsQuery,
   useGetPatientVisitsQuery,
   useUpdateVisitStatusMutation,
@@ -187,10 +186,6 @@ export default function ClinicVisitInfoPage() {
     skip: !patientId,
     refetchOnMountOrArgChange: true,
   });
-
-  // --- Billing ---
-  const billQuery = useGetVisitBillQuery({ visitId }, { skip: !visitId });
-  const bill = billQuery.data ?? null;
 
   // --- Doctors (for label) ---
   const doctorsQuery = useGetDoctorsQuery(undefined);
@@ -402,10 +397,10 @@ export default function ClinicVisitInfoPage() {
   const isAdmin = role === 'ADMIN';
 
   const visitDone = Boolean(visit && getPropString(visit, 'status') === 'DONE');
-  const hasBill = Boolean(bill);
+  const isCheckedOut = visit?.checkedOut === true;
 
-  const primaryLabel = hasBill ? 'Print/Followup' : 'Checkout';
-  const primaryHref = hasBill
+  const primaryLabel = isCheckedOut ? 'Print/Followup' : 'Checkout';
+  const primaryHref = isCheckedOut
     ? `/visits/${visitId}/checkout/printing`
     : `/visits/${visitId}/checkout/billing`;
 
@@ -435,7 +430,7 @@ export default function ClinicVisitInfoPage() {
     !visit ||
     offlineCheckoutBusy ||
     updateVisitStatusState.isLoading ||
-    (!hasBill && !visitDone && !isOfflineVisit);
+    (!isCheckedOut && !visitDone && !isOfflineVisit);
 
   // --- Rx chain for history blocks in PrescriptionPreview ---
   const rxChain = React.useMemo(() => {
@@ -518,12 +513,11 @@ export default function ClinicVisitInfoPage() {
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <div className="text-lg font-semibold text-gray-900">Visit Info</div>
-          <div className="text-xs text-gray-500">{visitId ? `Visit ID: ${visitId}` : ''}</div>
           {isOfflineVisit ? <div className="mt-1 text-xs text-amber-600">Offline visit</div> : null}
         </div>
 
         <div className="flex items-center gap-2">
-          {hasBill && isAdmin ? (
+          {isCheckedOut && isAdmin ? (
             <Button
               type="button"
               variant="outline"
@@ -542,7 +536,7 @@ export default function ClinicVisitInfoPage() {
             title={
               !visit
                 ? 'Loading visit…'
-                : hasBill
+                : isCheckedOut
                   ? 'View documents'
                   : isOfflineVisit
                     ? 'Proceed to billing (offline visit)'
@@ -551,7 +545,7 @@ export default function ClinicVisitInfoPage() {
                       : 'Checkout'
             }
             onClick={() => {
-              if (hasBill) {
+              if (isCheckedOut) {
                 router.push(primaryHref);
                 return;
               }

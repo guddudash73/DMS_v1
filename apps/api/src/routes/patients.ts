@@ -1,3 +1,4 @@
+// apps/api/src/routes/patients.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { PatientCreate, PatientUpdate, PatientSearchQuery, PatientId } from '@dcm/types';
 import { patientRepository, DuplicatePatientError } from '../repositories/patientRepository';
@@ -21,6 +22,8 @@ const asyncHandler =
 
 const todayIso = (): string => clinicDateISO();
 
+/* ----------------------------- existing routes unchanged ----------------------------- */
+
 router.post(
   '/',
   asyncHandler(async (req, res) => {
@@ -36,15 +39,8 @@ router.post(
         logAudit({
           actorUserId: req.auth.userId,
           action: 'PATIENT_CREATE',
-          entity: {
-            type: 'PATIENT',
-            id: patient.patientId,
-          },
-          meta: {
-            name: patient.name,
-            phone: patient.phone,
-            sdId: patient.sdId,
-          },
+          entity: { type: 'PATIENT', id: patient.patientId },
+          meta: { name: patient.name, phone: patient.phone, sdId: patient.sdId },
         });
       }
 
@@ -71,12 +67,8 @@ router.get(
     }
 
     const { query, limit } = parsed.data;
-
     const params: { query?: string; limit: number } = { limit };
-
-    if (query !== undefined) {
-      params.query = query;
-    }
+    if (query !== undefined) params.query = query;
 
     const patients = await patientRepository.search(params);
 
@@ -205,14 +197,8 @@ router.patch(
         logAudit({
           actorUserId: req.auth.userId,
           action: 'PATIENT_UPDATE',
-          entity: {
-            type: 'PATIENT',
-            id: parsedId.data,
-          },
-          meta: {
-            name: updated.name,
-            phone: updated.phone,
-          },
+          entity: { type: 'PATIENT', id: parsedId.data },
+          meta: { name: updated.name, phone: updated.phone },
         });
       }
 
@@ -229,6 +215,78 @@ router.patch(
     }
   }),
 );
+
+/* ----------------------------- ✅ NEW: avoid / unavoid ----------------------------- */
+
+router.post(
+  '/:patientId/avoid',
+  asyncHandler(async (req, res) => {
+    const parsedId = PatientId.safeParse(req.params.patientId);
+    if (!parsedId.success) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'Invalid patient id',
+        traceId: req.requestId,
+      });
+    }
+
+    const updated = await patientRepository.avoid(parsedId.data);
+    if (!updated) {
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Patient not found',
+        traceId: req.requestId,
+      });
+    }
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'PATIENT_AVOID',
+        entity: { type: 'PATIENT', id: parsedId.data },
+        meta: {},
+      });
+    }
+
+    return res.status(200).json(updated);
+  }),
+);
+
+router.post(
+  '/:patientId/unavoid',
+  asyncHandler(async (req, res) => {
+    const parsedId = PatientId.safeParse(req.params.patientId);
+    if (!parsedId.success) {
+      return res.status(400).json({
+        error: 'VALIDATION_ERROR',
+        message: 'Invalid patient id',
+        traceId: req.requestId,
+      });
+    }
+
+    const updated = await patientRepository.unavoid(parsedId.data);
+    if (!updated) {
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Patient not found',
+        traceId: req.requestId,
+      });
+    }
+
+    if (req.auth) {
+      logAudit({
+        actorUserId: req.auth.userId,
+        action: 'PATIENT_UNAVOID',
+        entity: { type: 'PATIENT', id: parsedId.data },
+        meta: {},
+      });
+    }
+
+    return res.status(200).json(updated);
+  }),
+);
+
+/* ----------------------------- existing delete/restore/visits unchanged ----------------------------- */
 
 router.delete(
   '/:patientId',
@@ -255,10 +313,7 @@ router.delete(
       logAudit({
         actorUserId: req.auth.userId,
         action: 'PATIENT_SOFT_DELETE',
-        entity: {
-          type: 'PATIENT',
-          id: parsedId.data,
-        },
+        entity: { type: 'PATIENT', id: parsedId.data },
         meta: {},
       });
     }
@@ -292,10 +347,7 @@ router.post(
       logAudit({
         actorUserId: req.auth.userId,
         action: 'PATIENT_RESTORE',
-        entity: {
-          type: 'PATIENT',
-          id: parsedId.data,
-        },
+        entity: { type: 'PATIENT', id: parsedId.data },
         meta: {},
       });
     }

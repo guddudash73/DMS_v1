@@ -47,6 +47,7 @@ import type {
   PatientQueueResponse,
   RecentCompletedResponse,
   ToothDetail,
+  PatientUpdate,
 } from '@dcm/types';
 
 import { createClinicQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
@@ -697,6 +698,18 @@ export const apiSlice = createApi({
       invalidatesTags: [{ type: 'Patients' as const, id: 'LIST' }],
     }),
 
+    updatePatient: builder.mutation<Patient, { patientId: string; patch: PatientUpdate }>({
+      query: ({ patientId, patch }) => ({
+        url: `/patients/${patientId}`,
+        method: 'PATCH',
+        body: patch,
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: 'Patient' as const, id: arg.patientId },
+        { type: 'Patients' as const, id: 'LIST' },
+      ],
+    }),
+
     getPatientById: builder.query<Patient, string>({
       query: (patientId) => ({
         url: `/patients/${patientId}`,
@@ -753,7 +766,7 @@ export const apiSlice = createApi({
 
     getVisitBill: builder.query<Billing, { visitId: string }>({
       query: ({ visitId }) => ({
-        url: `/visits/${visitId}/bill`,
+        url: `/visits/${visitId}/bill`, // ✅ matches backend
         method: 'GET',
       }),
       providesTags: (_r, _e, arg) => [{ type: 'Billing' as const, id: arg.visitId }],
@@ -763,6 +776,18 @@ export const apiSlice = createApi({
       query: ({ visitId, input }) => ({
         url: `/visits/${visitId}/checkout`,
         method: 'POST',
+        body: input,
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: 'Billing' as const, id: arg.visitId },
+        { type: 'Visit' as const, id: arg.visitId },
+      ],
+    }),
+
+    updateVisitBill: builder.mutation<Billing, { visitId: string; input: BillingCheckoutInput }>({
+      query: ({ visitId, input }) => ({
+        url: `/visits/${visitId}/bill`,
+        method: 'PATCH',
         body: input,
       }),
       invalidatesTags: (_r, _e, arg) => [
@@ -1360,6 +1385,28 @@ export const apiSlice = createApi({
         { type: 'RecentCompleted' as const, id: arg.date ?? clinicDateISO(new Date()) }, // ✅ FIX
       ],
     }),
+
+    avoidPatient: builder.mutation<Patient, { patientId: string }>({
+      query: ({ patientId }) => ({
+        url: `/patients/${patientId}/avoid`,
+        method: 'POST',
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: 'Patient' as const, id: arg.patientId },
+        { type: 'Patients' as const, id: 'LIST' },
+      ],
+    }),
+
+    unavoidPatient: builder.mutation<Patient, { patientId: string }>({
+      query: ({ patientId }) => ({
+        url: `/patients/${patientId}/unavoid`,
+        method: 'POST',
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: 'Patient' as const, id: arg.patientId },
+        { type: 'Patients' as const, id: 'LIST' },
+      ],
+    }),
   }),
 });
 
@@ -1372,6 +1419,9 @@ export const {
 
   useGetPatientsQuery,
   useCreatePatientMutation,
+  useUpdatePatientMutation,
+  useAvoidPatientMutation,
+  useUnavoidPatientMutation,
   useGetPatientByIdQuery,
   useGetPatientVisitsQuery,
 
@@ -1393,6 +1443,7 @@ export const {
   useUpdateVisitStatusMutation,
 
   useGetVisitBillQuery,
+  useUpdateVisitBillMutation,
   useCheckoutVisitMutation,
 
   useGetDailyFollowupsQuery,

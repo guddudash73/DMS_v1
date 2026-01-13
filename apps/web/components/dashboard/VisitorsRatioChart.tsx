@@ -231,19 +231,19 @@ export default function VisitorsRatioChart({
 
         <Select value={timeRange} onValueChange={(value: TimeRange) => setTimeRange(value)}>
           <SelectTrigger
-            className="hidden w-[150px] rounded-full border bg-white text-xs sm:ml-auto sm:flex"
+            className="hidden w-[150px] rounded-full border bg-white text-xs sm:ml-auto sm:flex cursor-pointer"
             aria-label="Select time range"
           >
             <SelectValue placeholder="Last 3 months" />
           </SelectTrigger>
           <SelectContent className="rounded-xl">
-            <SelectItem value="90d" className="rounded-lg text-xs">
+            <SelectItem value="90d" className="rounded-lg text-xs cursor-pointer">
               Last 3 months
             </SelectItem>
-            <SelectItem value="30d" className="rounded-lg text-xs">
+            <SelectItem value="30d" className="rounded-lg text-xs cursor-pointer">
               Last 30 days
             </SelectItem>
-            <SelectItem value="7d" className="rounded-lg text-xs">
+            <SelectItem value="7d" className="rounded-lg text-xs cursor-pointer">
               Last 7 days
             </SelectItem>
           </SelectContent>

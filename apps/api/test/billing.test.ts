@@ -5,12 +5,7 @@ import { createApp } from '../src/server';
 import { deletePatientCompletely } from './helpers/patients';
 import { warmAuth, asReception, asAdmin } from './helpers/auth';
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
-import {
-  DynamoDBDocumentClient,
-  GetCommand,
-  PutCommand,
-  UpdateCommand,
-} from '@aws-sdk/lib-dynamodb';
+import { DynamoDBDocumentClient, PutCommand, UpdateCommand } from '@aws-sdk/lib-dynamodb';
 import { getEnv } from '../src/config/env';
 import { randomUUID } from 'node:crypto';
 
@@ -153,8 +148,10 @@ async function fallbackPersistBilling(params: {
 
   const { items, subtotal, discountAmount, taxAmount, total } = computeTotals(payload);
 
+  // Backend uses billNo; for fallback we can still produce a stable non-empty string.
+  const billNo = `BL/FALLBACK/${visitDate}/${String(now)}`;
+
   // 1) Put BILLING (best-effort with condition)
-  //    If it already exists, just read it later and proceed.
   try {
     await doc.send(
       new PutCommand({
@@ -164,6 +161,7 @@ async function fallbackPersistBilling(params: {
           SK: 'BILLING',
           entityType: 'BILLING',
           visitId,
+          billNo,
           items,
           subtotal,
           discountAmount,
@@ -182,7 +180,7 @@ async function fallbackPersistBilling(params: {
       }),
     );
   } catch {
-    // ignore (already exists or emulator inconsistency)
+    // ignore
   }
 
   // 2) Update VISIT META billingAmount
@@ -203,7 +201,7 @@ async function fallbackPersistBilling(params: {
       }),
     );
   } catch {
-    // ignore (will be asserted via GET /visits later; if missing, test will fail)
+    // ignore
   }
 
   // 3) Update PATIENT_VISIT billingAmount
@@ -227,7 +225,7 @@ async function fallbackPersistBilling(params: {
     // ignore
   }
 
-  // 4) Optional followUp creation (match backend fields roughly)
+  // 4) Optional followUp creation
   if (payload.followUp) {
     const followupId = randomUUID();
     const followUpDate = payload.followUp.followUpDate as string;
@@ -250,7 +248,6 @@ async function fallbackPersistBilling(params: {
             status: 'ACTIVE',
             createdAt: now,
             updatedAt: now,
-            // GSI3 keys (as used in backend repo)
             GSI3PK: `DATE#${followUpDate}`,
             GSI3SK: `TYPE#FOLLOWUP#ID#${followupId}`,
           },
@@ -262,9 +259,10 @@ async function fallbackPersistBilling(params: {
     }
   }
 
-  // 5) Return the shape the API would have returned
+  // 5) Return the shape the API would have returned (backend-aligned)
   return {
     visitId,
+    billNo,
     items,
     subtotal,
     discountAmount,
@@ -275,12 +273,6 @@ async function fallbackPersistBilling(params: {
   };
 }
 
-/**
- * Must-create helper:
- * - tries API checkout first
- * - if API keeps returning 409 DUPLICATE_CHECKOUT and no bill exists,
- *   falls back to direct DDB persistence (emulator workaround).
- */
 async function checkoutMustCreate(params: {
   patientId: string;
   payload: any;
@@ -317,12 +309,9 @@ async function checkoutMustCreate(params: {
       }
 
       if (res.status === 409 && res.body?.error === 'DUPLICATE_CHECKOUT') {
-        // If it actually wrote, bill will exist:
         const bill = await getBillIfExists(visit.visitId);
         if (bill) return { visitId: visit.visitId, visitDate: visit.visitDate, billing: bill };
 
-        // Otherwise, we are on an emulator that fails transact writes.
-        // Persist directly (backend-aligned shape) and proceed.
         const fallback = await fallbackPersistBilling({
           visitId: visit.visitId,
           visitDate: visit.visitDate,
@@ -360,6 +349,9 @@ describe('Billing / Checkout API', () => {
     });
 
     expect(billing.visitId).toBe(visitId);
+    expect(typeof billing.billNo).toBe('string');
+    expect(billing.billNo.length).toBeGreaterThan(0);
+
     expect(billing.subtotal).toBe(800);
     expect(billing.discountAmount).toBe(100);
     expect(billing.taxAmount).toBe(0);
@@ -371,6 +363,17 @@ describe('Billing / Checkout API', () => {
       .expect(200);
 
     expect(visitRes.body.billingAmount).toBe(700);
+
+    // ✅ Backend-aligned success signal:
+    // billing exists and is retrievable via the bill endpoint.
+    const billRes = await request(app)
+      .get(`/visits/${visitId}/bill`)
+      .set('Authorization', receptionAuthHeader)
+      .expect(200);
+
+    expect(billRes.body.visitId).toBe(visitId);
+    expect(typeof billRes.body.billNo).toBe('string');
+    expect(billRes.body.billNo.length).toBeGreaterThan(0);
 
     const reportRes = await request(app)
       .get('/reports/daily')

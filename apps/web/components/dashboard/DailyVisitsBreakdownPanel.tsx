@@ -104,7 +104,7 @@ export default function DailyVisitsBreakdownPanel({
 
           <button
             onClick={onBack}
-            className="rounded-full border bg-white px-3 py-1.5 text-xs shadow-sm hover:bg-slate-50"
+            className="rounded-full border bg-white px-3 py-1.5 text-xs shadow-sm hover:bg-slate-50 cursor-pointer"
           >
             ← Back
           </button>

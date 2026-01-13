@@ -5,6 +5,11 @@ import * as React from 'react';
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 
+import { Button } from '@/components/ui/button';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { Calendar as CalendarIcon } from 'lucide-react';
+
 import VisitorsRatioChart from '@/components/dashboard/VisitorsRatioCharts';
 import DailyVisitsBreakdownPanel from '@/components/dashboard/DailyVisitsBreakdownPanel';
 
@@ -27,6 +32,20 @@ function currencyINR(v?: number) {
 
 function safeNum(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+}
+
+// ✅ helpers for ISO <-> Date (local midnight) to avoid timezone drift
+function parseISODateToLocalDate(iso: string): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
+  const [y, m, d] = iso.split('-').map((x) => Number(x));
+  return new Date(y, m - 1, d, 0, 0, 0, 0);
+}
+
+function toLocalISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
 }
 
 function StatCard({
@@ -72,6 +91,15 @@ export default function ReportsPage() {
 
   const [selectedDate, setSelectedDate] = React.useState<string>(() => clinicDateISO(new Date()));
   const [drilldownDate, setDrilldownDate] = React.useState<string | null>(null);
+
+  // ✅ NEW: calendar popover state
+  const [datePickerOpen, setDatePickerOpen] = React.useState(false);
+
+  // ✅ NEW: Date object for calendar (derived from ISO)
+  const selectedDateObj = React.useMemo(
+    () => parseISODateToLocalDate(selectedDate) ?? new Date(),
+    [selectedDate],
+  );
 
   React.useEffect(() => {
     setDrilldownDate(null);
@@ -143,13 +171,33 @@ export default function ReportsPage() {
           <div className="flex items-center gap-2">
             <div className="rounded-2xl border bg-white px-3 py-2 shadow-sm">
               <div className="text-[11px] text-muted-foreground">Report date</div>
-              <input
-                type="date"
-                className="mt-1 h-8 w-40 rounded-xl border bg-white px-2 text-xs"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                disabled={!canUseApi}
-              />
+
+              {/* ✅ REPLACED: manual <input type="date" /> -> calendar popover */}
+              <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-1 h-8 w-40 justify-start gap-2 rounded-xl px-2 text-xs cursor-pointer"
+                    disabled={!canUseApi}
+                  >
+                    <CalendarIcon className="h-4 w-4" />
+                    <span className="text-gray-900">{selectedDate}</span>
+                  </Button>
+                </PopoverTrigger>
+
+                <PopoverContent align="end" className="w-auto rounded-2xl p-2">
+                  <Calendar
+                    mode="single"
+                    selected={selectedDateObj}
+                    onSelect={(d) => {
+                      if (!d) return;
+                      setSelectedDate(toLocalISODate(d));
+                      setDatePickerOpen(false);
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
         </div>
@@ -248,7 +296,7 @@ export default function ReportsPage() {
               <button
                 type="button"
                 onClick={() => setDrilldownDate(selectedDate)}
-                className="mt-4 w-full rounded-xl border bg-white px-3 py-2 text-xs font-medium shadow-sm hover:bg-slate-50 disabled:opacity-60"
+                className="mt-4 w-full rounded-xl border bg-white px-3 py-2 text-xs font-medium shadow-sm hover:bg-slate-50 disabled:opacity-60 cursor-pointer"
                 disabled={!canUseApi}
                 title="Open daily breakdown"
               >
