@@ -10,12 +10,16 @@ export function createApi(router: sst.aws.Router) {
     handler: 'apps/api/src/lambda.handler',
 
     /**
-     * ✅ PRODUCTION FIX: native dependency packaging
-     * sharp is a native module and must be installed into the Lambda bundle.
-     * Without this, the runtime bundle.mjs will import "sharp" but it won't exist in /var/task/node_modules.
+     * ✅ PRODUCTION FIX: native dependency packaging for Lambda
+     *
+     * Native modules like bcrypt + sharp require a platform-specific .node binary.
+     * When esbuild bundles your handler, those binaries may not be included.
+     *
+     * `nodejs.install` forces SST to run an install step inside the Lambda bundle
+     * so the correct Linux x64 Node 20 binaries are present at /var/task/node_modules.
      */
     nodejs: {
-      install: ['sharp'],
+      install: ['bcrypt', 'sharp'],
     },
 
     link: [mainTable, xrayBucket, connectionsTable],
@@ -31,7 +35,6 @@ export function createApi(router: sst.aws.Router) {
       JWT_ACCESS_SECRET: jwtAccessSecret.value,
       JWT_REFRESH_SECRET: jwtRefreshSecret.value,
 
-      // Optional: useful if you later want an API endpoint to return it
       REALTIME_WS_URL: realtimeWs.url,
     },
 
