@@ -3,6 +3,7 @@ import cookieParser from 'cookie-parser';
 import { randomUUID } from 'node:crypto';
 import { parseEnv } from '@dcm/config';
 import type { HealthResponse } from '@dcm/types';
+
 import authRoutes from './routes/auth';
 import patientRoutes from './routes/patients';
 import visitRoutes from './routes/visits';
@@ -15,23 +16,30 @@ import adminDoctorsRouter from './routes/admin-doctors';
 import adminRxPresetsRouter from './routes/admin-rx-presets';
 import adminMedicinesRouter from './routes/admin-medicines';
 import doctorsRouter from './routes/doctors';
+import meRouter from './routes/me';
+import followupsRouter from './routes/followups';
+import adminUsersRouter from './routes/admin-users';
+
 import { authMiddleware, requireRole } from './middlewares/auth';
 import { genericSensitiveRateLimiter } from './middlewares/rateLimit';
 import { logInfo } from './lib/logger';
 import { errorHandler } from './middlewares/errorHandler';
-import meRouter from './routes/me';
-import followupsRouter from './routes/followups';
-import adminUsersRouter from './routes/admin-users';
 import { createSecurityMiddleware } from './middlewares/securityHeaders';
 
 const env = parseEnv(process.env);
 
 export const createApp = () => {
   const app = express();
+
+  // If CloudFront / Router adds proxy headers, keep this.
   app.set('trust proxy', 1);
+
+  // Global middleware (applies to both / and /api)
   app.use(createSecurityMiddleware(env));
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
+
+  // Request logging
   app.use((req, res, next) => {
     const headerReqId = req.header('x-request-id');
     const reqId = headerReqId && headerReqId.trim().length > 0 ? headerReqId : randomUUID();
@@ -56,14 +64,23 @@ export const createApp = () => {
     next();
   });
 
-  app.get('/health', (_req, res) => {
+  /**
+   * IMPORTANT:
+   * Some setups forward requests to Lambda *with* "/api" still present (your case),
+   * while others strip it before reaching Express.
+   *
+   * So we mount the same router at BOTH "/" and "/api".
+   */
+  const routes = express.Router();
+
+  routes.get('/health', (_req, res) => {
     const payload: HealthResponse = { status: 'ok' };
     res.status(200).json(payload);
   });
 
-  app.use('/auth', authRoutes);
+  routes.use('/auth', authRoutes);
 
-  app.use(
+  routes.use(
     '/patients',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -71,7 +88,7 @@ export const createApp = () => {
     patientRoutes,
   );
 
-  app.use(
+  routes.use(
     '/visits',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -79,7 +96,7 @@ export const createApp = () => {
     visitRoutes,
   );
 
-  app.use(
+  routes.use(
     '/reports',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -87,7 +104,7 @@ export const createApp = () => {
     reportsRoutes,
   );
 
-  app.use(
+  routes.use(
     '/xrays',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -95,7 +112,7 @@ export const createApp = () => {
     xrayRouter,
   );
 
-  app.use(
+  routes.use(
     '/xray',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -103,7 +120,7 @@ export const createApp = () => {
     xrayRouter,
   );
 
-  app.use(
+  routes.use(
     '/rx',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -111,7 +128,7 @@ export const createApp = () => {
     rxRouter,
   );
 
-  app.use(
+  routes.use(
     '/medicines',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -119,7 +136,7 @@ export const createApp = () => {
     medicinesRouter,
   );
 
-  app.use(
+  routes.use(
     '/admin/medicines',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -127,7 +144,7 @@ export const createApp = () => {
     adminMedicinesRouter,
   );
 
-  app.use(
+  routes.use(
     '/rx-presets',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -135,7 +152,7 @@ export const createApp = () => {
     rxPresetsRouter,
   );
 
-  app.use(
+  routes.use(
     '/doctors',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -143,7 +160,7 @@ export const createApp = () => {
     doctorsRouter,
   );
 
-  app.use(
+  routes.use(
     '/admin/doctors',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -151,7 +168,7 @@ export const createApp = () => {
     adminDoctorsRouter,
   );
 
-  app.use(
+  routes.use(
     '/admin/users',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -159,7 +176,7 @@ export const createApp = () => {
     adminUsersRouter,
   );
 
-  app.use(
+  routes.use(
     '/admin/rx-presets',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -167,9 +184,9 @@ export const createApp = () => {
     adminRxPresetsRouter,
   );
 
-  app.use('/me', authMiddleware, genericSensitiveRateLimiter, meRouter);
+  routes.use('/me', authMiddleware, genericSensitiveRateLimiter, meRouter);
 
-  app.use(
+  routes.use(
     '/followups',
     authMiddleware,
     genericSensitiveRateLimiter,
@@ -177,6 +194,11 @@ export const createApp = () => {
     followupsRouter,
   );
 
+  // Mount routes at BOTH base paths
+  app.use(routes);
+  app.use('/api', routes);
+
+  // Error handler last
   app.use(errorHandler);
 
   return app;
