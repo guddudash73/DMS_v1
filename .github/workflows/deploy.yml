@@ -26,7 +26,7 @@ jobs:
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
 
       # Helps prevent memory-related crashes during SST/Pulumi bundling
-      NODE_OPTIONS: --max-old-space-size=4096
+      NODE_OPTIONS: --max_old_space_size=4096
 
     steps:
       - name: Checkout
@@ -44,35 +44,36 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      # ✅ CRITICAL FIX: remove preinstalled Pulumi that breaks SST (pulumi-language-nodejs -root flag mismatch)
+      # ✅ CRITICAL FIX: remove preinstalled Pulumi binaries from runner (prevents -root mismatch issue)
       - name: Remove preinstalled Pulumi binaries from runner
         run: |
           set -euxo pipefail
           which pulumi || true
           which pulumi-language-nodejs || true
 
-          # Remove common preinstalled locations on GitHub hosted runners
           sudo rm -f /usr/local/bin/pulumi || true
           sudo rm -f /usr/local/bin/pulumi-language-nodejs || true
           sudo rm -f /usr/local/bin/pulumi-language-python || true
           sudo rm -f /usr/local/bin/pulumi-language-go || true
           sudo rm -f /usr/local/bin/pulumi-language-dotnet || true
 
-          # Confirm they're gone
           which pulumi || true
           which pulumi-language-nodejs || true
 
-      # ✅ REQUIRED: build internal workspace packages so dist/ exists for Lambda bundling (@dcm/types, @dcm/config)
+      # ✅ REQUIRED: build internal workspace packages so dist/ exists for Lambda bundling
       - name: Build workspace packages
         run: |
           set -euxo pipefail
           npm run build --workspace=@dcm/config
           npm run build --workspace=@dcm/types
 
-      # ✅ Sanity check: make sure dist outputs exist (prevents "Could not resolve @dcm/types")
+      # ✅ Sanity check: make sure dist outputs exist
       - name: Verify workspace build outputs
         run: |
           set -euxo pipefail
+          node -v
+          npm -v
+          npx sst version
           test -f packages/types/dist/index.js
           test -f packages/config/dist/env.js
           echo "OK: workspace dist outputs exist"
