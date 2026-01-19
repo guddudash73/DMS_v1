@@ -25,10 +25,15 @@ jobs:
       # Used by infra/web.ts -> Next runtime env
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
 
-    steps:
-      - uses: actions/checkout@v4
+      # Optional hardening: keep Pulumi isolated per-run
+      PULUMI_HOME: ${{ runner.temp }}/.pulumi
 
-      - uses: actions/setup-node@v4
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
@@ -38,6 +43,17 @@ jobs:
 
       - name: Install deps
         run: npm ci
+
+      # ✅ Fix for: "flag provided but not defined: -root"
+      - name: Install Pulumi CLI (fix pulumi-language-nodejs -root)
+        run: |
+          set -euxo pipefail
+          curl -fsSL https://get.pulumi.com | sh
+          echo "$HOME/.pulumi/bin" >> $GITHUB_PATH
+          pulumi version
+          which pulumi || true
+          which pulumi-language-nodejs || true
+          pulumi-language-nodejs -version || true
 
       - name: Configure AWS creds (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
