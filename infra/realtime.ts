@@ -1,5 +1,7 @@
 /// <reference path="../.sst/platform/config.d.ts" />
 
+import { jwtAccessSecret, jwtRefreshSecret } from './secrets';
+
 export const connectionsTable = new sst.aws.Dynamo('ConnectionsTable', {
   fields: {
     PK: 'string',
@@ -19,17 +21,16 @@ export const connectionsTable = new sst.aws.Dynamo('ConnectionsTable', {
   },
 });
 
-const jwtAccessSecret = new sst.Secret('JWT_ACCESS_SECRET');
-const jwtRefreshSecret = new sst.Secret('JWT_REFRESH_SECRET');
-
 export const realtimeWs = new sst.aws.ApiGatewayWebSocket('RealtimeWs');
 
+// ─────────────────────────────────────────────
+// $connect
+// ─────────────────────────────────────────────
 realtimeWs.route('$connect', {
   runtime: 'nodejs20.x',
   handler: 'apps/api/src/realtime/wsConnect.handler',
 
-  // ✅ Explicit
-  link: [connectionsTable, jwtAccessSecret, jwtRefreshSecret],
+  link: [connectionsTable],
 
   environment: {
     NODE_ENV: 'production',
@@ -44,6 +45,9 @@ realtimeWs.route('$connect', {
   },
 });
 
+// ─────────────────────────────────────────────
+// $disconnect
+// ─────────────────────────────────────────────
 realtimeWs.route('$disconnect', {
   runtime: 'nodejs20.x',
   handler: 'apps/api/src/realtime/wsDisconnect.handler',
@@ -55,6 +59,9 @@ realtimeWs.route('$disconnect', {
   },
 });
 
+// ─────────────────────────────────────────────
+// $default
+// ─────────────────────────────────────────────
 realtimeWs.route('$default', {
   runtime: 'nodejs20.x',
   handler: 'apps/api/src/realtime/wsDefault.handler',

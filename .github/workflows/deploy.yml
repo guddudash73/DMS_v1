@@ -21,9 +21,6 @@ jobs:
       SST_PASSPHRASE: ${{ secrets.SST_PASSPHRASE }}
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
       NEXT_PUBLIC_WS_BASE_URL: ${{ secrets.NEXT_PUBLIC_WS_BASE_URL }}
-
-      SST_NO_TYPES: '1' # ✅ CRITICAL FIX
-
       NODE_OPTIONS: --max-old-space-size=8192
       SST_TELEMETRY_DISABLED: '1'
       TURBO_TELEMETRY_DISABLED: '1'
@@ -127,7 +124,7 @@ jobs:
       - name: Deploy
         run: |
           set -euxo pipefail
-          npx sst deploy --stage "$SST_STAGE" --continue
+          npx sst deploy --stage "$SST_STAGE"
 
       - name: Dump SST logs on failure
         if: failure()

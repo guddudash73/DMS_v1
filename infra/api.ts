@@ -1,18 +1,15 @@
 /// <reference path="../.sst/platform/config.d.ts" />
 
 import { mainTable, xrayBucket } from './storage';
-import { connectionsTable } from './realtime';
+import { connectionsTable, realtimeWs } from './realtime';
+import { jwtAccessSecret, jwtRefreshSecret } from './secrets';
 
 export function createApi(router: sst.aws.Router) {
-  const jwtAccessSecret = new sst.Secret('JWT_ACCESS_SECRET');
-  const jwtRefreshSecret = new sst.Secret('JWT_REFRESH_SECRET');
-
   const apiFn = new sst.aws.Function('Api', {
     runtime: 'nodejs20.x',
     handler: 'apps/api/src/lambda.handler',
 
-    // ✅ Explicitly link secrets so SST knows these are required by the function
-    link: [mainTable, xrayBucket, connectionsTable, jwtAccessSecret, jwtRefreshSecret],
+    link: [mainTable, xrayBucket, connectionsTable],
 
     environment: {
       NODE_ENV: 'production',
@@ -24,6 +21,9 @@ export function createApi(router: sst.aws.Router) {
 
       JWT_ACCESS_SECRET: jwtAccessSecret.value,
       JWT_REFRESH_SECRET: jwtRefreshSecret.value,
+
+      // Optional: useful if you later want an API endpoint to return it
+      REALTIME_WS_URL: realtimeWs.url,
     },
 
     url: {
