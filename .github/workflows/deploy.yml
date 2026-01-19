@@ -19,14 +19,11 @@ jobs:
       AWS_REGION: us-east-1
       SST_STAGE: prod
 
-      # SST needs this for state encryption/decryption
+      # Required by SST to decrypt state
       SST_PASSPHRASE: ${{ secrets.SST_PASSPHRASE }}
 
-      # Used by infra/web.ts -> Next runtime env
+      # Passed into infra/web.ts
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
-
-      # Keep Pulumi isolated per-run (works everywhere)
-      PULUMI_HOME: ${{ github.workspace }}/.pulumi
 
     steps:
       - name: Checkout
@@ -44,19 +41,12 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      # ✅ Fix for: "flag provided but not defined: -root"
-      - name: Install Pulumi CLI
-        run: |
-          set -euxo pipefail
-          curl -fsSL https://get.pulumi.com | sh
-          echo "$HOME/.pulumi/bin" >> $GITHUB_PATH
-          pulumi version
-
       - name: Configure AWS creds (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::512491905643:role/github-actions-sarangi-dcm-deploy
           aws-region: ${{ env.AWS_REGION }}
 
+      # ✅ LET SST MANAGE PULUMI
       - name: Deploy with SST
         run: npx sst deploy --stage $SST_STAGE
