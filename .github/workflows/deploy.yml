@@ -2,7 +2,8 @@ name: Deploy (prod)
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 
 permissions:
   id-token: write
@@ -15,25 +16,21 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     env:
       AWS_REGION: us-east-1
       SST_STAGE: prod
-
-      # SST needs this for state encryption/decryption
       SST_PASSPHRASE: ${{ secrets.SST_PASSPHRASE }}
-
-      # Used by infra/web.ts -> Next runtime env
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
-
-      # Helps prevent memory-related crashes during SST/Pulumi bundling
-      NODE_OPTIONS: --max_old_space_size=4096
+      NODE_OPTIONS: '--max-old-space-size=4096'
+      SST_TELEMETRY_DISABLED: '1'
+      TURBO_TELEMETRY_DISABLED: '1'
+      HUSKY: '0'
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
@@ -41,48 +38,65 @@ jobs:
       - name: Pin npm
         run: npm install -g npm@11.6.2
 
-      - name: Install deps
-        run: npm ci
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
 
-      # ✅ CRITICAL FIX: remove preinstalled Pulumi binaries from runner (prevents -root mismatch issue)
-      - name: Remove preinstalled Pulumi binaries from runner
+      - name: Remove preinstalled Pulumi binaries
         run: |
           set -euxo pipefail
           which pulumi || true
           which pulumi-language-nodejs || true
-
           sudo rm -f /usr/local/bin/pulumi || true
           sudo rm -f /usr/local/bin/pulumi-language-nodejs || true
           sudo rm -f /usr/local/bin/pulumi-language-python || true
           sudo rm -f /usr/local/bin/pulumi-language-go || true
           sudo rm -f /usr/local/bin/pulumi-language-dotnet || true
-
           which pulumi || true
           which pulumi-language-nodejs || true
 
-      # ✅ REQUIRED: build internal workspace packages so dist/ exists for Lambda bundling
       - name: Build workspace packages
         run: |
           set -euxo pipefail
           npm run build --workspace=@dcm/config
           npm run build --workspace=@dcm/types
-
-      # ✅ Sanity check: make sure dist outputs exist
-      - name: Verify workspace build outputs
-        run: |
-          set -euxo pipefail
-          node -v
-          npm -v
-          npx sst version
           test -f packages/types/dist/index.js
           test -f packages/config/dist/env.js
-          echo "OK: workspace dist outputs exist"
+          test -n "$SST_PASSPHRASE"
+          test -n "$QZ_PRIVATE_KEY_SECRET_ID"
 
-      - name: Configure AWS creds (OIDC)
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::512491905643:role/github-actions-sarangi-dcm-deploy
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Patch Pulumi error renderer (unchanged logic)
+        run: |
+          set -euxo pipefail
+          npx sst --help >/dev/null 2>&1 || true
+          node <<'NODE'
+          const fs = require("fs");
+          const path = ".sst/platform/node_modules/@pulumi/cmd/run/error.js";
+          if (!fs.existsSync(path)) process.exit(0);
+          let s = fs.readFileSync(path, "utf8");
+          if (s.includes("SAFE_PULUMI_ERROR_MESSAGE")) process.exit(0);
+          s = s.replace(
+            /function defaultErrorMessage\([\s\S]*?\)\s*\{[\s\S]*?\n\}/m,
+            `function defaultErrorMessage(err) {
+              // SAFE_PULUMI_ERROR_MESSAGE
+              try {
+                if (err && typeof err === "object") {
+                  const msg = err.message || err.toString();
+                  if (typeof msg === "string" && msg.length) return msg;
+                }
+                return String(err);
+              } catch (e) {
+                return "Pulumi error (failed to render safely)";
+              }
+            }`
+          );
+          fs.writeFileSync(path, s, "utf8");
+          NODE
+
       - name: Deploy with SST
-        run: npx sst deploy --stage $SST_STAGE
+        run: npx sst deploy --stage "$SST_STAGE"
