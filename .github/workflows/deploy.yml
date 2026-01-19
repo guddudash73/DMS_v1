@@ -19,10 +19,10 @@ jobs:
       AWS_REGION: us-east-1
       SST_STAGE: prod
 
-      # Required by SST to decrypt state
+      # SST needs this for state encryption/decryption
       SST_PASSPHRASE: ${{ secrets.SST_PASSPHRASE }}
 
-      # Passed into infra/web.ts
+      # Used by infra/web.ts -> Next runtime env
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
 
     steps:
@@ -41,12 +41,29 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      # ✅ CRITICAL FIX: remove preinstalled Pulumi that breaks SST (pulumi-language-nodejs -root flag mismatch)
+      - name: Remove preinstalled Pulumi binaries from runner
+        run: |
+          set -euxo pipefail
+          which pulumi || true
+          which pulumi-language-nodejs || true
+
+          # Remove common preinstalled locations on GitHub hosted runners
+          sudo rm -f /usr/local/bin/pulumi || true
+          sudo rm -f /usr/local/bin/pulumi-language-nodejs || true
+          sudo rm -f /usr/local/bin/pulumi-language-python || true
+          sudo rm -f /usr/local/bin/pulumi-language-go || true
+          sudo rm -f /usr/local/bin/pulumi-language-dotnet || true
+
+          # Confirm they're gone
+          which pulumi || true
+          which pulumi-language-nodejs || true
+
       - name: Configure AWS creds (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::512491905643:role/github-actions-sarangi-dcm-deploy
           aws-region: ${{ env.AWS_REGION }}
 
-      # ✅ LET SST MANAGE PULUMI
       - name: Deploy with SST
         run: npx sst deploy --stage $SST_STAGE
