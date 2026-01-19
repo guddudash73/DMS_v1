@@ -25,6 +25,9 @@ jobs:
       # Used by infra/web.ts -> Next runtime env
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
 
+      # Helps prevent memory-related crashes during SST/Pulumi bundling
+      NODE_OPTIONS: --max-old-space-size=4096
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -58,6 +61,21 @@ jobs:
           # Confirm they're gone
           which pulumi || true
           which pulumi-language-nodejs || true
+
+      # ✅ REQUIRED: build internal workspace packages so dist/ exists for Lambda bundling (@dcm/types, @dcm/config)
+      - name: Build workspace packages
+        run: |
+          set -euxo pipefail
+          npm run build --workspace=@dcm/config
+          npm run build --workspace=@dcm/types
+
+      # ✅ Sanity check: make sure dist outputs exist (prevents "Could not resolve @dcm/types")
+      - name: Verify workspace build outputs
+        run: |
+          set -euxo pipefail
+          test -f packages/types/dist/index.js
+          test -f packages/config/dist/env.js
+          echo "OK: workspace dist outputs exist"
 
       - name: Configure AWS creds (OIDC)
         uses: aws-actions/configure-aws-credentials@v4
