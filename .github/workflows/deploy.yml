@@ -20,9 +20,9 @@ jobs:
       SST_STAGE: prod
       SST_PASSPHRASE: ${{ secrets.SST_PASSPHRASE }}
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
-
-      # Optional during bootstrap; set after first successful prod deploy
       NEXT_PUBLIC_WS_BASE_URL: ${{ secrets.NEXT_PUBLIC_WS_BASE_URL }}
+
+      SST_NO_TYPES: '1' # ✅ CRITICAL FIX
 
       NODE_OPTIONS: --max-old-space-size=8192
       SST_TELEMETRY_DISABLED: '1'
