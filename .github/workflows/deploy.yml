@@ -36,7 +36,8 @@ jobs:
 
       - run: npm install -g npm@11.6.2
 
-      - run: npm ci --ignore-scripts
+      # ✅ IMPORTANT: allow scripts so sharp can install correctly
+      - run: npm ci
 
       - run: |
           set -euxo pipefail
