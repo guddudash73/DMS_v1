@@ -54,6 +54,7 @@ import { createClinicQueueWebSocket, type RealtimeMessage } from '@/lib/realtime
 import type { RootState } from './index';
 import { setTokensFromRefresh, setUnauthenticated } from './authSlice';
 import { clinicDateISO } from '../lib/clinicTime';
+type AppDispatch = typeof import('./index').store.dispatch;
 
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL && process.env.NEXT_PUBLIC_API_BASE_URL.length > 0
@@ -96,6 +97,7 @@ export const TAG_TYPES = [
   'RxPresets',
   'MedicinesCatalog',
   'RecentCompleted',
+  'DailyPaymentsBreakdown',
 ] as const;
 
 export type AdminMedicinesStatus = 'PENDING' | 'VERIFIED';
@@ -155,6 +157,33 @@ function normalizeIsoDate(input: string): string {
   return clinicDateISO(new Date(input));
 }
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function getRetryAfterMs(err: FetchBaseQueryError): number | null {
+  const anyErr = err as any;
+  const headers = anyErr?.meta?.response?.headers;
+
+  if (!headers || typeof headers.get !== 'function') return null;
+
+  const value = headers.get('Retry-After');
+  if (!value) return null;
+
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return Math.min(30_000, seconds * 1000);
+}
+
+function isFetchBaseQueryError(error: unknown): error is FetchBaseQueryError & { status: number } {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'status' in error &&
+    typeof (error as { status?: unknown }).status === 'number'
+  );
+}
+
 let refreshInFlight: Promise<boolean> | null = null;
 
 const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQueryError> = async (
@@ -164,23 +193,42 @@ const baseQueryWithReauth: BaseQueryFn<string | FetchArgs, unknown, FetchBaseQue
 ) => {
   let result = await rawBaseQuery(args, api, extraOptions);
 
+  if (result.error?.status === 429) {
+    const ms = getRetryAfterMs(result.error) ?? 1500;
+    await sleep(ms);
+    result = await rawBaseQuery(args, api, extraOptions);
+  }
+
   if (result.error?.status !== 401) return result;
 
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
-      const refreshResult = await rawBaseQuery(
+      let refreshResult = await rawBaseQuery(
         { url: '/auth/refresh', method: 'POST' },
         api,
         extraOptions,
       );
+
+      if (isFetchBaseQueryError(refreshResult.error) && refreshResult.error.status === 429) {
+        const ms = getRetryAfterMs(refreshResult.error) ?? 1500;
+        await sleep(ms);
+
+        refreshResult = await rawBaseQuery(
+          { url: '/auth/refresh', method: 'POST' },
+          api,
+          extraOptions,
+        );
+      }
 
       if (refreshResult.data) {
         api.dispatch(setTokensFromRefresh(refreshResult.data as RefreshResponse));
         return true;
       }
 
-      const status = (refreshResult.error as any)?.status;
-      if (status === 401 || status === 403) {
+      if (
+        isFetchBaseQueryError(refreshResult.error) &&
+        (refreshResult.error.status === 401 || refreshResult.error.status === 403)
+      ) {
         api.dispatch(setUnauthenticated());
         api.dispatch(apiSlice.util.resetApiState());
       }
@@ -210,6 +258,8 @@ let sharedSocket: WebSocket | null = null;
 let sharedListeners = new Set<WsListener>();
 let sharedRefCount = 0;
 
+let sharedOpeningPromise: Promise<void> | null = null;
+
 let sharedHeartbeatTimer: ReturnType<typeof setInterval> | null = null;
 let sharedIdleTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -227,7 +277,7 @@ function clearReconnectTimer() {
   reconnectTimer = null;
 }
 
-function scheduleReconnect(args: { dispatch: any; getState: () => unknown }) {
+function scheduleReconnect(args: { dispatch: AppDispatch; getState: () => unknown }) {
   if (typeof window === 'undefined') return;
   if (document.visibilityState !== 'visible') return;
   if (sharedRefCount <= 0) return;
@@ -239,12 +289,12 @@ function scheduleReconnect(args: { dispatch: any; getState: () => unknown }) {
 
   clearReconnectTimer();
   reconnectTimer = setTimeout(() => {
-    void sharedOpenSocketIfNeeded(args, { force: true });
+    void sharedOpenSocketIfNeeded(args);
   }, delay);
 }
 
 const HEARTBEAT_MS = 4 * 60 * 1000;
-const IDLE_CLOSE_MS = 10 * 60 * 1000;
+const IDLE_CLOSE_MS = 5 * 60 * 1000;
 const MAX_CONN_AGE_MS = 110 * 60 * 1000;
 const EXPIRY_SKEW_MS = 30_000;
 
@@ -259,11 +309,18 @@ function getTodayIsoSafe() {
   return clinicDateISO(new Date());
 }
 
-function invalidateQueueOnly(dispatch: any, dateIso: string) {
+const lastQueueInvalidateAt = new Map<string, number>();
+
+function invalidateQueueOnly(dispatch: AppDispatch, dateIso: string) {
+  const now = Date.now();
+  const prev = lastQueueInvalidateAt.get(dateIso) ?? 0;
+  if (now - prev < 200) return;
+  lastQueueInvalidateAt.set(dateIso, now);
+
   dispatch(apiSlice.util.invalidateTags([{ type: 'ClinicQueue' as const, id: dateIso }]));
 }
 
-function invalidateRealtimeDrivenCaches(args: { dispatch: any }) {
+function invalidateRealtimeDrivenCaches(args: { dispatch: AppDispatch }) {
   const today = getTodayIsoSafe();
   invalidateQueueOnly(args.dispatch, today);
 }
@@ -286,6 +343,10 @@ function sharedSafeClose() {
   sharedStopTimers();
 }
 
+if (typeof window !== 'undefined') {
+  (window as any).__dms_force_ws_close = sharedSafeClose;
+}
+
 function sharedResetIdleTimer() {
   if (sharedIdleTimer) clearTimeout(sharedIdleTimer);
   sharedIdleTimer = setTimeout(() => {
@@ -294,7 +355,7 @@ function sharedResetIdleTimer() {
 }
 
 async function refreshAccessTokenShared(args: {
-  dispatch: any;
+  dispatch: AppDispatch;
   getState: () => unknown;
 }): Promise<string | null> {
   if (!refreshInFlight) {
@@ -330,14 +391,16 @@ async function refreshAccessTokenShared(args: {
 }
 
 async function ensureFreshAccessTokenForWs(args: {
-  dispatch: any;
+  dispatch: AppDispatch;
   getState: () => unknown;
 }): Promise<string | null> {
   const state = args.getState() as RootState;
   const token = state.auth.accessToken;
   const expiresAt = state.auth.accessExpiresAt;
 
-  if (!token || !expiresAt) return null;
+  if (!token || !expiresAt) {
+    return await refreshAccessTokenShared(args);
+  }
 
   if (Date.now() < expiresAt - EXPIRY_SKEW_MS) {
     return token;
@@ -346,91 +409,107 @@ async function ensureFreshAccessTokenForWs(args: {
   return await refreshAccessTokenShared(args);
 }
 
-async function sharedOpenSocketIfNeeded(
-  args: { dispatch: any; getState: () => unknown },
-  opts?: { force?: boolean },
-) {
+async function sharedOpenSocketIfNeeded(args: { dispatch: AppDispatch; getState: () => unknown }) {
   if (typeof window === 'undefined') return;
+
+  if (sharedRefCount <= 0) return;
+
   if (document.visibilityState !== 'visible') return;
-
-  if (!opts?.force && isSocketUsable(sharedSocket)) return;
-
-  if (sharedSocket && !isSocketUsable(sharedSocket)) {
-    sharedSafeClose();
-  }
 
   if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
 
-  const token = await ensureFreshAccessTokenForWs(args);
-  if (!token) return;
+  if (isSocketUsable(sharedSocket)) return;
 
-  const isReconnect = sharedEverOpened;
+  if (sharedOpeningPromise) {
+    await sharedOpeningPromise;
+    return;
+  }
 
-  sharedSocket = createClinicQueueWebSocket({
-    token,
+  clearReconnectTimer();
 
-    onOpen: () => {
-      sharedEverOpened = true;
-      reconnectAttempt = 0;
-      clearReconnectTimer();
-
-      if (isReconnect) {
-        invalidateRealtimeDrivenCaches({ dispatch: args.dispatch });
-      }
-
-      clearRecycleTimer();
-      recycleTimer = setTimeout(() => {
-        sharedSafeClose();
-        void sharedOpenSocketIfNeeded(args, { force: true });
-      }, MAX_CONN_AGE_MS);
-
-      sharedResetIdleTimer();
-    },
-
-    onMessage: (msg) => {
-      for (const fn of sharedListeners) {
-        try {
-          fn(msg);
-        } catch {}
-      }
-      sharedResetIdleTimer();
-    },
-
-    onClose: () => {
-      sharedSocket = null;
-      sharedStopTimers();
-      scheduleReconnect(args);
-    },
-
-    onError: () => {
+  sharedOpeningPromise = (async () => {
+    if (sharedSocket && !isSocketUsable(sharedSocket)) {
       sharedSafeClose();
+    }
+
+    const token = await ensureFreshAccessTokenForWs(args);
+    if (!token) {
       scheduleReconnect(args);
-    },
+      return;
+    }
+
+    const isReconnect = sharedEverOpened;
+
+    sharedSocket = createClinicQueueWebSocket({
+      token,
+
+      onOpen: () => {
+        sharedEverOpened = true;
+        reconnectAttempt = 0;
+        clearReconnectTimer();
+
+        if (isReconnect) {
+          invalidateRealtimeDrivenCaches({ dispatch: args.dispatch });
+        }
+
+        clearRecycleTimer();
+        recycleTimer = setTimeout(() => {
+          sharedSafeClose();
+          void sharedOpenSocketIfNeeded(args);
+        }, MAX_CONN_AGE_MS);
+
+        sharedResetIdleTimer();
+      },
+
+      onMessage: (msg) => {
+        for (const fn of sharedListeners) {
+          try {
+            fn(msg);
+          } catch {}
+        }
+        sharedResetIdleTimer();
+      },
+
+      onClose: () => {
+        sharedSocket = null;
+        sharedStopTimers();
+        scheduleReconnect(args);
+      },
+
+      onError: () => {
+        sharedSafeClose();
+        scheduleReconnect(args);
+      },
+    });
+
+    if (!sharedSocket) return;
+
+    sharedHeartbeatTimer = setInterval(() => {
+      const sock = sharedSocket;
+      if (!sock || sock.readyState !== WebSocket.OPEN) return;
+      try {
+        sock.send(JSON.stringify({ type: 'ping' }));
+      } catch {}
+    }, HEARTBEAT_MS);
+
+    sharedResetIdleTimer();
+  })().finally(() => {
+    sharedOpeningPromise = null;
   });
 
-  if (!sharedSocket) return;
-
-  sharedHeartbeatTimer = setInterval(() => {
-    const sock = sharedSocket;
-    if (!sock || sock.readyState !== WebSocket.OPEN) return;
-    try {
-      sock.send(JSON.stringify({ type: 'ping' }));
-    } catch {}
-  }, HEARTBEAT_MS);
-
-  sharedResetIdleTimer();
+  await sharedOpeningPromise;
 }
 
-function sharedMarkActivity(args: { dispatch: any; getState: () => unknown }) {
+function sharedMarkActivity(args: { dispatch: AppDispatch; getState: () => unknown }) {
   sharedResetIdleTimer();
 
   if (!isSocketUsable(sharedSocket) && sharedRefCount > 0) {
-    void sharedOpenSocketIfNeeded(args, { force: true });
+    void sharedOpenSocketIfNeeded(args);
   }
 }
 
 function subscribeSharedRealtime(args: {
-  dispatch: any;
+  dispatch: AppDispatch;
   getState: () => unknown;
   onMessage: WsListener;
 }) {
@@ -515,8 +594,8 @@ function subscribeSharedRealtime(args: {
 export const apiSlice = createApi({
   reducerPath: 'api',
   baseQuery: baseQueryWithReauth,
-  refetchOnFocus: true,
-  refetchOnReconnect: true,
+  refetchOnFocus: false,
+  refetchOnReconnect: false,
   refetchOnMountOrArgChange: false,
   tagTypes: TAG_TYPES,
 
@@ -573,6 +652,10 @@ export const apiSlice = createApi({
         try {
           await queryFulfilled;
         } finally {
+          if (typeof window !== 'undefined') {
+            (window as any).__dms_force_ws_close?.();
+          }
+
           dispatch(setUnauthenticated());
           dispatch(apiSlice.util.resetApiState());
         }
@@ -635,6 +718,37 @@ export const apiSlice = createApi({
         params: { date },
       }),
       providesTags: (_r, _e, date) => [{ type: 'DailyVisitsBreakdown' as const, id: date }],
+    }),
+
+    getDailyPaymentsBreakdown: builder.query<
+      {
+        date: string;
+        totals: { total: number; online: number; offline: number; other: number };
+        items: {
+          visitId: string;
+          visitDate: string;
+          status: 'QUEUED' | 'IN_PROGRESS' | 'DONE';
+          tag?: 'N' | 'F';
+          zeroBilled?: boolean;
+          reason?: string;
+          billingAmount: number;
+          paymentMode: 'ONLINE' | 'OFFLINE' | 'OTHER';
+          createdAt: number;
+          updatedAt: number;
+
+          patientId: string;
+          patientName: string;
+          patientPhone?: string;
+          patientGender?: string;
+        }[];
+      },
+      string
+    >({
+      query: (date) => ({
+        url: '/reports/daily/payments-breakdown',
+        params: { date },
+      }),
+      providesTags: (_r, _e, date) => [{ type: 'DailyPaymentsBreakdown' as const, id: date }],
     }),
 
     getDoctors: builder.query<DoctorPublicListItem[], void>({
@@ -766,7 +880,7 @@ export const apiSlice = createApi({
 
     getVisitBill: builder.query<Billing, { visitId: string }>({
       query: ({ visitId }) => ({
-        url: `/visits/${visitId}/bill`, // ✅ matches backend
+        url: `/visits/${visitId}/bill`,
         method: 'GET',
       }),
       providesTags: (_r, _e, arg) => [{ type: 'Billing' as const, id: arg.visitId }],
@@ -1429,6 +1543,7 @@ export const {
   useGetDailyPatientSummaryQuery,
   useGetDailyPatientSummarySeriesQuery,
   useGetDailyVisitsBreakdownQuery,
+  useGetDailyPaymentsBreakdownQuery,
 
   useGetDoctorsQuery,
   useAdminGetDoctorsQuery,

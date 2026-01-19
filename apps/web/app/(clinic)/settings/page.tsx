@@ -41,7 +41,7 @@ export default function SettingPage() {
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
-      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 2xl:gap-10">
+      <div className="mx-auto flex w-full max-w-300 flex-col gap-6 2xl:gap-10">
         <div>
           <h1 className="text-xl font-semibold text-gray-900">Settings</h1>
           <div className="mt-1 text-xs text-gray-500">Configure printing and token behavior.</div>

@@ -188,7 +188,6 @@ export default function BlankPrescriptionPrintPage() {
         </div>
       </Card>
 
-      {/* Print-only portal */}
       <PrescriptionBlankPrintSheet
         patientName={patientName}
         patientPhone={patientPhone}

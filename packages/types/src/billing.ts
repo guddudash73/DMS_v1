@@ -33,12 +33,12 @@ export const BillingCheckoutInput = z
   .superRefine((val, ctx) => {
     if (val.receivedOnline === true && val.receivedOffline === true) {
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         path: ['receivedOnline'],
         message: 'Only one of receivedOnline/receivedOffline can be true',
       });
       ctx.addIssue({
-        code: z.ZodIssueCode.custom,
+        code: 'custom',
         path: ['receivedOffline'],
         message: 'Only one of receivedOnline/receivedOffline can be true',
       });
@@ -61,7 +61,6 @@ export const Billing = z.object({
   total: z.number().nonnegative(),
   currency: z.string().min(1).max(16).default('INR'),
   createdAt: z.number().int().nonnegative(),
-
   receivedOnline: z.boolean().optional(),
   receivedOffline: z.boolean().optional(),
 });

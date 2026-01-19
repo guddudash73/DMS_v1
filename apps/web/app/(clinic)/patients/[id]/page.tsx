@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/patients/[id]/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -159,7 +158,6 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
 
-// ✅ Backend may evolve — keep safe accessors
 function anchorIdFromVisit(v: Visit): string | undefined {
   const rec: Record<string, unknown> = isRecord(v) ? (v as Record<string, unknown>) : {};
   const a1 = rec['anchorVisitId'];
@@ -182,6 +180,12 @@ function typeBadgeClass(kind: 'NEW' | 'FOLLOWUP') {
 
 function zeroBilledBadgeClass() {
   return 'bg-rose-100 text-rose-700 border-rose-200';
+}
+
+// Lint-only fix: avoid `any` for the optional `isAvoided` field.
+function isAvoidedFlag(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return value['isAvoided'] === true;
 }
 
 export default function PatientDetailPage() {
@@ -220,7 +224,6 @@ export default function PatientDetailPage() {
 
   const { data: summary } = useGetPatientSummaryQuery(patientId);
 
-  // still used for printing (me)
   useGetDoctorsQuery();
 
   const meQuery = useGetMeQuery();
@@ -253,30 +256,23 @@ export default function PatientDetailPage() {
 
   const visits: Visit[] = visitsData?.items ?? [];
 
-  // Sort newest first
   const sortedVisits = React.useMemo(() => {
     const items = [...visits];
     items.sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0));
     return items;
   }, [visits]);
 
-  // If date filter set, only keep visits on that date for *rows*,
-  // but we still keep a map of all visits to resolve anchor info.
   const filteredVisits = React.useMemo(() => {
     if (!selectedDate) return sortedVisits;
     return sortedVisits.filter((v) => v.visitDate === selectedDate);
   }, [sortedVisits, selectedDate]);
 
-  // For anchor lookups (reason/date)
   const visitById = React.useMemo(() => {
     const map = new Map<string, Visit>();
     for (const v of sortedVisits) map.set(v.visitId, v);
     return map;
   }, [sortedVisits]);
 
-  // Grouping:
-  // - Anchors are visits with no anchorVisitId
-  // - Followups attach to their anchorVisitId
   const groups = React.useMemo(() => {
     type Group = {
       anchor: Visit;
@@ -286,7 +282,6 @@ export default function PatientDetailPage() {
     const anchorMap = new Map<string, Group>();
     const orphanFollowups: Visit[] = [];
 
-    // First pass: anchors from filtered set (so pagination feels right with date filter)
     for (const v of filteredVisits) {
       const anchorId = anchorIdFromVisit(v);
       if (!anchorId) {
@@ -294,7 +289,6 @@ export default function PatientDetailPage() {
       }
     }
 
-    // Second pass: attach followups (from filtered set)
     for (const v of filteredVisits) {
       const anchorId = anchorIdFromVisit(v);
       if (!anchorId) continue;
@@ -307,20 +301,16 @@ export default function PatientDetailPage() {
       }
     }
 
-    // Sort followups oldest -> newest within each anchor (looks nicer under parent)
     for (const g of anchorMap.values()) {
       g.followups.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
     }
 
-    // Order anchors newest -> oldest (already implied by filteredVisits sort)
     const anchorsOrdered: Group[] = Array.from(anchorMap.values()).sort(
       (a, b) =>
         (b.anchor.updatedAt ?? b.anchor.createdAt ?? 0) -
         (a.anchor.updatedAt ?? a.anchor.createdAt ?? 0),
     );
 
-    // If we have orphan followups (anchor not in filtered set), keep them as mini-groups
-    // but still show anchor context text using visitById when possible.
     const orphanGroups: Array<{ followup: Visit }> = orphanFollowups
       .sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0))
       .map((f) => ({ followup: f }));
@@ -360,7 +350,6 @@ export default function PatientDetailPage() {
     });
   };
 
-  // Pagination: paginate by anchor visits (not total rows)
   const PAGE_SIZE = 4;
   const [page, setPage] = React.useState<number>(1);
 
@@ -379,8 +368,6 @@ export default function PatientDetailPage() {
   const renderReasonCell = (visit: Visit, opts: { kind: 'NEW' | 'FOLLOWUP'; anchor?: Visit }) => {
     const anchor = opts.anchor;
 
-    // ✅ For NEW/anchor: show follow-up count (from FULL dataset, not only filtered)
-    // so the anchor row always shows true count.
     let followupCount = 0;
     if (opts.kind === 'NEW') {
       const anchorId = visit.visitId;
@@ -389,7 +376,6 @@ export default function PatientDetailPage() {
       }
     }
 
-    // ✅ For FOLLOWUP: show "Follow-up of: {anchor reason} • {anchor date}"
     const followupOfText =
       opts.kind === 'FOLLOWUP'
         ? (() => {
@@ -428,7 +414,7 @@ export default function PatientDetailPage() {
   const [avoidPatient, { isLoading: avoidLoading }] = useAvoidPatientMutation();
   const [unavoidPatient, { isLoading: unavoidLoading }] = useUnavoidPatientMutation();
 
-  const isAvoided = (patient as any)?.isAvoided === true;
+  const isAvoided = isAvoidedFlag(patient);
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10 w-full">
@@ -519,7 +505,6 @@ export default function PatientDetailPage() {
           )}
 
           <div className="mt-5 flex justify-end gap-2">
-            {/* ✅ NEW: Avoid / Un-avoid */}
             <Button
               type="button"
               variant="outline"
@@ -528,7 +513,7 @@ export default function PatientDetailPage() {
               onClick={async () => {
                 if (!patient) return;
                 try {
-                  if ((patient as any)?.isAvoided) {
+                  if (isAvoidedFlag(patient)) {
                     await unavoidPatient({ patientId }).unwrap();
                   } else {
                     await avoidPatient({ patientId }).unwrap();
@@ -538,7 +523,7 @@ export default function PatientDetailPage() {
                 }
               }}
             >
-              {(patient as any)?.isAvoided ? 'Un-avoid' : 'Avoid'}
+              {isAvoidedFlag(patient) ? 'Un-avoid' : 'Avoid'}
             </Button>
 
             <Button
@@ -677,14 +662,12 @@ export default function PatientDetailPage() {
                   </TableRow>
                 ) : (
                   <>
-                    {/* Anchor groups (paginated) */}
                     {pageAnchors.map((g) => {
                       const anchor = g.anchor;
                       const followups = g.followups;
 
                       return (
                         <React.Fragment key={anchor.visitId}>
-                          {/* Anchor row */}
                           <TableRow className="hover:bg-gray-50/60">
                             <TableCell className="px-6 py-4 align-top text-sm font-medium text-gray-900">
                               {formatVisitDate(anchor.visitDate)}
@@ -739,7 +722,6 @@ export default function PatientDetailPage() {
                             </TableCell>
                           </TableRow>
 
-                          {/* Followups rows */}
                           {followups.map((f) => {
                             const a = visitById.get(anchor.visitId) ?? anchor;
 
@@ -747,7 +729,7 @@ export default function PatientDetailPage() {
                               <TableRow key={f.visitId} className="hover:bg-gray-50/60">
                                 <TableCell className="px-6 py-4 align-top">
                                   <div className="flex items-center gap-3">
-                                    <div className="ml-1 h-8 w-[2px] rounded-full bg-gray-200" />
+                                    <div className="ml-1 h-8 w-0.5 rounded-full bg-gray-200" />
                                     <div className="text-sm text-gray-900">
                                       {formatVisitDate(f.visitDate)}
                                     </div>
@@ -756,7 +738,7 @@ export default function PatientDetailPage() {
 
                                 <TableCell className="px-6 py-4 align-top">
                                   <div className="flex items-start gap-3">
-                                    <div className="ml-1 h-8 w-[2px] rounded-full bg-gray-200" />
+                                    <div className="ml-1 h-8 w-0.5 rounded-full bg-gray-200" />
                                     <div className="min-w-0 flex-1">
                                       {renderReasonCell(f, { kind: 'FOLLOWUP', anchor: a })}
                                     </div>
@@ -813,7 +795,6 @@ export default function PatientDetailPage() {
                       );
                     })}
 
-                    {/* Orphan followups (anchor not present in filtered set) */}
                     {groups.orphanGroups.length
                       ? groups.orphanGroups.map(({ followup }) => {
                           const aId = anchorIdFromVisit(followup);

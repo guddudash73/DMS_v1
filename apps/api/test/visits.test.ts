@@ -1,4 +1,3 @@
-// apps/api/test/visits.test.ts
 import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -53,7 +52,6 @@ describe('Visits API', () => {
       })
       .expect(201);
 
-    // backend returns { visit, tokenPrint }
     const visitId = (createVisitRes.body.visit?.visitId ?? createVisitRes.body.visitId) as string;
     expect(visitId).toBeTruthy();
 

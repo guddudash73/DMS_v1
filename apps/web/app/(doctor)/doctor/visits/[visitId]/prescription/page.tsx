@@ -1,4 +1,3 @@
-// apps/web/app/(doctor)/doctor/visits/[visitId]/prescription/page.tsx
 'use client';
 
 import { useMemo, useState } from 'react';

@@ -1,4 +1,3 @@
-// apps/api/test/rx.test.ts
 import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -44,10 +43,6 @@ async function createVisit(patientId: string, doctorId: string, reason: string) 
   return (res.body.visit ?? res.body) as { visitId: string; visitDate: string; patientId: string };
 }
 
-/**
- * Backend often enforces: QUEUED -> IN_PROGRESS -> DONE
- * so do it in two steps; tolerate 409 if already transitioned.
- */
 async function markVisitDone(visitId: string) {
   const r1 = await request(app)
     .patch(`/visits/${visitId}/status`)
@@ -64,21 +59,12 @@ async function markVisitDone(visitId: string) {
   expect([200, 409]).toContain(r2.status);
 }
 
-/**
- * Discover the actual mount path for the rx router's json-url endpoint.
- * Different apps mount it under different prefixes, and in your case `/rx` is 404.
- *
- * If we still can't find it, we SKIP the test with a clear message.
- */
 async function findRxJsonUrlEndpoint(rxId: string) {
   const candidates = [
-    // no prefix
     `/rx/${rxId}/json-url`,
     `/prescriptions/${rxId}/json-url`,
     `/prescription/${rxId}/json-url`,
     `/rxs/${rxId}/json-url`,
-
-    // versioned /api prefixes
     `/api/rx/${rxId}/json-url`,
     `/api/prescriptions/${rxId}/json-url`,
     `/v1/rx/${rxId}/json-url`,

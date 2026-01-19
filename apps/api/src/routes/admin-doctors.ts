@@ -1,4 +1,3 @@
-// apps/api/src/routes/admin-doctors.ts
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';

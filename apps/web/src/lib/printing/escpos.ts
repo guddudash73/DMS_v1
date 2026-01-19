@@ -1,4 +1,3 @@
-// apps/web/src/lib/printing/escpos.ts
 import type { TokenPrintPayload } from '@dcm/types';
 import { CLINIC_TZ } from '../clinicTime';
 
@@ -45,7 +44,6 @@ function calcAge(dobIso: string, atMs: number): number | null {
   const p = parseDobIso(dobIso);
   if (!p) return null;
 
-  // local date components (good enough for clinical age display)
   const at = new Date(atMs);
   const ay = at.getFullYear();
   const am = at.getMonth() + 1;
@@ -76,10 +74,8 @@ function blankLines(n: number) {
 export function buildTokenEscPos(p: TokenPrintPayload): string {
   const clinicName = (p.clinicName ?? 'SARANGI DENTISTRY').slice(0, 32);
   const clinicPhone = p.clinicPhone ? String(p.clinicPhone).slice(0, 32) : '';
-
   const patientName = String(p.patientName ?? '').slice(0, 32);
   const phoneMasked = maskPhone(p.patientPhone);
-
   const reason = String(p.reason ?? '')
     .replace(/\s+/g, ' ')
     .trim()
@@ -87,31 +83,21 @@ export function buildTokenEscPos(p: TokenPrintPayload): string {
 
   const tag = p.tag ?? 'N';
   const offline = !!p.isOffline;
-
   const visitNo = p.visitNumberForPatient;
-
-  // ✅ stable daily patient number (fallback for safety)
   const patientNo = typeof p.dailyPatientNumber === 'number' ? p.dailyPatientNumber : p.tokenNumber;
-
   const created = fmtDateTime(p.createdAt);
-
   const opdNo = p.opdNo ? String(p.opdNo).slice(0, 32) : '';
   const sdId = p.sdId ? String(p.sdId).slice(0, 32) : '';
-
   const age = p.patientDob ? calcAge(p.patientDob, p.createdAt) : null;
   const sx = sexShort(p.patientGender);
-
   const ageSex = age !== null && sx ? `${age}/${sx}` : age !== null ? `${age}` : sx ? `${sx}` : '';
-
   const init = ESC + '@';
   const alignLeft = ESC + 'a' + '\x00';
   const alignCenter = ESC + 'a' + '\x01';
   const boldOn = ESC + 'E' + '\x01';
   const boldOff = ESC + 'E' + '\x00';
-
   const sizeNormal = GS + '!' + '\x00';
   const sizeBig = GS + '!' + String.fromCharCode((2 << 3) | 1);
-
   const cut = GS + 'V' + 'B' + '\x00';
 
   let out = '';
@@ -148,7 +134,6 @@ export function buildTokenEscPos(p: TokenPrintPayload): string {
   out += LF;
   out += hr();
 
-  // ✅ Medical history checklist (patient ticks manually)
   out += boldOn + `Medical History (tick):` + LF + boldOff;
   out += `[ ] Diabetes` + LF;
   out += `[ ] BP` + LF;
@@ -162,14 +147,11 @@ export function buildTokenEscPos(p: TokenPrintPayload): string {
 
   out += hr();
 
-  // ✅ Procedure section with 6 lines
   out += boldOn + `Procedure:` + LF + boldOff;
   out += blankLines(2);
 
   out += hr();
 
-  // ✅ Bottom notes section: divider + 8 blank lines
-  // out += `------------------` + LF;
   out += blankLines(6);
 
   out += alignCenter;

@@ -326,10 +326,10 @@ export function PrescriptionPreview({
                     </div>
                     <div className="text-[12px] font-semibold text-gray-900">{CONTACT_NUMBER}</div>
 
-                    <div className="mt-1 max-w-[520px] text-[9px] font-medium leading-4  text-gray-700">
+                    <div className="mt-1 max-w-130 text-[9px] font-medium leading-4  text-gray-700">
                       {ADDRESS_ONE_LINE}
                     </div>
-                    <div className="max-w-[520px] text-[9px] font-medium leading-4 text-red-400 uppercase">
+                    <div className="max-w-130 text-[9px] font-medium leading-4 text-red-400 uppercase">
                       {CLINIC_HOURS}
                     </div>
                   </div>

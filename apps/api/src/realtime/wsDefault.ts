@@ -24,10 +24,7 @@ export const handler = async (event: WsEvent): Promise<LambdaResponse> => {
       const msg = JSON.parse(event.body) as { type?: string };
 
       if (msg.type === 'ping') {
-        // keep the connection record fresh (even if disconnect never fires)
         await touchConnectionTtl(connectionId);
-
-        // send pong back over websocket
         const wsClient = getWsClient();
         if (wsClient) {
           await wsClient.send(

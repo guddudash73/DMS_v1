@@ -1,4 +1,3 @@
-// apps\web\components\dashboard\VisitorsRatioChart.tsx
 'use client';
 
 import * as React from 'react';
@@ -87,19 +86,11 @@ function VisitorsTooltip({ active, payload, label }: TooltipProps) {
   if (!active || !payload?.length) return null;
 
   const row = payload?.[0]?.payload ?? {};
-
   const newCount = Number(row.newPatients ?? 0);
   const followupCount = Number(row.followupPatients ?? 0);
-
-  // ✅ Visitors total is ONLY N + F
   const totalVisitors = newCount + followupCount;
-
-  // ✅ Z is a subset of N/F visits (NOT an extra category)
-  // Clamp to prevent negative billed even if backend sends inconsistent counts.
   const zeroBilledRaw = Number(row.zeroBilledVisits ?? 0);
   const zeroBilled = Math.max(0, Math.min(zeroBilledRaw, totalVisitors));
-
-  // ✅ Billed = Visitors(N+F) - ZeroBilled(Z subset)
   const billed = Math.max(0, totalVisitors - zeroBilled);
 
   const items = [
@@ -202,7 +193,6 @@ export default function VisitorsRatioChart({
         date: p.date,
         newPatients: p.newPatients,
         followupPatients: p.followupPatients,
-        // ✅ keep for tooltip breakdown only (Z is subset)
         zeroBilledVisits: p.zeroBilledVisits,
       })) ?? [],
     [series],
@@ -231,7 +221,7 @@ export default function VisitorsRatioChart({
 
         <Select value={timeRange} onValueChange={(value: TimeRange) => setTimeRange(value)}>
           <SelectTrigger
-            className="hidden w-[150px] rounded-full border bg-white text-xs sm:ml-auto sm:flex cursor-pointer"
+            className="hidden w-37.5 rounded-full border bg-white text-xs sm:ml-auto sm:flex cursor-pointer"
             aria-label="Select time range"
           >
             <SelectValue placeholder="Last 3 months" />
@@ -260,10 +250,7 @@ export default function VisitorsRatioChart({
             No visitors data available for the selected range.
           </p>
         ) : (
-          <ChartContainer
-            config={chartConfig}
-            className={cn('aspect-auto h-[180px] 2xl:h-[220px] w-full')}
-          >
+          <ChartContainer config={chartConfig} className={cn('aspect-auto h-45 2xl:h-55 w-full')}>
             <AreaChart
               data={chartData}
               onClick={(e: ChartClickEvent) => {
@@ -300,7 +287,6 @@ export default function VisitorsRatioChart({
 
               <ChartTooltip cursor={false} content={<VisitorsTooltip />} />
 
-              {/* ✅ Only N/F in the chart */}
               <Area
                 dataKey="newPatients"
                 type="natural"

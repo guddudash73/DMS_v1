@@ -27,6 +27,7 @@
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
+    "pdfkit": "^0.17.2",
     "sharp": "^0.34.5",
     "uuid": "^9.0.1",
     "zod": "^4.1.13"
@@ -39,6 +40,7 @@
     "@types/express": "^5.0.5",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.19.1",
+    "@types/pdfkit": "^0.17.4",
     "@types/supertest": "^6.0.3",
     "@types/uuid": "^9.0.8",
     "eslint": "^9.39.0",

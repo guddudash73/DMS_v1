@@ -1,4 +1,3 @@
-// packages/types/src/patient.ts
 import { z } from 'zod';
 
 export const PatientId = z.string().min(1);
@@ -25,23 +24,16 @@ const PatientGenderInput = z.preprocess((val) => {
 
 export const Patient = z.object({
   patientId: PatientId,
-
   sdId: z.string().min(1),
-
   name: z.string().min(1),
   phone: z.string().min(5).max(13),
   dob: z.string().optional(),
   gender: PatientGender.optional(),
-
   address: z.string().min(1).max(500).optional(),
-
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
-
   isDeleted: z.boolean().default(false),
   deletedAt: z.number().int().nonnegative().optional(),
-
-  // ✅ NEW: Avoid patient flag
   isAvoided: z.boolean().optional().default(false),
   avoidedAt: z.number().int().nonnegative().optional(),
   unavoidedAt: z.number().int().nonnegative().optional(),

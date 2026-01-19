@@ -31,7 +31,7 @@ export function XrayViewerModal({ xrayId, open, onOpenChange }: Props) {
         </DialogHeader>
 
         <div className="relative w-full overflow-hidden rounded-xl border bg-white">
-          <div className="flex min-h-[420px] items-center justify-center p-4">
+          <div className="flex min-h-105 items-center justify-center p-4">
             {isFetching && <div className="text-sm text-gray-500">Loading…</div>}
             {isError && <div className="text-sm text-red-600">Failed to load image.</div>}
             {data?.url && (

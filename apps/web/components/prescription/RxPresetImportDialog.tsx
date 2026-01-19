@@ -4,7 +4,13 @@ import * as React from 'react';
 import type { RxLineType, PrescriptionPreset, RxPresetFilter } from '@dcm/types';
 import { useGetRxPresetsQuery } from '@/src/store/api';
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -24,9 +30,7 @@ type Props = {
   onOpenChange: (open: boolean) => void;
 
   disabled?: boolean;
-
   append?: boolean;
-
   existingCount?: number;
 
   onImport: (lines: RxLineType[]) => void;
@@ -119,14 +123,7 @@ function normalizePresetLines(lines: unknown[]): RxLineType[] {
     .filter((x): x is RxLineType => Boolean(x));
 }
 
-export function RxPresetImportDialog({
-  open,
-  onOpenChange,
-  disabled,
-  append = true,
-  existingCount,
-  onImport,
-}: Props) {
+export function RxPresetImportDialog({ open, onOpenChange, disabled, onImport }: Props) {
   const [query, setQuery] = React.useState('');
   const [debouncedQuery, setDebouncedQuery] = React.useState('');
 
@@ -172,7 +169,12 @@ export function RxPresetImportDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="w-[95vw] max-w-[1600px] rounded-3xl p-0 overflow-hidden">
+      <DialogContent
+        className={[
+          'w-[96vw] max-w-225 sm:max-w-250 lg:max-w-280 xl:max-w-312.5 2xl:max-w-340',
+          'rounded-3xl p-0 overflow-hidden',
+        ].join(' ')}
+      >
         <div className="flex h-[78vh] flex-col">
           <DialogHeader className="px-6 pt-6 pb-4 border-b bg-linear-to-b from-white to-gray-50">
             <div className="flex items-start justify-between gap-4">
@@ -181,25 +183,15 @@ export function RxPresetImportDialog({
                   <Sparkles className="h-5 w-5 text-gray-800" />
                   Import Rx Preset
                 </DialogTitle>
+
+                <DialogDescription className="sr-only">
+                  Search and select a prescription preset, preview its medicines, then import them
+                  into the current prescription.
+                </DialogDescription>
+
                 <div className="mt-1 text-xs text-gray-500">
                   Search and select a preset, then import medicines into this prescription.
                 </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {typeof existingCount === 'number' ? (
-                  <Badge variant="outline" className="rounded-full">
-                    Current: {existingCount}
-                  </Badge>
-                ) : null}
-                <Badge
-                  variant="outline"
-                  className={`rounded-full ${
-                    append ? 'bg-emerald-50 border-emerald-200 text-emerald-800' : ''
-                  }`}
-                >
-                  {append ? 'Append' : 'Replace'}
-                </Badge>
               </div>
             </div>
 
@@ -215,7 +207,7 @@ export function RxPresetImportDialog({
                 />
               </div>
 
-              <div className="w-full sm:w-[220px]">
+              <div className="w-full sm:w-60">
                 <Select value={filter} onValueChange={(v) => setFilter(v as RxPresetFilter)}>
                   <SelectTrigger className="h-11 rounded-2xl">
                     <SelectValue placeholder="Filter" />
@@ -296,7 +288,7 @@ export function RxPresetImportDialog({
               </div>
             </div>
 
-            <div className="min-h-0 w-full lg:w-[42%] bg-gray-50">
+            <div className="min-h-0 w-full lg:w-[60%] bg-gray-50">
               <div className="px-6 py-3 text-xs font-semibold text-gray-600">Preview</div>
 
               <div className="min-h-0 overflow-y-auto px-6 pb-6">

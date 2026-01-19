@@ -1,4 +1,3 @@
-// apps/api/src/routes/admin-users.ts
 import { Router } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';
@@ -18,7 +17,6 @@ const r = Router();
 
 r.use(requireRole('ADMIN'));
 
-// Only allow non-doctor users here; doctors are managed via /admin/doctors
 const SAFE_ROLES: Role[] = ['RECEPTION', 'VIEWER', 'ADMIN'];
 
 r.get('/', async (req, res, next) => {
@@ -63,7 +61,6 @@ r.post('/', validate(AdminCreateUserRequest), async (req, res, next) => {
   try {
     const input = req.body as AdminCreateUserRequest;
 
-    // Runtime safety: even if schema is changed later, keep backend safe.
     if (!SAFE_ROLES.includes(input.role as Role)) {
       return res.status(400).json({
         error: 'INVALID_ROLE',
@@ -120,7 +117,6 @@ r.patch('/:userId', validate(AdminUpdateUserRequest), async (req, res, next) => 
 
     const body = req.body as AdminUpdateUserRequest;
 
-    // If role is provided, it must be one of SAFE_ROLES (doctors handled elsewhere)
     if (body.role !== undefined && !SAFE_ROLES.includes(body.role as Role)) {
       return res.status(400).json({
         error: 'INVALID_ROLE',

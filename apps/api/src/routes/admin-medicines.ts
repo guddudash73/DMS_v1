@@ -1,4 +1,3 @@
-// apps/api/src/routes/admin-medicines.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {

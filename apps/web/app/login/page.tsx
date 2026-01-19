@@ -52,10 +52,10 @@ export default function LoginPage() {
       const response = (await login(values).unwrap()) as LoginResponse;
 
       dispatch(setCredentials(response));
+      dispatch((await import('@/src/store/api')).apiSlice.util.resetApiState());
       toast.success('Logged in successfully.');
 
       const target = from && isSafeInternalPath(from) ? from : defaultRouteByRole(response.role);
-
       router.replace(target);
     } catch (err) {
       const msg = 'Invalid credentials.';
@@ -76,18 +76,20 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#f5f7f8] px-3 py-8 md:px-4">
-      <div className="relative flex w-full max-w-4xl md:max-h-[560px] flex-col overflow-hidden rounded-2xl bg-white shadow-sm md:flex-row">
+      <div className="relative flex w-full max-w-4xl md:max-h-140 flex-col overflow-hidden rounded-2xl bg-white shadow-sm md:flex-row">
         <Card className="border-0 w-full md:w-[45%] rounded-none flex-col">
           <CardHeader className="px-8 pt-8 md:px-12 md:pt-10">
             <div className="mb-2 flex items-center gap-3">
-              <Image
-                src="/sarangi-logo.png"
-                alt="Sarangi Dentistry"
-                width={160}
-                height={60}
-                className="h-auto w-40"
-                priority
-              />
+              <div className="relative h-15 w-40">
+                <Image
+                  src="/sarangi-logo.png"
+                  alt="Sarangi Dentistry"
+                  fill
+                  sizes="160px"
+                  className="object-contain"
+                  priority
+                />
+              </div>
             </div>
 
             <div className="space-y-1">
@@ -166,8 +168,8 @@ export default function LoginPage() {
             alt="Sarangi Dentistry"
             fill
             priority
-            sizes="(min-width: 1024px) 45vw, 100vw"
-            className="h-full w-full object-cover"
+            sizes="(min-width: 1024px) 55vw, 100vw"
+            className="object-cover"
           />
         </div>
       </div>

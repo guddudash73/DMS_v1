@@ -1,4 +1,3 @@
-// apps/web/app/(admin)/admin/layout.tsx
 'use client';
 
 import { useEffect, useMemo } from 'react';
@@ -22,13 +21,11 @@ function getStatus(auth: unknown): AuthStatus | undefined {
 function extractRole(auth: unknown): Role | undefined {
   if (!isRecord(auth)) return undefined;
 
-  // single role: auth.user.role OR auth.role
   const user = isRecord(auth.user) ? auth.user : undefined;
 
   const single = (user?.role ?? auth.role) as unknown;
   if (single === 'RECEPTION' || single === 'DOCTOR' || single === 'ADMIN') return single;
 
-  // roles array: auth.user.roles OR auth.roles
   const roles = (user?.roles ?? auth.roles) as unknown;
   if (Array.isArray(roles)) {
     if (roles.includes('ADMIN')) return 'ADMIN';

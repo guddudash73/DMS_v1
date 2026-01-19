@@ -1,4 +1,3 @@
-// apps/web/components/visits/RegisterVisitModal.tsx
 'use client';
 
 import * as React from 'react';
@@ -16,7 +15,7 @@ import {
   useGetPatientByIdQuery,
   useGetPatientVisitsQuery,
   useCreateVisitMutation,
-  useUnavoidPatientMutation, // ✅ NEW
+  useUnavoidPatientMutation,
 } from '@/src/store/api';
 import { loadPrintSettings } from '@/src/lib/printing/settings';
 import { buildTokenEscPos } from '@/src/lib/printing/escpos';
@@ -67,6 +66,14 @@ function safeVisitLabel(v: VisitSummaryItem) {
   return `${date} • ${opd}`;
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+function isAvoidedFlag(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return value['isAvoided'] === true;
+}
+
 export default function RegisterVisitModal({ patientId, onClose }: Props) {
   const auth = useAuth();
   const router = useRouter();
@@ -74,7 +81,6 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
   const [mounted, setMounted] = React.useState(false);
   const [closing, setClosing] = React.useState(false);
 
-  // ✅ NEW: avoid warning state
   const [avoidWarningOpen, setAvoidWarningOpen] = React.useState(false);
   const pendingSubmitRef = React.useRef<VisitCreate | null>(null);
 
@@ -108,7 +114,7 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
   });
 
   const [createVisit, { isLoading }] = useCreateVisitMutation();
-  const [unavoidPatient, { isLoading: unavoidLoading }] = useUnavoidPatientMutation(); // ✅ NEW
+  const [unavoidPatient, { isLoading: unavoidLoading }] = useUnavoidPatientMutation();
 
   const {
     register,
@@ -202,8 +208,7 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
   };
 
   const onSubmit = async (values: VisitCreate) => {
-    // ✅ If patient is avoided → show warning popup first
-    const isAvoided = (patient as any)?.isAvoided === true;
+    const isAvoided = isAvoidedFlag(patient);
     if (isAvoided) {
       pendingSubmitRef.current = values;
       setAvoidWarningOpen(true);
@@ -392,10 +397,9 @@ export default function RegisterVisitModal({ patientId, onClose }: Props) {
           </CardContent>
         </Card>
 
-        {/* ✅ Avoid warning popup */}
         {avoidWarningOpen ? (
           <div
-            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 px-4"
+            className="fixed inset-0 z-60 flex items-center justify-center bg-black/40 px-4"
             role="dialog"
             aria-modal="true"
             onMouseDown={(e) => {

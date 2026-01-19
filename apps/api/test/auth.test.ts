@@ -90,7 +90,6 @@ describe('Auth flows', () => {
     const refresh1 = await agent.post('/auth/refresh').send({}).expect(200);
     expect(refresh1.body.tokens?.accessToken).toBeDefined();
 
-    // Your current implementation allows repeated refresh (no rotation/reuse rejection)
     const refresh2 = await agent.post('/auth/refresh').send({}).expect(200);
     expect(refresh2.body.tokens?.accessToken).toBeDefined();
   });

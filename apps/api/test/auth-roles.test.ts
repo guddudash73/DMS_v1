@@ -1,4 +1,3 @@
-// apps/api/test/auth-roles.test.ts
 import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import bcrypt from 'bcrypt';
@@ -63,7 +62,6 @@ async function createPatient(token: string) {
     })
     .expect(201);
 
-  // patients.create returns full patient object (includes patientId)
   const patientId = res.body.patientId as string;
   registerPatient(patientId);
   return patientId;
@@ -80,7 +78,6 @@ async function createVisit(token: string, patientId: string, doctorId: string) {
     })
     .expect(201);
 
-  // visits.create returns { visit, tokenPrint }
   return res.body.visit.visitId as string;
 }
 
@@ -103,13 +100,12 @@ describe('Auth roles', () => {
 
     expect([200, 400]).toContain(queueRes.status);
 
-    // GET /visits/:visitId/rx is allowed for RECEPTION (server requires DOCTOR/ADMIN/RECEPTION)
     const rxGetRes = await request(app)
       .get(`/visits/${visitId}/rx`)
       .set('Authorization', `Bearer ${receptionToken}`)
       .expect(200);
 
-    expect(rxGetRes.body).toHaveProperty('rx'); // usually null in fresh visit
+    expect(rxGetRes.body).toHaveProperty('rx');
 
     const reportsRes = await request(app)
       .get('/reports/daily')
@@ -163,16 +159,14 @@ describe('Auth roles', () => {
     const patientId = await createPatient(receptionToken);
     const visitId = await createVisit(receptionToken, patientId, 'DOCTOR#AUTH_RX');
 
-    // Doctor: should PASS auth, then fail validation (400), without touching S3.
     const doctorRes = await request(app)
       .post(`/visits/${visitId}/rx`)
       .set('Authorization', `Bearer ${doctorToken}`)
-      .send({}); // invalid: must include lines or toothDetails
+      .send({});
 
     expect(doctorRes.status).toBe(400);
     expect(doctorRes.body.error).toBe('VALIDATION_ERROR');
 
-    // Reception: blocked by role middleware before validation
     const forbiddenRes = await request(app)
       .post(`/visits/${visitId}/rx`)
       .set('Authorization', `Bearer ${receptionToken}`)

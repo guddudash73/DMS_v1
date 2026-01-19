@@ -24,7 +24,6 @@ const JWT_ACCESS_SECRET = requireString('JWT_ACCESS_SECRET', env.JWT_ACCESS_SECR
 const ACCESS_TOKEN_TTL_SEC = requireNumber('ACCESS_TOKEN_TTL_SEC', env.ACCESS_TOKEN_TTL_SEC);
 
 function signAccessToken(userId: string, role: string) {
-  // Common JWT shapes: { sub, role } and sometimes { userId } too
   const payload = { role, userId };
 
   return jwt.sign(payload, JWT_ACCESS_SECRET, {

@@ -53,6 +53,13 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
 
+// Lint-only fix: avoid `any` while safely extracting a message string.
+function getErrorMessage(value: unknown): string | null {
+  if (!isRecord(value)) return null;
+  const msg = value['message'];
+  return typeof msg === 'string' && msg.trim().length > 0 ? msg : null;
+}
+
 function parseISODateToLocalDate(iso: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
   const [y, m, d] = iso.split('-').map((x) => Number(x));
@@ -197,7 +204,6 @@ export default function RemindersPage() {
 
     void (async () => {
       try {
-        // ✅ avoid TS2352 by intentionally going through `unknown` first
         const created = (await createFollowup({
           visitId,
           followUpDate: date,
@@ -224,12 +230,9 @@ export default function RemindersPage() {
         router.replace(qs ? `/reminders?${qs}` : '/reminders');
       } catch (err: unknown) {
         const e = err as ApiError;
-        const msg =
-          (isRecord(e.data) &&
-            typeof (e.data as any).message === 'string' &&
-            (e.data as any).message) ||
-          (isRecord(err) && typeof (err as any).message === 'string' && (err as any).message) ||
-          'Failed to add follow-up';
+
+        const msg = getErrorMessage(e.data) ?? getErrorMessage(err) ?? 'Failed to add follow-up';
+
         toast.error(msg);
       }
     })();
@@ -259,12 +262,7 @@ export default function RemindersPage() {
       });
 
       const e = err as ApiError;
-      const msg =
-        (isRecord(e.data) &&
-          typeof (e.data as any).message === 'string' &&
-          (e.data as any).message) ||
-        (isRecord(err) && typeof (err as any).message === 'string' && (err as any).message) ||
-        'Failed to update';
+      const msg = getErrorMessage(e.data) ?? getErrorMessage(err) ?? 'Failed to update';
       toast.error(msg);
     }
   };
@@ -293,12 +291,7 @@ export default function RemindersPage() {
       });
 
       const e = err as ApiError;
-      const msg =
-        (isRecord(e.data) &&
-          typeof (e.data as any).message === 'string' &&
-          (e.data as any).message) ||
-        (isRecord(err) && typeof (err as any).message === 'string' && (err as any).message) ||
-        'Failed to update';
+      const msg = getErrorMessage(e.data) ?? getErrorMessage(err) ?? 'Failed to update';
       toast.error(msg);
     }
   };
@@ -335,7 +328,7 @@ export default function RemindersPage() {
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-[220px] justify-start gap-2 rounded-xl cursor-pointer"
+                  className="w-55 justify-start gap-2 rounded-xl cursor-pointer"
                   disabled={!canUseApi}
                 >
                   <CalendarIcon className="h-4 w-4" />

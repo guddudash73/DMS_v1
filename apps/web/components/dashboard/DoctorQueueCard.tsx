@@ -1,4 +1,3 @@
-// apps/web/components/dashboard/DoctorQueueCard.tsx
 'use client';
 
 import * as React from 'react';
@@ -52,11 +51,10 @@ function getVisitLabel(v: PatientQueueItem): string {
   return name && name.length > 0 ? name : `Patient: ${v.patientId}`;
 }
 
-/** ✅ Smaller offline badge */
 function OfflineBadge() {
   return (
     <span
-      className="ml-1.5 inline-flex items-center rounded border border-gray-200 bg-gray-100 px-1.5 py-[1px] text-[9px] font-medium leading-none text-gray-600"
+      className="ml-1.5 inline-flex items-center rounded border border-gray-200 bg-gray-100 px-1.5 py-px text-[9px] font-medium leading-none text-gray-600"
       title="Offline visit"
     >
       OFF
@@ -85,7 +83,7 @@ function QueueItemRow({
       title="Open visit"
     >
       <span className="min-w-0 truncate font-medium">
-        <span className="mr-2 inline-flex h-6 min-w-[44px] items-center justify-center rounded-lg border bg-gray-50 px-2 text-[11px] font-semibold text-gray-700">
+        <span className="mr-2 inline-flex h-6 min-w-11 items-center justify-center rounded-lg border bg-gray-50 px-2 text-[11px] font-semibold text-gray-700">
           {dailyPatientNumber ? `#${dailyPatientNumber}` : '—'}
         </span>
 
@@ -136,7 +134,6 @@ export default function DoctorQueueCard({ onViewAll }: ClinicQueueCardProps) {
   const loading = queueQ.isLoading || queueQ.isFetching;
   const error = !!queueQ.isError;
 
-  // ✅ Reception route
   const openClinicVisit = (visitId: string) => router.push(`/visits/${visitId}`);
 
   return (

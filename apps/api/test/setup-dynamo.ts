@@ -1,4 +1,3 @@
-// apps/api/test/setup-dynamo.ts
 import { beforeAll } from 'vitest';
 import { ensureDynamoTable } from '../src/dev/ensureDynamoTable';
 import { seedTestUsers } from './helpers/testUsers';

@@ -1,4 +1,3 @@
-// apps/api/src/routes/xray.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { VisitId, XrayId, XrayContentType } from '@dcm/types';
@@ -12,10 +11,10 @@ import { getEnv } from '../config/env';
 import { getPresignedUploadUrl, getPresignedDownloadUrl, s3Client } from '../lib/s3';
 import { DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { patientRepository } from '../repositories/patientRepository';
-import { randomUUID } from 'node:crypto'; // ✅ replace uuid package
+import { randomUUID } from 'node:crypto';
 import { logAudit, logError } from '../lib/logger';
 import { sendZodValidationError } from '../lib/validation';
-import { requireRole } from '../middlewares/auth'; // ✅ ADD
+import { requireRole } from '../middlewares/auth';
 
 const router = express.Router();
 

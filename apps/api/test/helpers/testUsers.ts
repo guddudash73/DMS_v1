@@ -1,8 +1,6 @@
-// apps/api/test/helpers/testUsers.ts
 import bcrypt from 'bcrypt';
 import { userRepository } from '../../src/repositories/userRepository';
 
-// Stable test users used by token helpers
 export const TEST_USERS = {
   admin: {
     email: 'admin@test.local',
@@ -24,7 +22,6 @@ export const TEST_USERS = {
   },
 };
 
-// Will be filled after seeding
 export const TEST_USER_IDS: Record<keyof typeof TEST_USERS, string> = {
   admin: '',
   doctor: '',
@@ -43,7 +40,6 @@ function isDynamoConditionalFailure(err: unknown): boolean {
 async function ensureUser(key: keyof typeof TEST_USERS) {
   const u = TEST_USERS[key];
 
-  // First try: normal read
   const existing = await userRepository.getByEmail(u.email);
   if (existing) {
     TEST_USER_IDS[key] = existing.userId;
@@ -64,11 +60,10 @@ async function ensureUser(key: keyof typeof TEST_USERS) {
     TEST_USER_IDS[key] = created.userId;
     return;
   } catch (err) {
-    // Another worker likely created it after our read
     if (!isDynamoConditionalFailure(err)) throw err;
 
     const after = await userRepository.getByEmail(u.email);
-    if (!after) throw err; // if still missing, bubble original error
+    if (!after) throw err;
 
     TEST_USER_IDS[key] = after.userId;
     return;
@@ -76,6 +71,5 @@ async function ensureUser(key: keyof typeof TEST_USERS) {
 }
 
 export async function seedTestUsers() {
-  // Run in parallel; race-safe due to conditional-failure fallback
   await Promise.all([ensureUser('admin'), ensureUser('doctor'), ensureUser('reception')]);
 }

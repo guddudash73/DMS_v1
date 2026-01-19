@@ -1,4 +1,3 @@
-// apps/api/test/xray-flow.test.ts
 import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -56,7 +55,6 @@ afterEach(async () => {
       })
       .expect(201);
 
-    // backend returns { visit, tokenPrint }
     return (res.body.visit ?? res.body) as {
       visitId: string;
       visitDate: string;
@@ -111,7 +109,6 @@ afterEach(async () => {
         size: 2048,
         takenAt,
         takenByUserId: 'DOCTOR#XRAY_FLOW',
-        // IMPORTANT: backend requires contentKey and validates it
         contentKey: key,
       })
       .expect(201);

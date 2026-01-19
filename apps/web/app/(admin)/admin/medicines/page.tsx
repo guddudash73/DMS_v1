@@ -1,4 +1,3 @@
-// apps/web/app/(admin)/admin/medicines/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -343,7 +342,6 @@ export default function AdminMedicinesPage() {
         </Button>
       </div>
 
-      {/* Add dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-xl rounded-2xl">
           <DialogHeader>
@@ -438,7 +436,6 @@ export default function AdminMedicinesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-xl rounded-2xl">
           <DialogHeader>

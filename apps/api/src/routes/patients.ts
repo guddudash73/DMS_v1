@@ -1,4 +1,3 @@
-// apps/api/src/routes/patients.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { PatientCreate, PatientUpdate, PatientSearchQuery, PatientId } from '@dcm/types';
 import { patientRepository, DuplicatePatientError } from '../repositories/patientRepository';
@@ -21,8 +20,6 @@ const asyncHandler =
     void fn(req, res, next).catch(next);
 
 const todayIso = (): string => clinicDateISO();
-
-/* ----------------------------- existing routes unchanged ----------------------------- */
 
 router.post(
   '/',
@@ -216,8 +213,6 @@ router.patch(
   }),
 );
 
-/* ----------------------------- ✅ NEW: avoid / unavoid ----------------------------- */
-
 router.post(
   '/:patientId/avoid',
   asyncHandler(async (req, res) => {
@@ -285,8 +280,6 @@ router.post(
     return res.status(200).json(updated);
   }),
 );
-
-/* ----------------------------- existing delete/restore/visits unchanged ----------------------------- */
 
 router.delete(
   '/:patientId',

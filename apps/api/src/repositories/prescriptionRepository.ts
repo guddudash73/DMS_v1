@@ -1,4 +1,3 @@
-// apps/api/src/repositories/prescriptionRepository.ts
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -41,17 +40,9 @@ const getStringProp = (v: unknown, key: string): string | undefined =>
 const getNumberProp = (v: unknown, key: string): number | undefined =>
   isObject(v) && typeof v[key] === 'number' ? (v[key] as number) : undefined;
 
-/**
- * ✅ Idempotent Rx IDs to prevent duplicates under concurrency:
- * - v1: `${visitId}#v1`
- * - v2: `${visitId}#v2`
- *
- * This keeps your existing API behavior while eliminating duplicate v2 rows when two requests race.
- */
 const rxIdFor = (visitId: string, version: 1 | 2) => `${visitId}#v${version}` as RxId;
 
 export interface PrescriptionRepository {
-  /** Option 2: draft stays version=1 and is overwritten (stable jsonKey) */
   upsertDraftForVisit(params: {
     visit: Visit;
     lines: RxLineType[];
@@ -59,8 +50,6 @@ export interface PrescriptionRepository {
     toothDetails?: Prescription['toothDetails'];
     doctorNotes?: Prescription['doctorNotes'];
   }): Promise<Prescription>;
-
-  /** Option 2: create revision ONCE (version=2) and then overwrite it */
   ensureRevisionForVisit(params: { visit: Visit; jsonKey: string }): Promise<Prescription>;
 
   updateById(params: {
@@ -79,11 +68,7 @@ export interface PrescriptionRepository {
   getById(rxId: RxId): Promise<Prescription | null>;
   listByVisit(visitId: string): Promise<Prescription[]>;
   getCurrentForVisit(visitId: string): Promise<Prescription | null>;
-
-  /** NEW: fetch a specific version (for dropdown selection) */
   getByVisitAndVersion(visitId: string, version: number): Promise<Prescription | null>;
-
-  /** NEW: used by visits route to decide draft vs revision */
   getCurrentMetaForVisit(
     visitId: string,
   ): Promise<{ currentRxId: string | null; currentRxVersion: number | null }>;
@@ -130,7 +115,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
   }
 
   async getByVisitAndVersion(visitId: string, version: number): Promise<Prescription | null> {
-    // list size should remain small; this avoids needing extra indexes
     const all = await this.listByVisit(visitId);
     return all.find((p) => p.version === version) ?? null;
   }
@@ -164,11 +148,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     doctorNotes?: Prescription['doctorNotes'];
   }): Promise<Prescription> {
     const { visit, lines, jsonKey, toothDetails, doctorNotes } = params;
-
-    // ✅ deterministic v1 id prevents duplicates
     const rxId = rxIdFor(visit.visitId, 1);
-
-    // if it already exists, overwrite via update
     const existing = await this.getById(rxId);
     if (existing) {
       const updated = await this.updateById({
@@ -180,8 +160,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       });
       return updated ?? existing;
     }
-
-    // ✅ create FIRST version only (idempotent with conditional puts)
     const now = Date.now();
     const version = 1 as const;
 
@@ -256,7 +234,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       );
       return base;
     } catch (err) {
-      // If a race created it first, return the winner
       const raced = await this.getById(rxId);
       if (raced) return raced;
       throw err;
@@ -266,17 +243,12 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
   async ensureRevisionForVisit(params: { visit: Visit; jsonKey: string }): Promise<Prescription> {
     const { visit, jsonKey } = params;
 
-    // ✅ deterministic v2 id prevents duplicates
     const rxId = rxIdFor(visit.visitId, 2);
-
-    // If already exists, return it
     const already = await this.getById(rxId);
     if (already) return already;
 
     const now = Date.now();
     const version = 2 as const;
-
-    // copy from v1 if present (prefer version 1)
     const v1 = await this.getById(rxIdFor(visit.visitId, 1));
 
     const base: Prescription = {
@@ -350,7 +322,6 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       );
       return base;
     } catch (err) {
-      // If a race created it first, return the winner
       const raced = await this.getById(rxId);
       if (raced) return raced;
       throw err;

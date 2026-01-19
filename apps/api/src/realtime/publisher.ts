@@ -3,9 +3,6 @@ import { listConnections, removeConnection } from './connectionStore';
 import { logError, logInfo } from '../lib/logger';
 import { getWsClient } from './wsClient';
 
-/**
- * ✅ Clinic-wide queue updated event (no doctorId)
- */
 export type ClinicQueueUpdatedEvent = {
   visitDate: string;
 };

@@ -71,15 +71,9 @@ export function XrayPrintSheet(props: {
   return createPortal(
     <div className={`xray-print-root ${open ? '' : 'hidden'} print:block`}>
       <style>{`
-        /* Default: never show on screen */
         .xray-print-root { display: none; }
 
         @media print {
-          /*
-            ✅ IMPORTANT:
-            Only apply "hide everything else" when body has print-xray class.
-            This prevents conflicts with Rx/Bill printing.
-          */
           body.print-xray > *:not(.xray-print-root) { display: none !important; }
           body.print-xray .xray-print-root { display: block !important; }
 

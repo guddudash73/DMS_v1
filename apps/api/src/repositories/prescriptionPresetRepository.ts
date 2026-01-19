@@ -1,4 +1,3 @@
-// apps/api/src/repositories/prescriptionPresetRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
@@ -10,7 +9,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 import {
-  PrescriptionPreset as PrescriptionPresetSchema, // ✅ zod schema
+  PrescriptionPreset as PrescriptionPresetSchema,
   type AdminRxPresetSearchQuery,
   type PrescriptionPreset,
   type PrescriptionPresetId,

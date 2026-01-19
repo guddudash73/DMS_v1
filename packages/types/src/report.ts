@@ -17,10 +17,8 @@ export const DailyReport = z.object({
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   visitCountsByStatus: DailyVisitStatusCounts,
   totalRevenue: z.number().nonnegative(),
-
   onlineReceivedTotal: z.number().nonnegative(),
   offlineReceivedTotal: z.number().nonnegative(),
-
   procedureCounts: z.record(z.string(), z.number().int().nonnegative()),
 });
 export type DailyReport = z.infer<typeof DailyReport>;
@@ -55,14 +53,16 @@ export const ClinicVisitBreakdownItem = z.object({
   visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   status: VisitStatus,
   tag: VisitTag.optional(),
-
   zeroBilled: z.boolean().optional(),
-
   reason: z.string().optional(),
   billingAmount: z.number().nonnegative().optional(),
+  billNo: z.string().min(1).optional(),
+  receivedOnline: z.boolean().optional(),
+  receivedOffline: z.boolean().optional(),
+  checkedOut: z.boolean().optional(),
+  checkedOutAt: z.number().int().nonnegative().optional(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
-
   patientId: z.string().min(1),
   patientName: z.string().min(1),
   patientPhone: z.string().optional(),
@@ -100,3 +100,46 @@ export const RecentCompletedResponse = z.object({
   items: z.array(RecentCompletedItem),
 });
 export type RecentCompletedResponse = z.infer<typeof RecentCompletedResponse>;
+
+export const PaymentMode = z.enum(['ONLINE', 'OFFLINE', 'OTHER']);
+export type PaymentMode = z.infer<typeof PaymentMode>;
+
+export const DailyPaymentsBreakdownQuery = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+export type DailyPaymentsBreakdownQuery = z.infer<typeof DailyPaymentsBreakdownQuery>;
+
+export const PaymentBreakdownItem = z.object({
+  visitId: z.string().min(1),
+  visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  status: VisitStatus,
+  tag: VisitTag.optional(),
+  zeroBilled: z.boolean().optional(),
+  reason: z.string().optional(),
+  billingAmount: z.number().nonnegative(),
+  paymentMode: PaymentMode,
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+  patientId: z.string().min(1),
+  patientName: z.string().min(1),
+  patientPhone: z.string().optional(),
+  patientGender: z.string().optional(),
+});
+export type PaymentBreakdownItem = z.infer<typeof PaymentBreakdownItem>;
+
+export const DailyPaymentsBreakdownResponse = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  totals: z.object({
+    total: z.number().nonnegative(),
+    online: z.number().nonnegative(),
+    offline: z.number().nonnegative(),
+    other: z.number().nonnegative(),
+  }),
+  items: z.array(PaymentBreakdownItem),
+});
+export type DailyPaymentsBreakdownResponse = z.infer<typeof DailyPaymentsBreakdownResponse>;
+
+export const DailyReportPdfQuery = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+});
+export type DailyReportPdfQuery = z.infer<typeof DailyReportPdfQuery>;

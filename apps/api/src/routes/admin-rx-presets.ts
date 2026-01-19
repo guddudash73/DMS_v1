@@ -1,4 +1,3 @@
-// apps/api/src/routes/admin-rx-presets.ts
 import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import { validate } from '../middlewares/zod';

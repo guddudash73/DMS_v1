@@ -1,4 +1,3 @@
-// apps/api/src/config/env.ts
 import { parseEnv, type Env } from '@dcm/config';
 
 let cached: Env | undefined;

@@ -1,4 +1,3 @@
-// apps/web/app/(doctor)/doctor/rx-presets/[id]/view/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -24,20 +23,15 @@ type RxLineLike = {
   drug?: unknown;
   name?: unknown;
   title?: unknown;
-
   dose?: unknown;
   strength?: unknown;
   amount?: unknown;
-
   frequency?: unknown;
   freq?: unknown;
-
   duration?: unknown;
   days?: unknown;
   durationDays?: unknown;
-
   route?: unknown;
-
   notes?: unknown;
   note?: unknown;
   instructions?: unknown;
@@ -177,7 +171,6 @@ export default function DoctorRxPresetViewPage() {
   return (
     <div className="p-6">
       <div className="mx-auto w-full max-w-4xl 2xl:px-6">
-        {/* Top bar */}
         <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div className="flex items-center gap-3">
             <Button
@@ -214,7 +207,6 @@ export default function DoctorRxPresetViewPage() {
           </div>
         </div>
 
-        {/* Header card */}
         <Card className="rounded-3xl border bg-white p-0">
           <div className="border-b px-6 py-5">
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -252,7 +244,6 @@ export default function DoctorRxPresetViewPage() {
                 </div>
               </div>
 
-              {/* subtle right-side hint */}
               <div className="rounded-2xl bg-gray-50 px-4 py-3 text-xs text-gray-700">
                 <div className="font-semibold text-gray-900">Tip</div>
                 <div className="mt-1 text-gray-600">
@@ -263,7 +254,6 @@ export default function DoctorRxPresetViewPage() {
             </div>
           </div>
 
-          {/* Body */}
           {error ? (
             <div className="px-6 py-10">
               <div className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 p-4">
@@ -305,7 +295,6 @@ export default function DoctorRxPresetViewPage() {
                       key={idx}
                       className="group relative overflow-hidden rounded-3xl border bg-white p-4 shadow-sm"
                     >
-                      {/* left accent */}
                       <div className="absolute left-0 top-0 h-full w-1 bg-gray-900/10" />
 
                       <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
@@ -327,7 +316,6 @@ export default function DoctorRxPresetViewPage() {
 
                           <div className="mt-2 text-sm text-gray-700">{headline}</div>
 
-                          {/* compact metadata row */}
                           <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-gray-600">
                             {asString(freq).trim() ? (
                               <span className="inline-flex items-center gap-1 rounded-full bg-gray-50 px-2 py-1">
@@ -362,7 +350,6 @@ export default function DoctorRxPresetViewPage() {
                 })}
               </div>
 
-              {/* Footer */}
               <div className="mt-6 flex flex-col gap-2 rounded-3xl bg-gray-50 p-5 text-xs text-gray-700 md:flex-row md:items-center md:justify-between">
                 <div className="text-gray-600">Want to use this preset as a starting point?</div>
                 <div className="flex flex-wrap items-center gap-2">

@@ -1,4 +1,3 @@
-// apps/api/src/middlewares/securityHeaders.ts
 import type { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 
@@ -22,22 +21,18 @@ export const createSecurityMiddleware = (env: EnvLike) => {
       'Idempotency-Key',
       'idempotency-key',
     ],
-    credentials: true, // ✅ REQUIRED because frontend uses credentials: 'include'
+    credentials: true,
   }) as unknown as CorsMiddleware;
 
   return (req: Request, res: Response, next: NextFunction) => {
     corsRaw(req, res, (err?: unknown) => {
       if (err) return next(err);
 
-      // Security headers
       res.header('X-Content-Type-Options', 'nosniff');
       res.header('X-Frame-Options', 'DENY');
       res.header('Referrer-Policy', 'no-referrer');
       res.header('X-XSS-Protection', '0');
 
-      // ✅ IMPORTANT:
-      // For preflight requests, end the response here.
-      // Otherwise some stacks can continue to other middleware and break CORS.
       if (req.method === 'OPTIONS') {
         return res.sendStatus(204);
       }

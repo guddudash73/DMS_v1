@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/visits/[visitId]/checkout/printing/prescription/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -98,7 +97,6 @@ function looksLikeDoctorIdLabel(name?: string) {
   return false;
 }
 
-// ✅ minimal runtime guard so we can safely pass ToothDetail[]
 function isToothDetail(v: unknown): v is ToothDetail {
   if (!isRecord(v)) return false;
   const pos = v.position;
@@ -205,10 +203,6 @@ export default function PrescriptionPrintPreviewPage() {
 
   const [printWithHistory, setPrintWithHistory] = React.useState(true);
 
-  /**
-   * ✅ Build a chain that is limited to visits up to the selected visitId (inclusive).
-   * So if there are later followups, they won't appear when viewing/printing an earlier visit.
-   */
   const printChain = React.useMemo(() => {
     const meta = new Map<string, Visit>();
 
@@ -259,7 +253,6 @@ export default function PrescriptionPrintPreviewPage() {
     return { visitIds: limitedIds, meta, currentVisitId: visitId };
   }, [allVisitsRaw, visit, visitId, visitRec]);
 
-  // ✅ correctly typed tooth details for components that expect ToothDetail[]
   const currentToothDetails = React.useMemo(() => {
     const rec: Record<string, unknown> = isRecord(rx)
       ? (rx as unknown as Record<string, unknown>)
@@ -267,7 +260,6 @@ export default function PrescriptionPrintPreviewPage() {
     return toToothDetails(rec.toothDetails);
   }, [rx]);
 
-  // ✅ allow printing when either medicines OR tooth details exist
   const hasLines = (rx?.lines?.length ?? 0) > 0;
   const hasTeeth = currentToothDetails.length > 0;
   const canPrint = hasLines || hasTeeth;
@@ -291,13 +283,10 @@ export default function PrescriptionPrintPreviewPage() {
     });
   };
 
-  // ✅ For preview: when "Current only", keep history DOM so the current visit stays in the SAME vertical position,
-  // but hide header + prev blocks using visibility (so space is preserved).
   const previewCurrentOnly = !printWithHistory;
 
   return (
     <section className="p-4 2xl:p-8">
-      {/* Preview-only CSS (scoped by wrapper class) */}
       <style>{`
         /* Keep layout space, but hide header+doctor+patient when preview is in "current only" mode */
         .rx-preview-shell.rx-preview-current-only .flex.h-full.flex-col > div:nth-child(1),
@@ -368,19 +357,15 @@ export default function PrescriptionPrintPreviewPage() {
             doctorRegdLabel={resolvedDoctorRegdLabel}
             visitDateLabel={visitCreatedDateLabel}
             lines={rx?.lines ?? []}
-            // ✅ Always pass LIMITED history chain so the "current block" positioning matches print.
             currentVisitId={printChain.currentVisitId}
             chainVisitIds={printChain.visitIds}
             visitMetaMap={printChain.meta}
-            // ✅ current visit tooth details
             toothDetails={currentToothDetails}
-            // ✅ In preview, hide notes automatically in "current only" mode (like print sheet)
             receptionNotes={previewCurrentOnly ? undefined : (rx?.receptionNotes ?? '')}
           />
         </div>
       </Card>
 
-      {/* ✅ PrintSheet receives LIMITED chain too (so "History ON" prints only up to selected visit). */}
       <PrescriptionPrintSheet
         patientName={patientName}
         patientPhone={patientPhone}

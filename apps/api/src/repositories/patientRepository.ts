@@ -1,4 +1,3 @@
-// apps/api/src/repositories/patientRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   ConditionalCheckFailedException,
@@ -92,8 +91,6 @@ export interface PatientRepository {
   search(params: { query?: string; limit: number }): Promise<Patient[]>;
   softDelete(patientId: string): Promise<boolean>;
   restore(patientId: string): Promise<Patient | null>;
-
-  // ✅ NEW
   avoid(patientId: string): Promise<Patient | null>;
   unavoid(patientId: string): Promise<Patient | null>;
 }
@@ -128,8 +125,6 @@ export class DynamoDBPatientRepository implements PatientRepository {
       updatedAt: now,
       isDeleted: false,
       deletedAt: undefined,
-
-      // ✅ NEW: default avoid state
       isAvoided: false,
       avoidedAt: undefined,
       unavoidedAt: undefined,
@@ -203,9 +198,18 @@ export class DynamoDBPatientRepository implements PatientRepository {
     const { isDeleted = false, ...rest } = Item as Partial<Patient>;
     if (isDeleted) return null;
 
-    // ✅ ensure isAvoided defaults to false if missing
+    // Keep behavior the same: default isAvoided to false if missing/invalid, without using `any`.
     const p = { ...rest, isDeleted } as Patient;
-    if (typeof (p as any).isAvoided !== 'boolean') (p as any).isAvoided = false;
+    const unknownP: unknown = p;
+
+    const currentIsAvoided =
+      typeof unknownP === 'object' && unknownP !== null && 'isAvoided' in unknownP
+        ? (unknownP as { isAvoided?: unknown }).isAvoided
+        : undefined;
+
+    if (typeof currentIsAvoided !== 'boolean') {
+      p.isAvoided = false;
+    }
 
     return p;
   }
@@ -464,7 +468,6 @@ export class DynamoDBPatientRepository implements PatientRepository {
     }
   }
 
-  // ✅ NEW: Avoid / Unavoid
   async avoid(patientId: string): Promise<Patient | null> {
     const now = Date.now();
 

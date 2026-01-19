@@ -372,7 +372,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
                 <div className="mb-2 text-sm font-semibold text-gray-900">Notes</div>
                 <Textarea
                   ref={notesTextareaRef}
-                  className="min-h-[90px] resize-none rounded-xl"
+                  className="min-h-22.5 resize-none rounded-xl"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
                   placeholder="Add notes for this medicine…"
@@ -452,7 +452,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
       <div
         className={[
           'divide-y',
-          shouldScroll ? 'max-h-[200px] 2xl:max-h-full overflow-y-auto' : '',
+          shouldScroll ? 'max-h-50 2xl:max-h-full overflow-y-auto' : '',
           'dms-scroll',
         ].join(' ')}
       >
@@ -496,7 +496,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
                   <PopoverContent side="bottom" align="start" className="w-80 rounded-2xl p-3">
                     <div className="mb-2 text-sm font-semibold text-gray-900">Notes</div>
                     <Textarea
-                      className="min-h-[90px] resize-none rounded-xl"
+                      className="min-h-22.5 resize-none rounded-xl"
                       value={rowNotesIndex === idx ? rowNotesDraft : ''}
                       onChange={(e) => setRowNotesDraft(e.target.value)}
                       placeholder="Add or edit notes…"

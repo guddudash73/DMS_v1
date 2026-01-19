@@ -1,4 +1,3 @@
-// apps/web/components/dashboard/DailyVisitsBreakdownPanel.tsx
 'use client';
 
 import * as React from 'react';
@@ -152,7 +151,7 @@ export default function DailyVisitsBreakdownPanel({
                 </div>
               </div>
 
-              <div className="max-h-[480px] overflow-y-auto">
+              <div className="max-h-120 overflow-y-auto">
                 <div className="divide-y">
                   {items.map((v) => (
                     <div key={v.visitId} className="px-4 py-3">
@@ -162,8 +161,6 @@ export default function DailyVisitsBreakdownPanel({
                             <div className="truncate text-sm font-semibold">{v.patientName}</div>
 
                             <span className={statusBadge(v.status)}>{v.status}</span>
-
-                            {/* ✅ Show N/F AND Z (zeroBilled) as separate badges */}
                             {v.tag ? (
                               <span className={tagBadgeClass(v.tag)}>{tagText(v.tag)}</span>
                             ) : null}

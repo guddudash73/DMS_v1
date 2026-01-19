@@ -1,4 +1,3 @@
-// apps/web/app/(doctor)/doctor/visits/[visitId]/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -235,7 +234,7 @@ function MedicinesReadOnly({ lines }: { lines: unknown[] }) {
 
             return (
               <TableRow key={key} className="hover:bg-gray-50/60">
-                <TableCell className="w-[60px] text-gray-700">{idx + 1}</TableCell>
+                <TableCell className="w-15 text-gray-700">{idx + 1}</TableCell>
                 <TableCell className="text-gray-800">{lineToText(l)}</TableCell>
               </TableRow>
             );
@@ -477,7 +476,6 @@ function VisitXrayQuickLookDialog(props: {
   );
 }
 
-// Grouping helpers
 function anchorIdFromVisit(v: Visit): string | undefined {
   return getPropString(v, 'anchorVisitId') ?? getPropString(v, 'anchorId') ?? undefined;
 }
@@ -533,8 +531,6 @@ export default function DoctorVisitPage() {
   const patientId = visit?.patientId ?? '';
   const patientQuery = useGetPatientByIdQuery(patientId, { skip: !patientId });
   const patient = patientQuery.data ?? null;
-
-  // Base Rx query (latest by default)
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: !visitId });
   const rxLatest = (getProp(rxQuery.data, 'rx') as unknown) ?? null;
 
@@ -609,7 +605,6 @@ export default function DoctorVisitPage() {
     if (!doctorId || !Array.isArray(list)) return null;
 
     const mapped = (list as unknown[]).filter(isRecord).map((d) => d as unknown as DoctorLite);
-
     return mapped.find((d) => d.doctorId === doctorId) ?? null;
   }, [doctorsQuery.data, doctorId]);
 
@@ -637,12 +632,10 @@ export default function DoctorVisitPage() {
   const loading = visitQuery.isLoading || patientQuery.isLoading;
   const hasError = visitQuery.isError || patientQuery.isError;
 
-  // Offline visits: doctor should NOT start session
   const sessionMuted = isOffline === true;
   const sessionMutedReason =
     'This is an offline visit. Session editing is disabled in Doctor view.';
 
-  // -------- Rx version dropdown (DONE visits) --------
   const [selectedRxVersion, setSelectedRxVersion] = React.useState<number | null>(null);
 
   const latestVersionFromRx = React.useMemo(() => {
@@ -650,12 +643,6 @@ export default function DoctorVisitPage() {
     const v = getProp(rxLatest, 'version');
     return typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null;
   }, [rxLatest]);
-
-  const versionOptions = React.useMemo(() => {
-    const latest = latestVersionFromRx;
-    if (!latest) return [];
-    return Array.from({ length: latest }, (_, i) => latest - i);
-  }, [latestVersionFromRx]);
 
   React.useEffect(() => {
     if (!isDone) return;
@@ -733,7 +720,6 @@ export default function DoctorVisitPage() {
     router.push(`/doctor/visits/${visitId}/prescription`);
   };
 
-  // Previous Visits table
   const allDoneVisits = React.useMemo(() => {
     return [...allVisitsRaw]
       .filter((v) => getPropString(v, 'status') === 'DONE')
@@ -911,27 +897,17 @@ export default function DoctorVisitPage() {
           </div>
 
           <div className="mt-0.5 text-xs text-gray-500">
-            Visit ID: <span className="font-medium text-gray-700">{visitId}</span>
             {visit?.tag ? (
               <>
-                {' '}
-                · Tag: <span className="font-medium text-gray-700">{visit.tag}</span>
+                Tag: <span className="font-medium text-gray-700">{visit.tag}</span>
+                {' · '}
               </>
-            ) : null}{' '}
-            · Stage: <span className="font-medium text-gray-700">{stageLabel(status)}</span>
+            ) : null}
+            Stage: <span className="font-medium text-gray-700">{stageLabel(status)}</span>
           </div>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {status ? (
-            <Badge
-              variant="outline"
-              className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(status)}`}
-            >
-              {stageLabel(status)}
-            </Badge>
-          ) : null}
-
           {isDone ? (
             <Button
               type="button"
@@ -1026,36 +1002,6 @@ export default function DoctorVisitPage() {
                 </div>
               </div>
 
-              {versionOptions.length > 0 ? (
-                <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-gray-50 px-3 py-2">
-                  <div className="text-xs font-medium text-gray-700">
-                    Prescription version
-                    {selectedRxVersion != null ? (
-                      <span className="text-gray-500">{` • v${selectedRxVersion}`}</span>
-                    ) : null}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <select
-                      className="h-9 rounded-xl border bg-white px-3 text-sm"
-                      value={selectedRxVersion ?? ''}
-                      onChange={(e) => setSelectedRxVersion(Number(e.target.value))}
-                      disabled={rxByVersionQuery.isFetching}
-                    >
-                      {versionOptions.map((v) => (
-                        <option key={v} value={v}>
-                          {v === versionOptions[0] ? `Latest (v${v})` : `Version ${v}`}
-                        </option>
-                      ))}
-                    </select>
-
-                    {rxByVersionQuery.isFetching ? (
-                      <span className="text-xs text-gray-500">Loading…</span>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-
               <div className="min-w-0 overflow-x-hidden">
                 <PrescriptionPreview
                   patientName={getProp(patient, 'name') as PreviewProps['patientName']}
@@ -1105,7 +1051,7 @@ export default function DoctorVisitPage() {
                   <Button
                     type="button"
                     variant="outline"
-                    className="w-[220px] justify-start gap-2 rounded-xl"
+                    className="w-55 justify-start gap-2 rounded-xl"
                   >
                     <CalendarIcon className="h-4 w-4" />
                     <span className={selectedDateStr ? 'text-gray-900' : 'text-gray-500'}>
@@ -1196,9 +1142,7 @@ export default function DoctorVisitPage() {
                                 <div className="flex flex-wrap items-center gap-2">
                                   <Badge
                                     variant="outline"
-                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
-                                      'NEW',
-                                    )}`}
+                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass('NEW')}`}
                                   >
                                     NEW
                                   </Badge>
@@ -1270,7 +1214,7 @@ export default function DoctorVisitPage() {
                               <TableRow key={f.visitId} className="hover:bg-gray-50/60">
                                 <TableCell className="px-6 py-2 align-top">
                                   <div className="flex items-center gap-3">
-                                    <div className="ml-1 h-7 w-[2px] rounded-full bg-gray-200" />
+                                    <div className="ml-1 h-7 w-0.5 rounded-full bg-gray-200" />
                                     <div className="text-sm text-gray-900">
                                       {formatClinicDateShort(String(getProp(f, 'visitDate') ?? ''))}
                                     </div>
@@ -1279,7 +1223,7 @@ export default function DoctorVisitPage() {
 
                                 <TableCell className="px-6 py-2 align-top">
                                   <div className="flex items-start gap-3">
-                                    <div className="ml-1 h-7 w-[2px] rounded-full bg-gray-200" />
+                                    <div className="ml-1 h-7 w-0.5 rounded-full bg-gray-200" />
                                     <div className="min-w-0 flex-1">
                                       {renderReasonCell(f, { kind: 'FOLLOWUP', anchor })}
                                     </div>
@@ -1290,9 +1234,7 @@ export default function DoctorVisitPage() {
                                   <div className="flex flex-wrap items-center gap-2">
                                     <Badge
                                       variant="outline"
-                                      className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
-                                        'FOLLOWUP',
-                                      )}`}
+                                      className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass('FOLLOWUP')}`}
                                     >
                                       FOLLOW UP
                                     </Badge>
@@ -1434,16 +1376,6 @@ export default function DoctorVisitPage() {
                   {String(getProp(visit, 'reason') ?? '—')}
                 </div>
               </div>
-
-              <div className="flex justify-between gap-3">
-                <div className="text-gray-600">Doctor</div>
-                <div className="font-semibold text-gray-900">{doctorLabel}</div>
-              </div>
-
-              <div className="flex justify-between gap-3">
-                <div className="text-gray-600">Regd No</div>
-                <div className="font-semibold text-gray-900">{doctorRegdLabel ?? '—'}</div>
-              </div>
             </div>
           </Card>
 
@@ -1465,63 +1397,13 @@ export default function DoctorVisitPage() {
               </Badge>
             </div>
 
-            <div className="mt-5 rounded-2xl border bg-gray-50 p-4">
-              <div className="text-sm font-semibold text-gray-900">Session actions</div>
-
-              <div className="mt-1 text-xs text-gray-600">
-                {sessionMuted
-                  ? 'This is an offline visit. Session actions are disabled.'
-                  : status === 'IN_PROGRESS'
-                    ? 'Continue the active session to add medicines, upload X-rays, and complete the visit.'
-                    : 'Start the session to begin adding medicines and uploading X-rays.'}
-              </div>
-
-              <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div className="text-xs text-gray-500">
-                  Visit ID: <span className="font-medium text-gray-700">{visitId}</span>
-                </div>
-
-                <Button
-                  type="button"
-                  className={[
-                    'rounded-2xl px-6',
-                    sessionMuted
-                      ? 'bg-gray-200 text-gray-600 hover:bg-gray-200'
-                      : 'bg-black text-white hover:bg-black/90',
-                  ].join(' ')}
-                  onClick={openSession}
-                  disabled={sessionMuted || updateVisitStatusState.isLoading}
-                  title={sessionMuted ? sessionMutedReason : undefined}
-                >
-                  {sessionMuted
-                    ? 'Session disabled'
-                    : updateVisitStatusState.isLoading
-                      ? 'Starting…'
-                      : status === 'IN_PROGRESS'
-                        ? 'Continue Session'
-                        : 'Start Session'}
-                  <ArrowRight className="ml-2 h-4 w-4" />
-                </Button>
-              </div>
-            </div>
-
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-              <div className="rounded-2xl border p-4">
-                <div className="text-xs font-semibold text-gray-700">What you’ll do next</div>
-                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-gray-600">
-                  <li>Add medicines to Rx</li>
-                  <li>Upload and review X-rays</li>
-                  <li>Finalize and mark visit as DONE</li>
-                </ul>
-              </div>
-
-              <div className="rounded-2xl border p-4">
-                <div className="text-xs font-semibold text-gray-700">Notes</div>
-                <div className="mt-2 text-xs text-gray-600">
-                  After marking visit as <b>DONE</b>, this page becomes the <b>read-only summary</b>{' '}
-                  with Rx + X-rays.
-                </div>
-              </div>
+            <div className="mt-4 rounded-2xl border p-4">
+              <div className="text-xs font-semibold text-gray-700">What’s next</div>
+              <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-gray-600">
+                <li>Add medicines to Rx</li>
+                <li>Upload and review X-rays</li>
+                <li>Finalize and mark visit as DONE</li>
+              </ul>
             </div>
 
             {isOffline ? (
@@ -1540,8 +1422,6 @@ export default function DoctorVisitPage() {
               </div>
             ) : null}
           </Card>
-
-          {/* Keep your remaining "Previous visits" non-DONE block as-is in your repo if it exists */}
         </div>
       )}
 

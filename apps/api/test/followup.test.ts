@@ -1,4 +1,3 @@
-// apps/api/test/followup.test.ts
 import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -14,7 +13,7 @@ const registerPatient = (id: string) => createdPatients.push(id);
 
 beforeAll(async () => {
   await warmAuth();
-  receptionAuthHeader = asReception(); // already "Bearer <token>"
+  receptionAuthHeader = asReception();
 });
 
 afterEach(async () => {
@@ -53,7 +52,6 @@ async function createVisit(patientId: string) {
     })
     .expect(201);
 
-  // backend returns { visit, tokenPrint }
   const visit = (res.body.visit ?? res.body) as { visitId: string; visitDate: string };
 
   return { visitId: visit.visitId, visitDate: visit.visitDate, patientId };

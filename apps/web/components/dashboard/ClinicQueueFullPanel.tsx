@@ -1,4 +1,3 @@
-// apps/web/components/dashboard/ClinicQueueFullPanel.tsx
 'use client';
 
 import * as React from 'react';
@@ -98,15 +97,13 @@ export default function ClinicQueueFullPanel({
 
   const showLoading = canUseApi && (isLoading || isFetching);
 
-  // ✅ Reception visit route
   const openClinicVisit = (visitId: string) => {
-    // IMPORTANT: keep it here as callback for Row
     window.location.assign(`/visits/${visitId}`);
   };
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
-      <div className="mx-auto flex h-full w-full max-w-[1200px] flex-col gap-6 2xl:gap-10">
+      <div className="mx-auto flex h-full w-full max-w-300 flex-col gap-6 2xl:gap-10">
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-2xl font-semibold text-gray-900">Today&apos;s Clinic Queue</h2>
@@ -127,7 +124,7 @@ export default function ClinicQueueFullPanel({
         </div>
 
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-          <Card className="flex h-[520px] flex-col rounded-2xl border-none bg-white p-5 shadow-sm">
+          <Card className="flex h-130 flex-col rounded-2xl border-none bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between pb-3">
               <div className="text-lg font-semibold text-gray-900">Waiting</div>
               <div className="text-sm font-semibold text-gray-500">{grouped.queued.length}</div>
@@ -150,7 +147,7 @@ export default function ClinicQueueFullPanel({
             </div>
           </Card>
 
-          <Card className="flex h-[520px] flex-col rounded-2xl border-none bg-white p-5 shadow-sm">
+          <Card className="flex h-130 flex-col rounded-2xl border-none bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between pb-3">
               <div className="text-lg font-semibold text-gray-900">On-chair</div>
               <div className="text-sm font-semibold text-gray-500">{grouped.inProgress.length}</div>
@@ -175,7 +172,7 @@ export default function ClinicQueueFullPanel({
             </div>
           </Card>
 
-          <Card className="flex h-[520px] flex-col rounded-2xl border-none bg-white p-5 shadow-sm">
+          <Card className="flex h-130 flex-col rounded-2xl border-none bg-white p-5 shadow-sm">
             <div className="flex items-center justify-between pb-3">
               <div className="text-lg font-semibold text-gray-900">Completed</div>
               <div className="text-sm font-semibold text-gray-500">{grouped.done.length}</div>

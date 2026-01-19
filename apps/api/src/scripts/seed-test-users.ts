@@ -1,4 +1,3 @@
-// apps/api/src/scripts/seed-test-users.ts
 import '../scripts/load-env';
 import bcrypt from 'bcrypt';
 import { userRepository } from '../repositories/userRepository';

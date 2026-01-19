@@ -44,6 +44,10 @@ export const createRateLimiter = (options: RateLimitOptions) => {
     const retryAfterSeconds = Math.max(1, Math.ceil((bucket.resetAt - now) / 1000));
 
     res.header('Retry-After', retryAfterSeconds.toString());
+    res.header('RateLimit-Limit', String(max));
+    res.header('RateLimit-Remaining', '0');
+    res.header('RateLimit-Reset', String(Math.ceil(bucket.resetAt / 1000)));
+
     return res.status(429).json({
       error: 'TOO_MANY_REQUESTS',
       message: 'Too many requests. Please try again later.',
@@ -80,5 +84,26 @@ export const genericSensitiveRateLimiter = createRateLimiter({
       path: req.path,
       method: req.method,
     });
+  },
+});
+
+export const refreshRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 30,
+  keyGenerator: (req) => {
+    const ip = req.ip || 'unknown';
+    return `refresh-ip:${ip}`;
+  },
+  onLimitReached: (req) => {
+    logInfo('auth_refresh_rate_limited', { ip: req.ip, path: req.path, method: req.method });
+  },
+});
+
+export const logoutRateLimiter = createRateLimiter({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: (req) => {
+    const ip = req.ip || 'unknown';
+    return `logout-ip:${ip}`;
   },
 });

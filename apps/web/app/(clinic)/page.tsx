@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -39,10 +38,6 @@ function mapQueueItemToPatientsPanelItem(it: PatientQueueItem): PatientsPanelIte
     createdAt: typeof it.createdAt === 'number' ? it.createdAt : 0,
     zeroBilled: zeroBilledFromApi || zeroBilledFromBilling,
 
-    // ✅ IMPORTANT:
-    // PatientsPanel shows the patient number pill only if this exists.
-    // If your PatientsPanelItem type allows extra keys, this will pass through.
-    // If it doesn't, add dailyPatientNumber?: number to PatientsPanelItem type.
     dailyPatientNumber:
       typeof (it as unknown as Record<string, unknown>)['dailyPatientNumber'] === 'number'
         ? ((it as unknown as Record<string, unknown>)['dailyPatientNumber'] as number)
@@ -60,7 +55,6 @@ export default function DashboardPage() {
   const todayIso = React.useMemo(() => clinicDateISO(new Date()), []);
   const dateForPatients = selectedDate ?? todayIso;
 
-  // ✅ Single “lightweight” fetch for reception-side list UI
   const queueQuery = useGetPatientQueueQuery({ date: dateForPatients }, { skip: !canUseApi });
 
   const patients: PatientsPanelItem[] = React.useMemo(() => {
@@ -74,7 +68,6 @@ export default function DashboardPage() {
     return mapped;
   }, [queueQuery.data]);
 
-  // ✅ Priority: date drilldown view
   if (selectedDate) {
     return (
       <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
@@ -86,7 +79,6 @@ export default function DashboardPage() {
     );
   }
 
-  // ✅ Priority: full queue view (View all)
   if (showFullQueue) {
     return <ClinicQueueFullPanel date={dateForPatients} onBack={() => setShowFullQueue(false)} />;
   }
@@ -96,7 +88,6 @@ export default function DashboardPage() {
       <div className="grid h-full grid-cols-1 gap-6 2xl:gap-10 lg:grid-cols-[minmax(0,2fr)_minmax(320px,0.9fr)]">
         <div className="flex h-full flex-col gap-6">
           <div className="grid w-full grid-cols-1 gap-6 2xl:gap-10 lg:grid-cols-[minmax(0,2fr)]">
-            {/* ✅ View all opens the full queue panel */}
             <DoctorQueueCard onViewAll={() => setShowFullQueue(true)} />
 
             <VisitorsRatioChart onDateSelect={(dateIso) => setSelectedDate(dateIso)} />
@@ -113,7 +104,6 @@ export default function DashboardPage() {
             canUseApi={canUseApi}
           />
 
-          {/* ✅ keep summary aligned to the same date */}
           <QueueSummaryCard date={dateForPatients} />
         </div>
       </div>

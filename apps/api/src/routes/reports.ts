@@ -4,6 +4,7 @@ import {
   DailyPatientSummaryRangeQuery,
   DailyVisitsBreakdownQuery,
   RecentCompletedQuery,
+  DailyPaymentsBreakdownQuery,
 } from '@dcm/types';
 import type {
   Patient,
@@ -22,6 +23,10 @@ import { type ZodError } from 'zod';
 import { sendZodValidationError } from '../lib/validation';
 import { clinicDateISO } from '../lib/date';
 
+import PDFDocument from 'pdfkit';
+import fs from 'node:fs';
+import path from 'node:path';
+
 const router = express.Router();
 
 const handleValidationError = (req: Request, res: Response, issues: ZodError['issues']) => {
@@ -37,11 +42,9 @@ function pad2(n: number): string {
 function addDaysISO(dateISO: string, days: number): string {
   const [y, m, d] = dateISO.split('-').map((x) => Number(x));
   const dt = new Date(Date.UTC(y, m - 1, d + days));
-
   const yy = dt.getUTCFullYear();
   const mm = pad2(dt.getUTCMonth() + 1);
   const dd = pad2(dt.getUTCDate());
-
   return `${yy}-${mm}-${dd}`;
 }
 
@@ -55,11 +58,6 @@ const asyncHandler =
     fn(req, res, next).catch(next);
   };
 
-/**
- * ✅ FIX:
- * totalPatients MUST be N + F only.
- * zeroBilledVisits (Z) is a subset of those visits, NOT additive.
- */
 async function buildDailyPatientSummary(date: string): Promise<DailyPatientSummary> {
   const visits = await visitRepository.listByDate(date);
 
@@ -83,9 +81,7 @@ async function buildDailyPatientSummary(date: string): Promise<DailyPatientSumma
     if (visit.zeroBilled === true) zeroBilledVisits++;
   }
 
-  // ✅ Visitors total = N + F (Z is NOT added)
   const totalPatients = newPatients + followupPatients;
-
   return { date, newPatients, followupPatients, zeroBilledVisits, totalPatients };
 }
 
@@ -118,8 +114,6 @@ router.get(
     };
 
     let totalRevenue = 0;
-
-    // ✅ NEW: online/offline received totals
     let onlineReceivedTotal = 0;
     let offlineReceivedTotal = 0;
 
@@ -137,10 +131,8 @@ router.get(
         totalRevenue += visit.billingAmount;
       }
 
-      // ✅ Payment received aggregation uses billing flags + billing.total
       if (billing) {
         const amt = typeof billing.total === 'number' && billing.total >= 0 ? billing.total : 0;
-
         if (billing.receivedOnline === true) onlineReceivedTotal += amt;
         if (billing.receivedOffline === true) offlineReceivedTotal += amt;
 
@@ -309,6 +301,628 @@ router.get(
     };
 
     return res.status(200).json(payload);
+  }),
+);
+
+router.get(
+  '/daily/payments-breakdown',
+  asyncHandler(async (req, res) => {
+    const parsed = DailyPaymentsBreakdownQuery.safeParse(req.query);
+    if (!parsed.success) return handleValidationError(req, res, parsed.error.issues);
+
+    const { date } = parsed.data;
+    const visits = await visitRepository.listByDate(date);
+
+    if (!visits.length) {
+      return res.status(200).json({
+        date,
+        totals: { total: 0, online: 0, offline: 0, other: 0 },
+        items: [],
+      });
+    }
+
+    const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
+    const patientResults = await Promise.all(
+      uniquePatientIds.map((id) => patientRepository.getById(id)),
+    );
+    const patientMap = new Map(patientResults.filter(Boolean).map((p) => [p!.patientId, p!]));
+
+    const billingResults = await Promise.all(
+      visits.map((v) => billingRepository.getByVisitId(v.visitId)),
+    );
+
+    let online = 0;
+    let offline = 0;
+    let other = 0;
+
+    const items = visits
+      .map((v, idx) => {
+        const p = patientMap.get(v.patientId);
+        if (!p) return null;
+
+        const billing = billingResults[idx] ?? null;
+
+        const amount =
+          billing && typeof billing.total === 'number' && billing.total >= 0
+            ? billing.total
+            : typeof v.billingAmount === 'number' && v.billingAmount >= 0
+              ? v.billingAmount
+              : 0;
+
+        const hasPayment = Boolean(billing) || amount > 0;
+        if (!hasPayment) return null;
+
+        let paymentMode: 'ONLINE' | 'OFFLINE' | 'OTHER' = 'OTHER';
+        if (billing?.receivedOnline === true) paymentMode = 'ONLINE';
+        else if (billing?.receivedOffline === true) paymentMode = 'OFFLINE';
+
+        if (paymentMode === 'ONLINE') online += amount;
+        else if (paymentMode === 'OFFLINE') offline += amount;
+        else other += amount;
+
+        return {
+          visitId: v.visitId,
+          visitDate: v.visitDate,
+          status: v.status,
+          tag: v.tag,
+          zeroBilled:
+            (v as typeof v & { zeroBilled?: boolean }).zeroBilled === true ? true : undefined,
+          reason: v.reason,
+          billingAmount: amount,
+          paymentMode,
+          createdAt: v.createdAt,
+          updatedAt: v.updatedAt,
+
+          patientId: p.patientId,
+          patientName: p.name,
+          patientPhone: p.phone,
+          patientGender: p.gender,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+      .sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+
+    return res.status(200).json({
+      date,
+      totals: { total: online + offline + other, online, offline, other },
+      items,
+    });
+  }),
+);
+
+router.get(
+  '/daily/pdf',
+  asyncHandler(async (req, res) => {
+    const date =
+      typeof req.query.date === 'string' && req.query.date.length > 0
+        ? req.query.date
+        : clinicDateISO();
+
+    if (!isValidISODate(date)) {
+      return res.status(400).json({ error: 'BAD_REQUEST', message: 'Invalid date' });
+    }
+
+    const [visits, patientSummary] = await Promise.all([
+      visitRepository.listByDate(date),
+      buildDailyPatientSummary(date),
+    ]);
+
+    const uniquePatientIds = Array.from(new Set(visits.map((v) => v.patientId)));
+    const patientResults = await Promise.all(
+      uniquePatientIds.map((id) => patientRepository.getById(id)),
+    );
+    const patientMap = new Map(patientResults.filter(Boolean).map((p) => [p!.patientId, p!]));
+
+    const billingResults = await Promise.all(
+      visits.map((v) => billingRepository.getByVisitId(v.visitId)),
+    );
+
+    const visitCountsByStatus: { QUEUED: number; IN_PROGRESS: number; DONE: number } = {
+      QUEUED: 0,
+      IN_PROGRESS: 0,
+      DONE: 0,
+    };
+
+    let totalRevenue = 0;
+    const procedureCounts: Record<string, number> = {};
+
+    let payOnline = 0;
+    let payOffline = 0;
+    let payOther = 0;
+
+    const fmtTime = (ts: number) =>
+      new Intl.DateTimeFormat('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }).format(
+        new Date(ts),
+      );
+
+    for (let i = 0; i < visits.length; i++) {
+      const v = visits[i]!;
+      const p = patientMap.get(v.patientId);
+      if (!p) continue;
+
+      if (v.status in visitCountsByStatus) {
+        visitCountsByStatus[v.status as keyof typeof visitCountsByStatus]++;
+      }
+
+      if (typeof v.billingAmount === 'number' && v.billingAmount >= 0)
+        totalRevenue += v.billingAmount;
+
+      const billing = billingResults[i] ?? null;
+      if (billing && Array.isArray(billing.items)) {
+        for (const line of billing.items) {
+          const key = line.code ?? line.description;
+          if (!key) continue;
+          procedureCounts[key] = (procedureCounts[key] ?? 0) + line.quantity;
+        }
+      }
+    }
+
+    const paymentsItems = visits
+      .map((v, idx) => {
+        const p = patientMap.get(v.patientId);
+        if (!p) return null;
+
+        const billing = billingResults[idx] ?? null;
+
+        const amount =
+          billing && typeof billing.total === 'number' && billing.total >= 0
+            ? billing.total
+            : typeof v.billingAmount === 'number' && v.billingAmount >= 0
+              ? v.billingAmount
+              : 0;
+
+        const hasPayment = Boolean(billing) || amount > 0;
+        if (!hasPayment) return null;
+
+        let mode: 'ONLINE' | 'OFFLINE' | 'OTHER' = 'OTHER';
+        if (billing?.receivedOnline === true) mode = 'ONLINE';
+        else if (billing?.receivedOffline === true) mode = 'OFFLINE';
+
+        if (mode === 'ONLINE') payOnline += amount;
+        else if (mode === 'OFFLINE') payOffline += amount;
+        else payOther += amount;
+
+        return {
+          createdAt: v.createdAt,
+          timeLabel: fmtTime(v.createdAt),
+          patientName: p.name ?? '—',
+          reason: v.reason ?? '—',
+          tag: v.tag ?? '—',
+          mode,
+          amount,
+        };
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+      .sort((a, b) => a.createdAt - b.createdAt);
+
+    const procedureRows = Object.entries(procedureCounts)
+      .map(([name, count]) => ({ name, count: typeof count === 'number' ? count : 0 }))
+      .filter((x) => x.count > 0)
+      .sort((a, b) => b.count - a.count);
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="daily-report-${date}.pdf"`);
+
+    const doc = new PDFDocument({
+      size: 'A4',
+      margins: { top: 44, bottom: 44, left: 44, right: 44 },
+      compress: true,
+    });
+
+    doc.pipe(res);
+
+    const fontsDir = path.join(process.cwd(), 'apps', 'api', 'src', 'assets', 'fonts');
+    const fontRegularPath = path.join(fontsDir, 'NotoSans-Regular.ttf');
+    const fontBoldPath = path.join(fontsDir, 'NotoSans-Bold.ttf');
+    const hasFonts = fs.existsSync(fontRegularPath) && fs.existsSync(fontBoldPath);
+
+    if (hasFonts) {
+      doc.registerFont('AppFont', fontRegularPath);
+      doc.registerFont('AppFont-Bold', fontBoldPath);
+    }
+
+    const font = (w: 'regular' | 'bold') => {
+      if (!hasFonts) return w === 'bold' ? doc.font('Helvetica-Bold') : doc.font('Helvetica');
+      return w === 'bold' ? doc.font('AppFont-Bold') : doc.font('AppFont');
+    };
+
+    const left = doc.page.margins.left;
+    const usableWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const bottomY = () => doc.page.height - doc.page.margins.bottom;
+
+    const ensureSpace = (need: number) => {
+      if (doc.y + need <= bottomY()) return;
+      doc.addPage();
+    };
+
+    const hr = () => {
+      ensureSpace(12);
+      const y = doc.y;
+      doc
+        .save()
+        .strokeColor('#E5E7EB')
+        .lineWidth(1)
+        .moveTo(left, y)
+        .lineTo(left + usableWidth, y)
+        .stroke()
+        .restore();
+      doc.moveDown(0.9);
+      doc.x = left;
+    };
+
+    const formatINR = (n: number) => {
+      const v = typeof n === 'number' && Number.isFinite(n) ? n : 0;
+      const amt = v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      return hasFonts ? `₹${amt}` : `INR ${amt}`;
+    };
+
+    const sectionTitle = (label: string) => {
+      ensureSpace(26);
+      doc.x = left;
+      font('bold').fontSize(14).fillColor('#111827');
+      doc.text(label, left, doc.y);
+      doc.moveDown(0.35);
+      doc.x = left;
+    };
+
+    const kv = (k: string, v: string) => {
+      ensureSpace(16);
+      doc.x = left;
+      font('regular')
+        .fontSize(11)
+        .fillColor('#111827')
+        .text(`${k}: `, left, doc.y, { continued: true });
+      font('bold').fontSize(11).fillColor('#111827').text(v);
+      doc.x = left;
+    };
+
+    type Col = {
+      key: string;
+      title: string;
+      width: number;
+      align?: 'left' | 'right' | 'center';
+      wrap?: boolean;
+      maxLines?: number;
+    };
+
+    const truncateToWidth = (text: string, maxW: number) => {
+      const t = text ?? '';
+      if (t.length === 0) return t;
+      if (doc.widthOfString(t) <= maxW) return t;
+
+      const ell = '…';
+      const ellW = doc.widthOfString(ell);
+      if (ellW >= maxW) return '';
+
+      let lo = 0;
+      let hi = t.length;
+      let best = ell;
+
+      while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const cand = t.slice(0, mid) + ell;
+        if (doc.widthOfString(cand) <= maxW) {
+          best = cand;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+      return best;
+    };
+
+    const clampToLines = (text: string, width: number, fontSize: number, maxLines: number) => {
+      const raw = text ?? '';
+      if (!raw) return raw;
+
+      const h = doc.heightOfString(raw, { width });
+      const lineH = doc.currentLineHeight(true);
+      const lines = Math.ceil(h / Math.max(1, lineH));
+      if (lines <= maxLines) return raw;
+
+      const ell = '…';
+      let lo = 0;
+      let hi = raw.length;
+      let best = ell;
+
+      while (lo <= hi) {
+        const mid = Math.floor((lo + hi) / 2);
+        const cand = raw.slice(0, mid).trimEnd() + ell;
+        const candH = doc.heightOfString(cand, { width });
+        const candLines = Math.ceil(candH / Math.max(1, lineH));
+
+        if (candLines <= maxLines) {
+          best = cand;
+          lo = mid + 1;
+        } else {
+          hi = mid - 1;
+        }
+      }
+
+      return best;
+    };
+
+    const drawTable = (
+      columns: Col[],
+      rows: Record<string, unknown>[],
+      opts?: { fontSize?: number },
+    ) => {
+      const headerH = 26;
+      const fontSize = opts?.fontSize ?? 10;
+      const padX = 6;
+      const padY = 7;
+
+      const drawHeader = () => {
+        ensureSpace(headerH + 8);
+        const y0 = doc.y;
+
+        doc.save();
+        doc.rect(left, y0, usableWidth, headerH).fill('#F3F4F6');
+        doc.restore();
+
+        doc.save();
+        doc
+          .strokeColor('#E5E7EB')
+          .lineWidth(1)
+          .moveTo(left, y0 + headerH)
+          .lineTo(left + usableWidth, y0 + headerH)
+          .stroke();
+        doc.restore();
+
+        let x = left;
+        font('bold').fontSize(fontSize).fillColor('#111827');
+        for (const c of columns) {
+          const cellW = c.width - padX * 2;
+          const title = truncateToWidth(String(c.title), cellW);
+          doc.text(title, x + padX, y0 + 8, {
+            width: cellW,
+            align: c.align ?? 'left',
+            lineBreak: false,
+          });
+          x += c.width;
+        }
+
+        doc.y = y0 + headerH;
+        doc.x = left;
+      };
+
+      // Lint-only fix: removed unused `row` param (behavior unchanged).
+      const measureRowHeight = () => {
+        font('regular').fontSize(fontSize);
+        const lineH = doc.currentLineHeight(true);
+
+        const heights = columns.map((c) => {
+          const wrap = c.wrap !== false && (c.align ?? 'left') === 'left';
+          if (!wrap) return fontSize + 4;
+
+          const maxLines = c.maxLines ?? 2;
+          return Math.max(lineH, maxLines * lineH);
+        });
+
+        return Math.max(...heights) + padY * 2;
+      };
+
+      const drawRow = (row: Record<string, unknown>) => {
+        const rowH = measureRowHeight();
+
+        if (doc.y + rowH > bottomY()) {
+          doc.addPage();
+          drawHeader();
+        }
+
+        const y0 = doc.y;
+
+        doc.save();
+        doc
+          .strokeColor('#F3F4F6')
+          .lineWidth(1)
+          .moveTo(left, y0 + rowH)
+          .lineTo(left + usableWidth, y0 + rowH)
+          .stroke();
+        doc.restore();
+
+        let x = left;
+        font('regular').fontSize(fontSize).fillColor('#111827');
+
+        for (const c of columns) {
+          const raw = row[c.key];
+          const textRaw = raw === null || raw === undefined ? '' : String(raw);
+
+          const cellW = c.width - padX * 2;
+          const wrap = c.wrap !== false && (c.align ?? 'left') === 'left';
+
+          let textToDraw = textRaw;
+
+          if (wrap) {
+            const maxLines = c.maxLines ?? 2;
+            textToDraw = clampToLines(textRaw, cellW, fontSize, maxLines);
+          } else {
+            textToDraw = truncateToWidth(textRaw, cellW);
+          }
+
+          doc.text(textToDraw, x + padX, y0 + padY, {
+            width: cellW,
+            align: c.align ?? 'left',
+            lineBreak: wrap,
+          });
+
+          x += c.width;
+        }
+
+        doc.y = y0 + rowH;
+        doc.x = left;
+      };
+
+      drawHeader();
+      for (const r of rows) drawRow(r);
+      doc.moveDown(0.7);
+      doc.x = left;
+    };
+
+    const colsProcedures = (): Col[] => {
+      const wCount = 90;
+      const wProc = usableWidth - wCount;
+      return [
+        {
+          key: 'proc',
+          title: 'Procedure / Code',
+          width: wProc,
+          align: 'left',
+          wrap: true,
+          maxLines: 2,
+        },
+        { key: 'count', title: 'Count', width: wCount, align: 'right', wrap: false },
+      ];
+    };
+
+    const colsPaymentsWithTag = (): Col[] => {
+      const wTime = 74;
+      const wTag = 38;
+      const wMode = 70;
+      const wAmount = 128;
+
+      const fixed = wTime + wTag + wMode + wAmount;
+      const remaining = Math.max(0, usableWidth - fixed);
+
+      let wPatient = Math.floor(remaining * 0.62);
+      let wReason = remaining - wPatient;
+
+      const minPatient = 120;
+      const minReason = 90;
+
+      if (remaining < minPatient + minReason) {
+        wPatient = Math.max(90, Math.floor(remaining * 0.58));
+        wReason = remaining - wPatient;
+        if (wReason < 70) {
+          wReason = 70;
+          wPatient = remaining - wReason;
+        }
+      } else {
+        wPatient = Math.max(minPatient, wPatient);
+        wReason = Math.max(minReason, wReason);
+        const over = wPatient + wReason - remaining;
+        if (over > 0) {
+          const takeFromReason = Math.min(over, wReason - minReason);
+          wReason -= takeFromReason;
+          const leftOver = over - takeFromReason;
+          if (leftOver > 0) wPatient = Math.max(minPatient, wPatient - leftOver);
+          wReason = remaining - wPatient;
+        }
+      }
+
+      wReason = Math.max(60, wReason);
+      wPatient = Math.max(60, remaining - wReason);
+      wReason = remaining - wPatient;
+
+      return [
+        { key: 'time', title: 'Time', width: wTime, align: 'left', wrap: false },
+        {
+          key: 'patient',
+          title: 'Patient',
+          width: wPatient,
+          align: 'left',
+          wrap: true,
+          maxLines: 2,
+        },
+        { key: 'reason', title: 'Reason', width: wReason, align: 'left', wrap: true, maxLines: 2 },
+        { key: 'tag', title: 'Tag', width: wTag, align: 'center', wrap: false },
+        { key: 'mode', title: 'Mode', width: wMode, align: 'center', wrap: false },
+        { key: 'amount', title: 'Amount', width: wAmount, align: 'right', wrap: false },
+      ];
+    };
+
+    font('bold').fontSize(22).fillColor('#111827');
+    doc.text('Daily Clinic Report', left, doc.y);
+    doc.moveDown(0.35);
+
+    font('regular').fontSize(11).fillColor('#374151');
+    doc.text(`Date: ${date}`, left, doc.y);
+    doc.text(
+      `Generated: ${new Intl.DateTimeFormat('en-IN', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+      }).format(new Date())}`,
+      left,
+      doc.y,
+    );
+
+    doc.moveDown(0.6);
+    hr();
+
+    sectionTitle('Summary');
+
+    const queued = visitCountsByStatus.QUEUED ?? 0;
+    const onChair = visitCountsByStatus.IN_PROGRESS ?? 0;
+    const done = visitCountsByStatus.DONE ?? 0;
+    const totalVisits = queued + onChair + done;
+
+    kv('Visits', `${totalVisits} (Queued ${queued}, On-chair ${onChair}, Done ${done})`);
+    kv(
+      'Visitors',
+      `${patientSummary.totalPatients} (New ${patientSummary.newPatients}, Follow-up ${patientSummary.followupPatients})`,
+    );
+    kv('Zero billed', `${patientSummary.zeroBilledVisits}`);
+
+    kv('Total revenue (from visits)', `${formatINR(totalRevenue)}`);
+    ensureSpace(30);
+    doc.x = left;
+    font('regular')
+      .fontSize(10)
+      .fillColor('#374151')
+      .text(
+        `(Online ${formatINR(payOnline)} • Offline ${formatINR(payOffline)} • Other ${formatINR(payOther)})`,
+        left,
+        doc.y,
+      );
+
+    doc.moveDown(0.6);
+    hr();
+
+    sectionTitle('Procedures');
+
+    if (procedureRows.length === 0) {
+      font('regular').fontSize(10).fillColor('#6B7280');
+      doc.text('No procedures found for this day.', left, doc.y);
+      doc.moveDown(0.6);
+    } else {
+      drawTable(
+        colsProcedures(),
+        procedureRows.map((p) => ({
+          proc: p.name,
+          count: String(p.count),
+        })),
+      );
+    }
+
+    doc.moveDown(0.6);
+
+    sectionTitle('Payments breakdown');
+
+    if (paymentsItems.length === 0) {
+      font('regular').fontSize(10).fillColor('#6B7280');
+      doc.text('No checked-out payments found for this day.', left, doc.y);
+      doc.moveDown(0.6);
+    } else {
+      drawTable(
+        colsPaymentsWithTag(),
+        paymentsItems.map((x) => ({
+          time: x.timeLabel,
+          patient: x.patientName,
+          reason: x.reason,
+          tag: x.tag,
+          mode: x.mode,
+          amount: formatINR(x.amount),
+        })),
+        { fontSize: 9 },
+      );
+    }
+
+    doc.end();
   }),
 );
 

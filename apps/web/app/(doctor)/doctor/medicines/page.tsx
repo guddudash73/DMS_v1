@@ -65,7 +65,6 @@ const toNumberOrUndef = (v: string) => {
   return Number.isFinite(n) ? n : undefined;
 };
 
-// ✅ type guards to remove `any` without changing behavior
 const isFrequency = (v: unknown): v is Frequency =>
   typeof v === 'string' && (FREQUENCIES as readonly string[]).includes(v);
 
@@ -102,7 +101,6 @@ const formatDefaults = (m: MedicinePreset) => {
   return { dose, freq, dur };
 };
 
-// ✅ minimal shape for the list query args (removes `as any` at the callsite)
 type MedicinesCatalogListArgs = {
   query?: string;
   limit: number;
@@ -387,7 +385,6 @@ export default function DoctorMedicinesPage() {
         </div>
       </Card>
 
-      {/* Add dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-xl rounded-2xl">
           <DialogHeader>
@@ -479,7 +476,6 @@ export default function DoctorMedicinesPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-xl rounded-2xl">
           <DialogHeader>

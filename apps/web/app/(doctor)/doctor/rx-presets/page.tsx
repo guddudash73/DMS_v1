@@ -1,4 +1,3 @@
-// apps/web/app/(doctor)/doctor/rx-presets/page.tsx
 'use client';
 
 import Link from 'next/link';

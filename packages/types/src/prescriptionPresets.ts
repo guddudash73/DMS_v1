@@ -13,10 +13,8 @@ export const PrescriptionPreset = z.object({
   name: z.string().min(1),
   lines: z.array(RxLine).min(1),
   tags: z.array(z.string().min(1)).optional(),
-
   scope: PrescriptionPresetScope.default('PRIVATE'),
   createdByUserId: z.string().min(1),
-
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative().optional(),
 });
@@ -29,7 +27,6 @@ export type RxPresetFilter = z.infer<typeof RxPresetFilter>;
 export const PrescriptionPresetSearchQuery = z.object({
   query: z.string().optional(),
   limit: z.number().int().min(1).max(50).default(10),
-
   filter: RxPresetFilter.optional(),
 });
 export type PrescriptionPresetSearchQuery = z.infer<typeof PrescriptionPresetSearchQuery>;

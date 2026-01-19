@@ -1,4 +1,3 @@
-// apps/api/src/routes/visits.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import {
@@ -124,7 +123,6 @@ router.post(
       return res.status(201).json({
         visit,
         tokenPrint: {
-          // existing
           tokenNumber,
           visitId: visit.visitId,
           patientName: patient?.name ?? '—',
@@ -135,8 +133,6 @@ router.post(
           visitNumberForPatient,
           createdAt: visit.createdAt,
           visitDate: visit.visitDate,
-
-          // ✅ stable daily patient number + OPD + SD + DOB/Gender for Age/Sex printing
           dailyPatientNumber: visit.dailyPatientNumber,
           opdNo: visit.opdNo,
           sdId: patient?.sdId,
@@ -145,7 +141,6 @@ router.post(
         },
       });
     } catch (err) {
-      // Idempotency-Key misuse (same key, different payload)
       if (err instanceof VisitCreateRuleViolationError) {
         return res.status(400).json({
           error: err.code,
@@ -361,8 +356,6 @@ const RxCreateBody = z
   .object({
     lines: z.array(RxLine).optional().default([]),
     toothDetails: z.array(ToothDetail).optional().default([]),
-
-    // ✅ NEW: doctor notes for reception only
     doctorNotes: z.string().max(2000).optional(),
   })
   .superRefine((val, ctx) => {
@@ -413,10 +406,6 @@ router.post(
     const now = Date.now();
 
     const isDone = visit.status === 'DONE';
-
-    // ✅ Option 2:
-    // - before DONE: always write draft.json and keep version 1
-    // - after DONE: always write revision.json and keep version 2 (create once)
     const jsonKey = isDone ? revisionRxJsonKey(visit.visitId) : draftRxJsonKey(visit.visitId);
 
     const jsonPayload: Record<string, unknown> = {
@@ -451,8 +440,6 @@ router.post(
       });
       throw new PrescriptionStorageError();
     }
-
-    // ✅ Persist metadata
     let prescription;
     if (!isDone) {
       prescription = await prescriptionRepository.upsertDraftForVisit({
@@ -463,7 +450,6 @@ router.post(
         doctorNotes,
       });
     } else {
-      // ensure revision exists (version 2) once, then overwrite it
       const revision = await prescriptionRepository.ensureRevisionForVisit({ visit, jsonKey });
       prescription =
         (await prescriptionRepository.updateById({
@@ -750,7 +736,6 @@ router.get(
     const id = VisitId.safeParse(req.params.visitId);
     if (!id.success) return handleValidationError(req, res, id.error.issues);
 
-    // ✅ support ?version=2 or ?rxId=<uuid>
     const RxQuery = z.object({
       version: z.coerce.number().int().positive().optional(),
       rxId: z.string().uuid().optional(),
@@ -780,11 +765,6 @@ router.get(
       v !== null &&
       'visitId' in v &&
       typeof (v as { visitId: unknown }).visitId === 'string';
-
-    // Priority:
-    // 1) rxId (exact)
-    // 2) version (specific)
-    // 3) current (existing behavior)
     let rx: unknown | null = null;
 
     if (q.data.rxId) {

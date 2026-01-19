@@ -138,7 +138,6 @@ export default function RegisterVisitPage() {
       return;
     }
 
-    // Default anchor to latest N if not chosen yet
     setAnchorVisitId((prev) => prev ?? anchorCandidates[0]?.visitId ?? undefined);
   }, [tag, anchorCandidates]);
 

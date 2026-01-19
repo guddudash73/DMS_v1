@@ -1,4 +1,3 @@
-// apps/api/test/visits-queue-concurrency.test.ts
 import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -49,11 +48,10 @@ async function createVisit(patientId: string, doctorId: string, reason: string) 
     .send({ patientId, doctorId, reason })
     .expect(201);
 
-  // backend may return { visit, tokenPrint } or the visit directly
   return (res.body.visit ?? res.body) as { visitId: string; visitDate: string; patientId: string };
 }
 
-const runId = Date.now(); // uniqueness across runs
+const runId = Date.now();
 
 describe('Doctor queue concurrency – DOCTOR_DAY lock', () => {
   it('allows multiple IN_PROGRESS visits for same doctor/day (no lock enforced in backend)', async () => {
@@ -73,8 +71,6 @@ describe('Doctor queue concurrency – DOCTOR_DAY lock', () => {
 
     expect(takeSeat1.body.visitId).toBe(v1.visitId);
     expect(takeSeat1.body.status).toBe('IN_PROGRESS');
-
-    // ✅ Backend currently allows this too (no lock)
     const takeSeat2 = await request(app)
       .post('/visits/queue/take-seat')
       .set('Authorization', asDoctor())
@@ -83,8 +79,6 @@ describe('Doctor queue concurrency – DOCTOR_DAY lock', () => {
 
     expect(takeSeat2.body.visitId).toBe(v2.visitId);
     expect(takeSeat2.body.status).toBe('IN_PROGRESS');
-
-    // Mark v1 DONE (valid transition IN_PROGRESS -> DONE)
     const doneRes = await request(app)
       .patch(`/visits/${v1.visitId}/status`)
       .set('Authorization', asReception())
@@ -93,8 +87,6 @@ describe('Doctor queue concurrency – DOCTOR_DAY lock', () => {
 
     expect(doneRes.body.visitId).toBe(v1.visitId);
     expect(doneRes.body.status).toBe('DONE');
-
-    // v2 should still be IN_PROGRESS
     const v2Get = await request(app)
       .get(`/visits/${v2.visitId}`)
       .set('Authorization', asReception())

@@ -1,4 +1,3 @@
-// apps/api/src/routes/auth.ts
 import { Router, type Response } from 'express';
 import bcrypt from 'bcrypt';
 import { validate } from '../middlewares/zod';
@@ -10,7 +9,7 @@ import { getEnv } from '../config/env';
 import { buildTokenPair, verifyRefreshToken } from '../lib/authTokens';
 import { AuthError } from '../middlewares/auth';
 import { logInfo, logAudit } from '../lib/logger';
-import { loginRateLimiter } from '../middlewares/rateLimit';
+import { loginRateLimiter, refreshRateLimiter, logoutRateLimiter } from '../middlewares/rateLimit';
 
 const r = Router();
 
@@ -27,7 +26,7 @@ const setRefreshCookie = (res: Response, refreshToken: string) => {
     secure: env.NODE_ENV === 'production',
     sameSite: 'lax',
     maxAge: env.REFRESH_TOKEN_TTL_SEC * 1000,
-    path: '/', // ✅ IMPORTANT: allow cookie on all routes
+    path: '/',
   });
 };
 
@@ -128,7 +127,7 @@ r.post('/login', loginRateLimiter, validate(LoginRequest), async (req, res, next
   }
 });
 
-r.post('/refresh', async (req, res, next) => {
+r.post('/refresh', refreshRateLimiter, async (req, res, next) => {
   try {
     const env = getEnv();
 
@@ -200,7 +199,7 @@ r.post('/refresh', async (req, res, next) => {
   }
 });
 
-r.post('/logout', async (req, res, next) => {
+r.post('/logout', logoutRateLimiter, async (req, res, next) => {
   try {
     const cookieToken = req.cookies?.[COOKIE_NAME] as string | undefined;
 

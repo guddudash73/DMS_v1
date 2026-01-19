@@ -1,10 +1,5 @@
-// apps/api/src/lib/httpQuery.ts
 import type { Request } from 'express';
 
-/**
- * Express query values can be string | string[] | undefined (and sometimes ParsedQs).
- * We want a single string value, deterministic (first element if array).
- */
 export function qString(req: Request, key: string): string | undefined {
   const raw = (req.query as Record<string, unknown>)[key];
 
@@ -15,7 +10,6 @@ export function qString(req: Request, key: string): string | undefined {
     return typeof first === 'string' ? first : undefined;
   }
 
-  // Some setups/types use objects for qs parsing — ignore those.
   return undefined;
 }
 

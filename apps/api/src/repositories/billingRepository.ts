@@ -1,4 +1,3 @@
-// apps/api/src/repositories/billingRepository.ts
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -70,8 +69,6 @@ const buildFollowUpKey = (visitId: string, followupId: string) => ({
   SK: `FOLLOWUP#${followupId}`,
 });
 
-/* ------------------------- Bill number counter (daily) ------------------------- */
-
 const buildBillDailyCounterKey = (visitDate: string) => ({
   PK: `COUNTER#BILL#${visitDate}`,
   SK: 'META',
@@ -99,14 +96,10 @@ function formatBillNo(visitDate: string, seq: number) {
   return `BL/${yy}/${mm}/${dd}/${String(seq).padStart(3, '0')}`;
 }
 
-/* -------------------------------- Followup GSI -------------------------------- */
-
 const gsi3PK_date = (dateISO: string) => `DATE#${dateISO}`;
 const gsi3SK_typeId = (type: 'FOLLOWUP', id: string) => `TYPE#${type}#ID#${id}`;
 
 const todayDateString = (): string => isoDateInTimeZone(new Date(), 'Asia/Kolkata');
-
-/* -------------------------------- Computations -------------------------------- */
 
 interface ComputedBillingTotals {
   billing: Billing;
@@ -116,7 +109,6 @@ interface ComputedBillingTotals {
 const computeTotals = (visitId: VisitId, input: BillingCheckoutInput): ComputedBillingTotals => {
   const now = Date.now();
 
-  // ✅ enforce mutual exclusivity here too (in addition to zod)
   if (input.receivedOnline === true && input.receivedOffline === true) {
     throw new BillingRuleViolationError('Only one of receivedOnline/receivedOffline can be true');
   }
@@ -144,7 +136,6 @@ const computeTotals = (visitId: VisitId, input: BillingCheckoutInput): ComputedB
 
   const billing: Billing = {
     visitId,
-    // billNo is set by checkout/updateBill (not here)
     billNo: '',
     items,
     subtotal,
@@ -186,7 +177,7 @@ type TransactItem =
 
 export interface BillingRepository {
   checkout(visitId: VisitId, input: BillingCheckoutInput): Promise<Billing>;
-  updateBill(visitId: VisitId, input: BillingCheckoutInput): Promise<Billing>; // ✅ Option 2 admin edit
+  updateBill(visitId: VisitId, input: BillingCheckoutInput): Promise<Billing>;
   getByVisitId(visitId: VisitId): Promise<Billing | null>;
 }
 
@@ -203,7 +194,6 @@ export class DynamoDBBillingRepository implements BillingRepository {
 
     const patient = await patientRepository.getById(visit.patientId);
 
-    // ✅ production-safe: treat deleted patient like missing
     if (!patient || patient.isDeleted) {
       throw new BillingRuleViolationError('Cannot checkout visit for deleted or missing patient');
     }
@@ -213,20 +203,17 @@ export class DynamoDBBillingRepository implements BillingRepository {
       throw new DuplicateCheckoutError('Billing already exists for this visit');
     }
 
-    // ✅ Z rule: billing is disabled unless explicitly enabled
     if (visit.zeroBilled === true && input.allowZeroBilled !== true) {
       throw new BillingRuleViolationError(
         'Billing is disabled for zero-billed (Z) visits. Enable billing to proceed.',
       );
     }
 
-    // ✅ Generate stable bill number once
     const billSeq = await nextBillCounter(visit.visitDate);
     const billNo = formatBillNo(visit.visitDate, billSeq);
 
     const { billing, total } = computeTotals(visitId, input);
 
-    // ✅ Hard enforcement: for all zero-billed visits, total must be 0
     if (visit.zeroBilled === true && total > 0) {
       throw new BillingRuleViolationError('Zero-billed (Z) visits must have total = 0.');
     }
@@ -363,7 +350,7 @@ export class DynamoDBBillingRepository implements BillingRepository {
           Item: {
             ...buildBillingKey(visitId),
             entityType: 'BILLING',
-            ...billingWithNo, // ✅ STORE billNo
+            ...billingWithNo,
           },
           ConditionExpression: 'attribute_not_exists(PK)',
         },
@@ -400,16 +387,9 @@ export class DynamoDBBillingRepository implements BillingRepository {
       receivedOffline: billingWithNo.receivedOffline ?? false,
     });
 
-    return billingWithNo; // ✅ return billNo
+    return billingWithNo;
   }
 
-  /**
-   * ✅ Option 2:
-   * Admin edits an existing bill:
-   * - billNo stays the same (stable)
-   * - totals/items can change
-   * - visit.billingAmount updates accordingly
-   */
   async updateBill(visitId: VisitId, input: BillingCheckoutInput): Promise<Billing> {
     const existingBill = await this.getByVisitId(visitId);
     if (!existingBill) {
@@ -430,7 +410,6 @@ export class DynamoDBBillingRepository implements BillingRepository {
       throw new BillingRuleViolationError('Cannot update bill for deleted or missing patient');
     }
 
-    // ✅ Z rule still applies
     if (visit.zeroBilled === true && input.allowZeroBilled !== true) {
       throw new BillingRuleViolationError(
         'Billing is disabled for zero-billed (Z) visits. Enable billing to proceed.',
@@ -447,8 +426,8 @@ export class DynamoDBBillingRepository implements BillingRepository {
 
     const updatedBill: Billing = {
       ...billing,
-      billNo: existingBill.billNo, // ✅ keep stable
-      createdAt: existingBill.createdAt, // ✅ keep original time
+      billNo: existingBill.billNo,
+      createdAt: existingBill.createdAt,
     };
 
     const receivedOnline =
@@ -456,7 +435,6 @@ export class DynamoDBBillingRepository implements BillingRepository {
     const receivedOffline =
       typeof input.receivedOffline === 'boolean' ? input.receivedOffline : undefined;
 
-    // ✅ Replace BILLING item + update billingAmount on visit records
     try {
       await docClient.send(
         new TransactWriteCommand({
@@ -578,7 +556,6 @@ export class DynamoDBBillingRepository implements BillingRepository {
     }
 
     const patient = await patientRepository.getById(visit.patientId);
-    // keep old behavior here; this is only for reading a bill
     if (!patient) {
       return null;
     }

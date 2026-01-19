@@ -1,4 +1,3 @@
-// apps/web/components/dashboard/TodayCaseMixCard.tsx
 'use client';
 
 import { useMemo } from 'react';
@@ -40,18 +39,12 @@ type ClinicDailyVisitsBreakdownItem = {
   visitId: string;
   visitDate: string;
   status: 'QUEUED' | 'IN_PROGRESS' | 'DONE';
-
-  // ✅ tags are only N/F now
   tag?: 'N' | 'F';
-
-  // ✅ zero-billed flag
   zeroBilled?: boolean;
-
   reason?: string;
   billingAmount?: number;
   createdAt: number;
   updatedAt: number;
-
   patientId: string;
   patientName: string;
   patientPhone?: string;
@@ -87,7 +80,6 @@ export default function TodayCaseMixCard() {
     let newCount = 0;
     let followupCount = 0;
 
-    // billing split is independent of N/F count
     let zeroBilledCount = 0;
     let billedCount = 0;
 
@@ -98,15 +90,12 @@ export default function TodayCaseMixCard() {
       if (v.zeroBilled === true) {
         zeroBilledCount += 1;
       } else {
-        // Count as "Billed" only if it has a positive billing amount.
         const amt = typeof v.billingAmount === 'number' ? v.billingAmount : 0;
         if (amt > 0) billedCount += 1;
       }
     }
 
     const visitorsTotal = newCount + followupCount;
-
-    // Safety clamp (should never go negative)
     billedCount = Math.max(0, billedCount);
 
     return {
@@ -122,8 +111,6 @@ export default function TodayCaseMixCard() {
     <Card className="w-full rounded-2xl border-none bg-white px-6 py-4 shadow-sm h-full flex justify-center">
       <h3 className="text-xl font-semibold tracking-wide text-gray-900">Today&apos;s Case Mix</h3>
       <p className="mt-1 text-xs text-gray-400">Counts are visits (not unique patients).</p>
-
-      {/* Keep the overall height/feel similar, but show the richer breakdown */}
       <div className="mt-4 space-y-2.5">
         <Row label="New (N)" value={stats.n} dotClass="bg-[#22c55e]" showDots={showDots} />
         <Row label="Followup (F)" value={stats.f} dotClass="bg-[#60a5fa]" showDots={showDots} />

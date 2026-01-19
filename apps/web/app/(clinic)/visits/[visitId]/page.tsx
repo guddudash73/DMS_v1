@@ -156,7 +156,6 @@ function getErrorMessage(err: unknown): string {
 }
 
 function anchorIdFromVisit(v: Visit): string | undefined {
-  // Visit is an object at runtime; safely read possible anchor keys without `any`
   return (
     getPropString(v as unknown, 'anchorVisitId') ??
     getPropString(v as unknown, 'anchorId') ??
@@ -168,10 +167,7 @@ export default function ClinicVisitInfoPage() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
   const auth = useAuth();
-
   const visitId = String(params?.visitId ?? '');
-
-  // --- Visit + Patient ---
   const visitQuery = useGetVisitByIdQuery(visitId, {
     skip: !visitId,
     refetchOnMountOrArgChange: true,
@@ -187,10 +183,7 @@ export default function ClinicVisitInfoPage() {
     refetchOnMountOrArgChange: true,
   });
 
-  // --- Doctors (for label) ---
   const doctorsQuery = useGetDoctorsQuery(undefined);
-
-  // --- Visits (for Rx chain) ---
   const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', {
     skip: !patientId,
     refetchOnMountOrArgChange: true,
@@ -200,8 +193,6 @@ export default function ClinicVisitInfoPage() {
     const items = getProp(visitsQuery.data, 'items');
     return Array.isArray(items) ? (items as Visit[]) : [];
   }, [visitsQuery.data]);
-
-  // --- Rx versioning ---
   const versionsQuery = useGetVisitRxVersionsQuery(
     { visitId },
     { skip: !visitId, refetchOnMountOrArgChange: true },
@@ -214,25 +205,21 @@ export default function ClinicVisitInfoPage() {
 
   const latestVersion = React.useMemo(() => {
     if (!versions.length) return null;
-    // backend may return sorted or not; treat max as latest
     return Math.max(...versions);
   }, [versions]);
 
   const [selectedRxVersion, setSelectedRxVersion] = React.useState<number | null>(null);
 
   React.useEffect(() => {
-    // default select latest when available
     if (selectedRxVersion != null) return;
     if (latestVersion != null) setSelectedRxVersion(latestVersion);
   }, [latestVersion, selectedRxVersion]);
 
-  // Base "latest" rx query (fallback if versions endpoint unavailable)
   const rxLatestQuery = useGetVisitRxQuery(
     { visitId },
     { skip: !visitId, refetchOnMountOrArgChange: true },
   );
 
-  // Versioned rx query (preferred when DONE / when versions exist)
   const rxByVersionQuery = useGetVisitRxQuery(
     { visitId, version: selectedRxVersion ?? undefined },
     {
@@ -258,28 +245,24 @@ export default function ClinicVisitInfoPage() {
     return String(getProp(rxToShow, 'doctorNotes') ?? '');
   }, [rxToShow]);
 
-  // --- Reception notes editing (only allow on Latest) ---
   const [updateNotes, updateNotesState] = useUpdateVisitRxReceptionNotesMutation();
   const [notes, setNotes] = React.useState('');
   const hydratedRef = React.useRef(false);
 
   const isViewingLatest = React.useMemo(() => {
-    if (latestVersion == null) return true; // if versions missing, treat as latest
+    if (latestVersion == null) return true;
     if (selectedRxVersion == null) return true;
     return selectedRxVersion === latestVersion;
   }, [selectedRxVersion, latestVersion]);
 
   React.useEffect(() => {
-    // reset hydration when switching versions
     hydratedRef.current = false;
   }, [selectedRxVersion]);
 
   React.useEffect(() => {
-    // hydrate notes from rxToShow once per version view
     if (!visitId) return;
     if (hydratedRef.current) return;
 
-    // only hydrate once we actually have rx response (either versioned or latest)
     const loading =
       rxLatestQuery.isLoading ||
       rxLatestQuery.isFetching ||
@@ -328,7 +311,6 @@ export default function ClinicVisitInfoPage() {
     }
   };
 
-  // --- Patient computed fields ---
   const patientName = getProp(patientQuery.data, 'name') as unknown;
   const patientPhone = getProp(patientQuery.data, 'phone') as unknown;
 
@@ -360,7 +342,6 @@ export default function ClinicVisitInfoPage() {
   const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
   const patientSex = normalizeSex(patientSexRaw);
 
-  // --- Doctor label ---
   const doctorId = getString(visit?.doctorId);
 
   const doctorFromList = React.useMemo<DoctorLite | null>(() => {
@@ -392,7 +373,6 @@ export default function ClinicVisitInfoPage() {
     ? `Visit: ${toLocalISODate(new Date(visitCreatedAtMs))}`
     : undefined;
 
-  // --- Checkout button rules ---
   const role = auth.status === 'authenticated' ? auth.role : undefined;
   const isAdmin = role === 'ADMIN';
 
@@ -432,7 +412,6 @@ export default function ClinicVisitInfoPage() {
     updateVisitStatusState.isLoading ||
     (!isCheckedOut && !visitDone && !isOfflineVisit);
 
-  // --- Rx chain for history blocks in PrescriptionPreview ---
   const rxChain = React.useMemo(() => {
     const meta = new Map<string, Visit>();
     for (const v of allVisitsRaw) meta.set(v.visitId, v);
@@ -488,12 +467,10 @@ export default function ClinicVisitInfoPage() {
     return { visitIds: limitedIds, meta, currentVisitId: visitId };
   }, [allVisitsRaw, visit, visitId]);
 
-  // --- UI helpers ---
   const versionOptions = React.useMemo(() => {
     if (!versions.length) return [];
     const latest = latestVersion ?? null;
     if (!latest) return [];
-    // show: Latest, then older descending
     return Array.from({ length: latest }, (_, i) => latest - i);
   }, [versions, latestVersion]);
 
@@ -570,7 +547,6 @@ export default function ClinicVisitInfoPage() {
             </div>
           </div>
 
-          {/* ✅ Version selector (only if versions exist) */}
           {versionOptions.length > 0 ? (
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-gray-50 px-3 py-2">
               <div className="text-xs font-medium text-gray-700">
@@ -646,7 +622,7 @@ export default function ClinicVisitInfoPage() {
               Internal note from doctor for reception. This will NOT print.
             </div>
 
-            <div className="mt-3 min-h-[80px] whitespace-pre-wrap rounded-xl bg-gray-50 p-3 text-sm text-gray-800">
+            <div className="mt-3 min-h-20 whitespace-pre-wrap rounded-xl bg-gray-50 p-3 text-sm text-gray-800">
               {doctorNotes.trim() ? doctorNotes : '—'}
             </div>
           </div>
@@ -679,7 +655,7 @@ export default function ClinicVisitInfoPage() {
             </div>
 
             <Textarea
-              className="mt-3 min-h-[120px] rounded-xl"
+              className="mt-3 min-h-30 rounded-xl"
               placeholder={
                 !isViewingLatest
                   ? 'Reception Notes are read-only for older versions. Switch to Latest to edit.'

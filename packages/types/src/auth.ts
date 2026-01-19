@@ -1,4 +1,3 @@
-// packages/types/src/auth.ts
 import { z } from 'zod';
 import { Role, UserId } from './user';
 

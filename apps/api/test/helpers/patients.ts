@@ -1,4 +1,3 @@
-// apps/api/test/helpers/patients.ts
 import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, DeleteCommand, ScanCommand } from '@aws-sdk/lib-dynamodb';
 import { getEnv } from '../../src/config/env';
@@ -34,7 +33,6 @@ async function deleteKeys(keys: Key[]) {
 export const deletePatientCompletely = async (patientId: string): Promise<void> => {
   if (!env.DDB_TABLE_NAME) return;
 
-  // 1) Delete patient profile (safe even if missing)
   try {
     await docClient.send(
       new DeleteCommand({
@@ -46,13 +44,11 @@ export const deletePatientCompletely = async (patientId: string): Promise<void> 
     // ignore
   }
 
-  // 2) Delete any patient-scoped items (including patient->visit items)
   const patientScopedKeys: Key[] = [];
   try {
     const scan = await docClient.send(
       new ScanCommand({
         TableName: env.DDB_TABLE_NAME,
-        // Cheap + broad for tests: delete all items with PK = PATIENT#<id>
         FilterExpression: 'PK = :pk',
         ExpressionAttributeValues: {
           ':pk': `PATIENT#${patientId}`,
@@ -71,7 +67,6 @@ export const deletePatientCompletely = async (patientId: string): Promise<void> 
 
   await deleteKeys(patientScopedKeys);
 
-  // 3) Find all visits belonging to this patient (from visit meta rows)
   const visitIds = new Set<string>();
   try {
     const scanVisits = await docClient.send(
@@ -92,7 +87,6 @@ export const deletePatientCompletely = async (patientId: string): Promise<void> 
     for (const item of scanVisits.Items ?? []) {
       const pk = (item as any).PK as string | undefined;
       if (!pk) continue;
-      // PK looks like "VISIT#<visitId>"
       const parts = pk.split('#');
       if (parts.length >= 2) visitIds.add(parts.slice(1).join('#'));
     }
@@ -100,7 +94,6 @@ export const deletePatientCompletely = async (patientId: string): Promise<void> 
     // ignore
   }
 
-  // 4) For each visit, delete everything under PK = VISIT#<visitId>
   for (const visitId of visitIds) {
     const keys: Key[] = [];
     try {
@@ -125,7 +118,6 @@ export const deletePatientCompletely = async (patientId: string): Promise<void> 
 
     await deleteKeys(keys);
 
-    // Also delete patient-visit row if it exists (in case step #2 missed it due to eventuals)
     try {
       await docClient.send(
         new DeleteCommand({
@@ -138,7 +130,6 @@ export const deletePatientCompletely = async (patientId: string): Promise<void> 
     }
   }
 
-  // 5) Backward-compat: delete patient phone index items (your old cleanup)
   try {
     const scan = await docClient.send(
       new ScanCommand({

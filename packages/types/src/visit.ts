@@ -1,4 +1,3 @@
-// packages/types/src/visit.ts
 import { z } from 'zod';
 import { PatientId } from './patient';
 
@@ -8,10 +7,6 @@ export type VisitId = z.infer<typeof VisitId>;
 export const VisitStatus = z.enum(['QUEUED', 'IN_PROGRESS', 'DONE']);
 export type VisitStatus = z.infer<typeof VisitStatus>;
 
-/**
- * ✅ Only N/F are tags now.
- * Z is now represented by zeroBilled: boolean
- */
 export const VisitTag = z.enum(['N', 'F']);
 export type VisitTag = z.infer<typeof VisitTag>;
 
@@ -25,8 +20,6 @@ export const Visit = z.object({
 
   opdNo: z.string().min(1).optional(),
 
-  // ✅ NEW: stable daily number (1..N) for that clinic date
-  // optional to keep backward compatibility with older records
   dailyPatientNumber: z.number().int().min(1).optional(),
 
   checkedOut: z.boolean().optional(),
@@ -44,6 +37,9 @@ export const Visit = z.object({
   anchorVisitId: VisitId.optional(),
 
   isOffline: z.boolean().optional(),
+
+  receivedOnline: z.boolean().optional(),
+  receivedOffline: z.boolean().optional(),
 
   currentRxId: z.string().min(1).optional(),
   currentRxVersion: z.number().int().min(1).optional(),

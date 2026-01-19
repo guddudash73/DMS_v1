@@ -1,4 +1,3 @@
-// apps/api/src/repositories/refreshTokenRepository.ts
 import {
   DynamoDBDocumentClient,
   PutCommand,
@@ -70,8 +69,6 @@ export class DynamoDBRefreshTokenRepository implements RefreshTokenRepository {
     if (!Item.valid || typeof Item.expiresAt !== 'number' || Item.expiresAt < now) {
       return null;
     }
-
-    // ✅ atomic consume: only if still valid AND not expired at update time
     const { Attributes } = await docClient.send(
       new UpdateCommand({
         TableName: TABLE_NAME,

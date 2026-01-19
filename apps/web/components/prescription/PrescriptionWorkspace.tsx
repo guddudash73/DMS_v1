@@ -52,12 +52,9 @@ type Props = {
   patientId?: string;
   patientName?: string;
   patientPhone?: string;
-
   patientSdId?: string;
   opdNo?: string;
-
   doctorName?: string;
-
   visitDateLabel?: string;
   visitStatus?: 'QUEUED' | 'IN_PROGRESS' | 'DONE';
 
@@ -163,7 +160,7 @@ function MedicinesReadOnly({ lines }: { lines: RxLineType[] }) {
 
             return (
               <TableRow key={key} className="hover:bg-gray-50/60">
-                <TableCell className="w-[60px] text-gray-700">{idx + 1}</TableCell>
+                <TableCell className="w-15 text-gray-700">{idx + 1}</TableCell>
                 <TableCell className="text-gray-800">{lineToText(l)}</TableCell>
               </TableRow>
             );
@@ -874,7 +871,7 @@ export function PrescriptionWorkspace(props: Props) {
             </div>
 
             <textarea
-              className="mt-3 w-full min-h-[90px] rounded-2xl border bg-gray-50 p-3 text-sm outline-none focus:bg-white"
+              className="mt-3 w-full min-h-22.5 rounded-2xl border bg-gray-50 p-3 text-sm outline-none focus:bg-white"
               placeholder="—"
               value={doctorNotes}
               onChange={(e) => setDoctorNotes(e.target.value)}
@@ -953,7 +950,7 @@ export function PrescriptionWorkspace(props: Props) {
                 <Button
                   type="button"
                   variant="outline"
-                  className="w-[220px] justify-start gap-2 rounded-xl"
+                  className="w-55 justify-start gap-2 rounded-xl"
                 >
                   <CalendarIcon className="h-4 w-4" />
                   <span className={selectedDateStr ? 'text-gray-900' : 'text-gray-500'}>

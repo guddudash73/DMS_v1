@@ -1,4 +1,3 @@
-// apps/api/test/medicine.test.ts
 import { beforeAll, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -11,7 +10,7 @@ let doctorAuthHeader: string;
 
 beforeAll(async () => {
   await warmAuth();
-  doctorAuthHeader = asDoctor(); // already "Bearer <token>"
+  doctorAuthHeader = asDoctor();
 });
 
 describe('Medicines API', () => {

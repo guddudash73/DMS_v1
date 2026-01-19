@@ -37,7 +37,7 @@ function sanitizeAny(value: unknown, depth = 0): unknown {
     for (const [k, v] of Object.entries(obj)) {
       const lower = k.toLowerCase();
       if (REDACT_KEYS.has(lower)) {
-        out[k] = '[REDACTED]'; // ✅ fixed spelling
+        out[k] = '[REDACTED]';
       } else {
         out[k] = sanitizeAny(v, depth + 1);
       }

@@ -1,4 +1,3 @@
-// apps/api/test/xray-conflict.test.ts
 import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -58,7 +57,6 @@ async function createVisit(patientId: string) {
     })
     .expect(201);
 
-  // backend may return { visit, tokenPrint } or the visit directly
   return (res.body.visit ?? res.body) as { visitId: string; visitDate: string; patientId: string };
 }
 

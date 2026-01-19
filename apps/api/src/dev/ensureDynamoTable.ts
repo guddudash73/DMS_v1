@@ -1,4 +1,3 @@
-// apps/api/src/dev/ensureDynamoTable.ts
 import {
   DynamoDBClient,
   ListTablesCommand,

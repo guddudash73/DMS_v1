@@ -1,4 +1,3 @@
-// apps/api/test/patients.test.ts
 import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';

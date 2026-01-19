@@ -33,18 +33,12 @@ export type RxId = z.infer<typeof RxId>;
 export const Prescription = z.object({
   rxId: RxId,
   visitId: VisitId,
-
   lines: z.array(RxLine).default([]),
-
   version: z.number().int().min(1).default(1),
   jsonKey: z.string().min(1),
-
   toothDetails: z.array(ToothDetail).optional(),
-
   doctorNotes: z.string().max(2000).optional(),
-
   receptionNotes: z.string().max(2000).optional(),
-
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 });

@@ -1,4 +1,3 @@
-// apps/web/app/(admin)/admin/users/page.tsx
 'use client';
 
 import { useMemo, useState } from 'react';
@@ -23,8 +22,6 @@ import {
 
 import { useAuth } from '@/src/hooks/useAuth';
 
-// ✅ Admin users page should never create DOCTOR.
-// Keep Role for displaying existing users, but use a narrower type for creation/filtering.
 type AdminUserRole = Exclude<Role, 'DOCTOR'>;
 
 const ROLE_OPTIONS: Array<{ value: Role; label: string }> = [
@@ -34,7 +31,6 @@ const ROLE_OPTIONS: Array<{ value: Role; label: string }> = [
   { value: 'DOCTOR', label: 'Doctor' },
 ];
 
-// ✅ Only safe roles for create/filter
 const ADMIN_ROLE_OPTIONS: Array<{ value: AdminUserRole; label: string }> = [
   { value: 'RECEPTION', label: 'Reception' },
   { value: 'VIEWER', label: 'Viewer' },
@@ -50,7 +46,6 @@ function roleBadge(role: Role) {
   );
 }
 
-// ---- small safe helpers (avoid `any`) ----
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
@@ -81,7 +76,6 @@ export default function AdminUsersPage() {
   const currentUserId = readCurrentUserId(auth);
 
   const [query, setQuery] = useState('');
-  // ✅ Filter role should match what backend expects for /admin/users (no DOCTOR)
   const [role, setRole] = useState<AdminUserRole | ''>('');
   const [active, setActive] = useState<ActiveFilter>('all');
 
@@ -99,14 +93,11 @@ export default function AdminUsersPage() {
   const [createEmail, setCreateEmail] = useState('');
   const [createName, setCreateName] = useState('');
   const [createPassword, setCreatePassword] = useState('');
-  // ✅ Create role is safe union (cannot be DOCTOR)
   const [createRole, setCreateRole] = useState<AdminUserRole>('RECEPTION');
   const [createActive, setCreateActive] = useState(true);
-
   const [createUser, createState] = useAdminCreateUserMutation();
   const [updateUser] = useAdminUpdateUserMutation();
   const [deleteUser, deleteState] = useAdminDeleteUserMutation();
-
   const [resetPassword, resetState] = useAdminResetUserPasswordMutation();
   const [resetOpen, setResetOpen] = useState(false);
   const [resetUserId, setResetUserId] = useState<string | null>(null);
@@ -420,7 +411,7 @@ export default function AdminUsersPage() {
                     email: createEmail.trim(),
                     displayName: createName.trim(),
                     password: createPassword,
-                    role: createRole, // ✅ now typed as AdminUserRole (no DOCTOR possible)
+                    role: createRole,
                     active: createActive,
                   }).unwrap();
 

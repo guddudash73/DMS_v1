@@ -1,10 +1,8 @@
-// apps/api/src/server.ts
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { randomUUID } from 'node:crypto';
 import { parseEnv } from '@dcm/config';
 import type { HealthResponse } from '@dcm/types';
-
 import authRoutes from './routes/auth';
 import patientRoutes from './routes/patients';
 import visitRoutes from './routes/visits';
@@ -17,7 +15,6 @@ import adminDoctorsRouter from './routes/admin-doctors';
 import adminRxPresetsRouter from './routes/admin-rx-presets';
 import adminMedicinesRouter from './routes/admin-medicines';
 import doctorsRouter from './routes/doctors';
-
 import { authMiddleware, requireRole } from './middlewares/auth';
 import { genericSensitiveRateLimiter } from './middlewares/rateLimit';
 import { logInfo } from './lib/logger';
@@ -31,16 +28,10 @@ const env = parseEnv(process.env);
 
 export const createApp = () => {
   const app = express();
-
   app.set('trust proxy', 1);
-
-  // ✅ Single source of truth for CORS + security headers.
-  // Do NOT add another cors() middleware elsewhere.
   app.use(createSecurityMiddleware(env));
-
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
-
   app.use((req, res, next) => {
     const headerReqId = req.header('x-request-id');
     const reqId = headerReqId && headerReqId.trim().length > 0 ? headerReqId : randomUUID();
@@ -70,117 +61,118 @@ export const createApp = () => {
     res.status(200).json(payload);
   });
 
-  app.use('/auth', genericSensitiveRateLimiter, authRoutes);
+  app.use('/auth', authRoutes);
 
   app.use(
     '/patients',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('RECEPTION', 'DOCTOR', 'ADMIN'),
     patientRoutes,
   );
 
   app.use(
     '/visits',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('RECEPTION', 'DOCTOR', 'ADMIN'),
     visitRoutes,
   );
 
   app.use(
     '/reports',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('ADMIN', 'DOCTOR', 'RECEPTION'),
     reportsRoutes,
   );
 
   app.use(
     '/xrays',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
     xrayRouter,
   );
+
   app.use(
     '/xray',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
     xrayRouter,
   );
 
   app.use(
     '/rx',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
     rxRouter,
   );
 
   app.use(
     '/medicines',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('DOCTOR', 'ADMIN'),
     medicinesRouter,
   );
 
   app.use(
     '/admin/medicines',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('ADMIN'),
     adminMedicinesRouter,
   );
 
   app.use(
     '/rx-presets',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
     rxPresetsRouter,
   );
 
   app.use(
     '/doctors',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('ADMIN', 'RECEPTION', 'DOCTOR'),
     doctorsRouter,
   );
 
   app.use(
     '/admin/doctors',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('ADMIN', 'RECEPTION'),
     adminDoctorsRouter,
   );
 
   app.use(
     '/admin/users',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('ADMIN'),
     adminUsersRouter,
   );
 
   app.use(
     '/admin/rx-presets',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('ADMIN'),
     adminRxPresetsRouter,
   );
 
-  app.use('/me', authMiddleware, meRouter);
+  app.use('/me', authMiddleware, genericSensitiveRateLimiter, meRouter);
 
   app.use(
     '/followups',
-    genericSensitiveRateLimiter,
     authMiddleware,
+    genericSensitiveRateLimiter,
     requireRole('RECEPTION', 'ADMIN'),
     followupsRouter,
   );

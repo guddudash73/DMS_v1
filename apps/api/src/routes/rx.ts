@@ -1,4 +1,3 @@
-// apps/api/src/routes/rx.ts
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
 import { RxId } from '@dcm/types';
@@ -12,7 +11,7 @@ import { logError } from '../lib/logger';
 import { RxLine, ToothDetail } from '@dcm/types';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { s3Client } from '../config/aws';
-import { requireRole } from '../middlewares/auth'; // ✅ ADD
+import { requireRole } from '../middlewares/auth';
 
 const router = express.Router();
 
@@ -63,7 +62,7 @@ const RxUpdateBody = z
 
 router.get(
   '/:rxId/json-url',
-  requireRole('DOCTOR', 'ADMIN', 'RECEPTION'), // ✅ ADD
+  requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
   asyncHandler(async (req, res) => {
     const env = getEnv();
 
@@ -151,7 +150,7 @@ router.get(
 
 router.put(
   '/:rxId',
-  requireRole('DOCTOR', 'ADMIN'), // ✅ doctor-only editing
+  requireRole('DOCTOR', 'ADMIN'),
   asyncHandler(async (req, res) => {
     const env = getEnv();
 
@@ -174,7 +173,6 @@ router.put(
     const nextLines = body.data.lines ?? existing.lines ?? [];
     const nextJsonKey = body.data.jsonKey ?? existing.jsonKey;
 
-    // ✅ Keep S3 JSON consistent with Dynamo metadata
     const now = Date.now();
     const jsonPayload: Record<string, unknown> = {
       visitId: existing.visitId,
@@ -222,8 +220,8 @@ router.put(
       rxId,
       lines: nextLines,
       jsonKey: nextJsonKey,
-      toothDetails: body.data.toothDetails, // undefined => no change
-      doctorNotes: body.data.doctorNotes, // undefined => no change
+      toothDetails: body.data.toothDetails,
+      doctorNotes: body.data.doctorNotes,
     });
 
     if (!updated) {

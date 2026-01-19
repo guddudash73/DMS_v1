@@ -153,7 +153,6 @@ export default function NewPatientPage() {
                     {...register('gender')}
                   >
                     <option value="">Choose a category</option>
-                    {/* ✅ Use enum values expected by backend */}
                     <option value="MALE">Male</option>
                     <option value="FEMALE">Female</option>
                     <option value="OTHER">Other</option>
@@ -188,7 +187,7 @@ export default function NewPatientPage() {
                 <Textarea
                   id="address"
                   placeholder="Type patient address here..."
-                  className={`min-h-[90px] rounded-xl text-sm ${
+                  className={`min-h-22.5 rounded-xl text-sm ${
                     errors.address
                       ? 'border-red-500 focus-visible:ring-red-500'
                       : 'border-gray-200 focus-visible:ring-gray-300'

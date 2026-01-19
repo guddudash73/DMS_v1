@@ -1,4 +1,3 @@
-// apps/api/src/index.ts
 import 'dotenv/config';
 import { createApp } from './server';
 import { getEnv } from './config/env';
@@ -86,7 +85,6 @@ function getErrorCodeAndMessage(err: unknown): { code: string; message: string }
 }
 
 async function main() {
-  // validate env once at startup (production-grade fail fast)
   const env = getEnv();
 
   const isLocalDynamo =

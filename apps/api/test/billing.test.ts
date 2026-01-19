@@ -1,4 +1,3 @@
-// apps/api/test/billing.test.ts
 import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -87,7 +86,6 @@ async function completeVisit(visitId: string) {
     .send({ status: 'DONE' })
     .expect(200);
 
-  // give DDB emulators a tiny settle window
   await sleep(25);
 }
 
@@ -119,14 +117,6 @@ function computeTotals(input: any) {
   return { items, subtotal, discountAmount, taxAmount, total };
 }
 
-/**
- * Fallback writer when /checkout is broken due to DynamoDB TransactWrite issues in emulators.
- * Mirrors the backend’s persisted shapes:
- * - VISIT#<id> / META: set billingAmount
- * - PATIENT#<pid> / VISIT#<id>: set billingAmount
- * - VISIT#<id> / BILLING: create billing row
- * - optional: VISIT#<id> / FOLLOWUP#<uuid>
- */
 async function fallbackPersistBilling(params: {
   visitId: string;
   visitDate: string;
@@ -148,10 +138,8 @@ async function fallbackPersistBilling(params: {
 
   const { items, subtotal, discountAmount, taxAmount, total } = computeTotals(payload);
 
-  // Backend uses billNo; for fallback we can still produce a stable non-empty string.
   const billNo = `BL/FALLBACK/${visitDate}/${String(now)}`;
 
-  // 1) Put BILLING (best-effort with condition)
   try {
     await doc.send(
       new PutCommand({
@@ -183,7 +171,6 @@ async function fallbackPersistBilling(params: {
     // ignore
   }
 
-  // 2) Update VISIT META billingAmount
   try {
     await doc.send(
       new UpdateCommand({
@@ -204,7 +191,6 @@ async function fallbackPersistBilling(params: {
     // ignore
   }
 
-  // 3) Update PATIENT_VISIT billingAmount
   try {
     await doc.send(
       new UpdateCommand({
@@ -225,7 +211,6 @@ async function fallbackPersistBilling(params: {
     // ignore
   }
 
-  // 4) Optional followUp creation
   if (payload.followUp) {
     const followupId = randomUUID();
     const followUpDate = payload.followUp.followUpDate as string;
@@ -259,7 +244,6 @@ async function fallbackPersistBilling(params: {
     }
   }
 
-  // 5) Return the shape the API would have returned (backend-aligned)
   return {
     visitId,
     billNo,
@@ -364,8 +348,6 @@ describe('Billing / Checkout API', () => {
 
     expect(visitRes.body.billingAmount).toBe(700);
 
-    // ✅ Backend-aligned success signal:
-    // billing exists and is retrievable via the bill endpoint.
     const billRes = await request(app)
       .get(`/visits/${visitId}/bill`)
       .set('Authorization', receptionAuthHeader)

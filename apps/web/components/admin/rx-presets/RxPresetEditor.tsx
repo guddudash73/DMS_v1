@@ -43,7 +43,6 @@ const tagsToArray = (csv: string) =>
     .map((t) => t.trim())
     .filter(Boolean);
 
-// ✅ safe accessors (remove `any` without changing runtime behavior)
 type RxLineLike = Partial<
   Pick<RxLineType, 'medicine' | 'frequency' | 'duration' | 'timing' | 'sig' | 'notes'>
 > & {
@@ -63,7 +62,6 @@ function readDefaults(item: MedicineTypeaheadItem): MedicineDefaultsLike {
 function oneLineSummary(l: RxLineType) {
   const parts: string[] = [];
   parts.push(l.medicine);
-  // dose exists on your line objects at runtime; keep same output, just avoid `any`
   parts.push(String((l as unknown as RxLineLike).dose ?? ''));
   parts.push(l.frequency);
   parts.push(`${l.duration}d`);
@@ -206,7 +204,6 @@ export default function RxPresetEditor({
 
     const newLine: RxLineType = {
       medicine: medicine.trim(),
-      // RxLineType includes dose in your codebase at runtime; keep same shape
       dose: dose.trim(),
       frequency,
       duration: durationNum,
@@ -257,7 +254,6 @@ export default function RxPresetEditor({
   return (
     <div className="min-h-[calc(100vh-64px)] bg-gray-50">
       <div className="mx-auto w-full max-w-none px-4 py-4 2xl:px-10 2xl:py-10">
-        {/* Top bar */}
         <div className="sticky top-0 z-10 -mx-4 mb-4 border-b bg-gray-50/80 px-4 py-3 backdrop-blur 2xl:-mx-10 2xl:px-10">
           <div className="flex items-center justify-between gap-3">
             <Button asChild variant="secondary" className="h-10 rounded-2xl">
@@ -450,7 +446,7 @@ export default function RxPresetEditor({
               </Card>
             </div>
 
-            <div className="w-full xl:w-[480px] xl:sticky xl:top-20">
+            <div className="w-full xl:w-120 xl:sticky xl:top-20">
               <Card className="rounded-3xl border bg-white p-0 shadow-sm">
                 <div className="border-b px-6 py-5">
                   <div className="text-sm font-semibold text-gray-900">Preset Builder</div>

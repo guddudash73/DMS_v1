@@ -2,17 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import {
-  LayoutDashboard,
-  FileText,
-  FileStack,
-  Search,
-  Calendar,
-  Clock,
-  Users,
-  Layers,
-  Pill,
-} from 'lucide-react';
+import { LayoutDashboard, Search, Calendar, Clock, Users, Layers, Pill } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -40,8 +30,6 @@ type NavItem = {
 
 const doctorNav: NavItem[] = [
   { label: 'Dashboard', href: '/doctor', icon: LayoutDashboard },
-  { label: 'Prescription', href: '/doctor/prescription', icon: FileText },
-  { label: 'Documents', href: '/doctor/documents', icon: FileStack },
   { label: 'Medicines', href: '/doctor/medicines', icon: Pill },
   { label: 'Rx Presets', href: '/doctor/rx-presets', icon: Layers },
 ];

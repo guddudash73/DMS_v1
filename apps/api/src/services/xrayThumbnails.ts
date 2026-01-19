@@ -1,4 +1,3 @@
-// apps/api/src/services/xrayThumbnails.ts
 import { GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
 import sharp from 'sharp';
 import { s3Client } from '../lib/s3';

@@ -1,4 +1,3 @@
-// apps/web/app/(admin)/admin/rx-presets/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -44,7 +43,6 @@ function formatWhen(ts?: number) {
 
 type SourceLabel = 'INLINE_DOCTOR' | 'ADMIN_IMPORT';
 
-// ---- small safe helpers (avoid `any`) ----
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
@@ -76,7 +74,6 @@ function getNameFromDoctor(d: Record<string, unknown>): string | undefined {
   );
 }
 
-// Minimal shape we need for this screen (keeps behavior same, avoids `any`)
 type RxPresetListItem = {
   id?: string;
   name?: string;
@@ -84,7 +81,7 @@ type RxPresetListItem = {
   createdByUserId?: string;
   createdAt?: number;
   tags?: string[];
-  lines?: unknown[]; // only `.length` is used here
+  lines?: unknown[];
 };
 
 function coercePresetItem(u: unknown): RxPresetListItem {

@@ -1,4 +1,3 @@
-// apps/api/src/dev/smoke-aws.ts
 import process from 'node:process';
 import { DynamoDBClient, ListTablesCommand } from '@aws-sdk/client-dynamodb';
 import { DynamoDBDocumentClient, PutCommand, GetCommand } from '@aws-sdk/lib-dynamodb';

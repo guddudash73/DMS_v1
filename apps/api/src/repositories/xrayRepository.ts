@@ -73,9 +73,6 @@ export class DynamoDBXrayRepository implements XrayRepository {
       SK: key.xraySK(xrayId),
       entityType: 'XRAY',
       patientId: input.visit.patientId,
-
-      // ❌ removed: doctorId: input.visit.doctorId,
-
       visitDate: input.visit.visitDate,
       ...base,
       GSI3PK: key.gsi3PK_date(input.visit.visitDate),
@@ -88,9 +85,6 @@ export class DynamoDBXrayRepository implements XrayRepository {
       entityType: 'XRAY',
       ...base,
       patientId: input.visit.patientId,
-
-      // ❌ removed: doctorId: input.visit.doctorId,
-
       visitDate: input.visit.visitDate,
     };
 

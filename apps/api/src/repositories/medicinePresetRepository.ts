@@ -1,4 +1,3 @@
-// apps/api/src/repositories/medicinePresetRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
@@ -9,7 +8,7 @@ import {
 } from '@aws-sdk/lib-dynamodb';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 import {
-  MedicinePreset as MedicinePresetSchema, // ✅ zod schema
+  MedicinePreset as MedicinePresetSchema,
   type AdminMedicineSearchQuery,
   type AdminUpdateMedicineRequest,
   type DoctorUpdateMedicineRequest,
@@ -131,7 +130,6 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
       }),
     );
 
-    // Keep it lenient for typeahead (don’t drop results if one item is malformed)
     const parsed = (Items ?? [])
       .map((x) => MedicinePresetSchema.safeParse(x))
       .filter((r): r is { success: true; data: MedicinePreset } => r.success)

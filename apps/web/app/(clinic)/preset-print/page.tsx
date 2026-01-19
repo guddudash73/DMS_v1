@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/preset-print/page.tsx
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -10,7 +9,6 @@ import { Button } from '@/components/ui/button';
 import { RxPresetImportDialog } from '@/components/prescription/RxPresetImportDialog';
 import { MedicinesEditor } from '@/components/prescription/MedicinesEditor';
 
-// True A4 at ~96dpi (kept for printing + coordinate system)
 const A4_W = 794;
 const A4_H = 1123;
 
@@ -45,13 +43,8 @@ function PresetBlock({ lines }: { lines: RxLineType[] }) {
 export default function PresetPrintPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [lines, setLines] = useState<RxLineType[]>([]);
-
-  // box is ALWAYS stored in TRUE A4 px coordinates
-  const [box, setBox] = useState({ x: 60, y: 80, w: 280, h: 180 }); // ✅ smaller default
-
+  const [box, setBox] = useState({ x: 60, y: 80, w: 280, h: 180 });
   const hasLines = lines.length > 0;
-
-  // --- Preview sizing (fit-to-container; keeps A4 aspect ratio)
   const previewWrapRef = useRef<HTMLDivElement>(null);
   const [wrapW, setWrapW] = useState(0);
 
@@ -68,11 +61,9 @@ export default function PresetPrintPage() {
     return () => ro.disconnect();
   }, []);
 
-  // scale used only for on-screen preview; print is always true A4
   const previewScale = useMemo(() => {
     if (!wrapW) return 1;
     const s = wrapW / A4_W;
-    // keep it smaller overall if container is huge
     return Math.min(s, 0.85);
   }, [wrapW]);
 
@@ -95,7 +86,6 @@ export default function PresetPrintPage() {
 
   return (
     <div className="w-full p-4">
-      {/* PRINT STYLES */}
       <style>{`
         @page { size: A4; margin: 0; }
         @media print {
@@ -118,9 +108,7 @@ export default function PresetPrintPage() {
         }
       `}</style>
 
-      {/* Layout: editor gets more width; preview smaller */}
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
-        {/* LEFT/WIDE: Preset Editor */}
         <div className="xl:col-span-7 h-full">
           <Card className="rounded-2xl border bg-white p-4 h-full">
             <div className="flex items-center justify-between border-b pb-3">
@@ -158,7 +146,6 @@ export default function PresetPrintPage() {
           </Card>
         </div>
 
-        {/* RIGHT/NARROW: Preset Print preview */}
         <div className="xl:col-span-5">
           <Card className="rounded-2xl border bg-white p-4">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
@@ -185,7 +172,6 @@ export default function PresetPrintPage() {
               </div>
             </div>
 
-            {/* On-screen A4 preview (scaled) */}
             <div className="mt-0">
               <div
                 ref={previewWrapRef}
@@ -193,7 +179,6 @@ export default function PresetPrintPage() {
                 style={previewOuterStyle}
               >
                 <div className="relative" style={previewInnerStyle}>
-                  {/* grid (screen only) */}
                   <div className="preset-grid pointer-events-none absolute inset-0 opacity-[0.06]">
                     <div
                       className="h-full w-full"
@@ -205,11 +190,10 @@ export default function PresetPrintPage() {
                     />
                   </div>
 
-                  {/* content */}
                   {hasLines ? (
                     <Rnd
                       bounds="parent"
-                      scale={previewScale} // ✅ correct drag/resize under transform
+                      scale={previewScale}
                       size={{ width: box.w, height: box.h }}
                       position={{ x: box.x, y: box.y }}
                       onDragStop={(_e, d) => setBox((b) => ({ ...b, x: d.x, y: d.y }))}
@@ -221,7 +205,6 @@ export default function PresetPrintPage() {
                           h: ref.offsetHeight,
                         });
                       }}
-                      // ✅ allow much smaller than before
                       minWidth={80}
                       minHeight={60}
                       enableResizing={{
@@ -234,10 +217,8 @@ export default function PresetPrintPage() {
                         bottomLeft: true,
                         topLeft: true,
                       }}
-                      // ✅ dashed outline (screen only; removed in print via CSS above)
-                      className="preset-rnd-outline rounded-md outline outline-2 outline-dashed outline-gray-300"
+                      className="preset-rnd-outline rounded-md outline outline-dashed outline-gray-300"
                     >
-                      {/* ✅ no border/margin/decoration; just p-2 */}
                       <PresetBlock lines={lines} />
                     </Rnd>
                   ) : (
@@ -256,13 +237,11 @@ export default function PresetPrintPage() {
         </div>
       </div>
 
-      {/* PRINT ROOT (true A4, not scaled) */}
       <div
         id="preset-print-root"
-        className="pointer-events-none fixed left-[-99999px] top-0 bg-white"
+        className="pointer-events-none fixed -left-24999.75 top-0 bg-white"
         style={{ width: A4_W, height: A4_H }}
       >
-        {/* (no grid, no outline) */}
         {hasLines ? (
           <div className="relative h-full w-full">
             <div
@@ -280,7 +259,6 @@ export default function PresetPrintPage() {
         ) : null}
       </div>
 
-      {/* Import dialog */}
       <RxPresetImportDialog
         open={importOpen}
         onOpenChange={setImportOpen}
@@ -289,7 +267,6 @@ export default function PresetPrintPage() {
         existingCount={lines.length}
         onImport={(importedLines) => {
           setLines(importedLines);
-          // ✅ smaller default on import too
           setBox({ x: 60, y: 80, w: 280, h: 180 });
         }}
       />

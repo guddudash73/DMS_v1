@@ -72,7 +72,6 @@ type Row = {
   billingAmount?: number;
 };
 
-// ✅ Support both API payloads (legacy grouped + new clinic-wide)
 type BreakdownItem = {
   visitId: string;
   patientName: string;
@@ -195,7 +194,7 @@ export default function VisitsByDayPage() {
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
-      <div className="mx-auto flex h-full w-full max-w-[1200px] flex-col gap-4">
+      <div className="mx-auto flex h-full w-full max-w-300 flex-col gap-4">
         <Card className="rounded-2xl border-none bg-white p-4 shadow-sm">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div className="flex items-start gap-3">

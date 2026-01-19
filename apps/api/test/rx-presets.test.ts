@@ -1,4 +1,3 @@
-// apps/api/test/rx-presets.test.ts
 import { beforeAll, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -33,12 +32,12 @@ describe('Prescription presets API', () => {
       ],
       tags: ['POST_EXTRACTION'],
       createdByUserId: 'ADMIN#001',
-      scope: 'ADMIN', // ✅ required by repository + ensures doctor can see it
+      scope: 'ADMIN',
     });
 
     const res = await request(app)
       .get('/rx-presets')
-      .set('Authorization', asDoctor()) // ✅ sync getter (no await)
+      .set('Authorization', asDoctor())
       .query({ query: name, limit: '10' })
       .expect(200);
 

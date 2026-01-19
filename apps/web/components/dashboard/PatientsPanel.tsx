@@ -1,4 +1,3 @@
-// apps/web/components/dashboard/PatientsPanel.tsx
 'use client';
 
 import * as React from 'react';
@@ -20,24 +19,13 @@ export type PatientsPanelItem = {
   visitId: string;
   patientName: string;
   doctorName: string;
-
-  // ✅ only N/F now
   tag: PatientTag;
-
-  // ✅ checkbox flag for zero-billed (preferred)
-  // NOTE: upstream sometimes types this as false|undefined, so treat as boolean-ish.
   zeroBilled?: boolean;
-
   status: VisitStatus;
   billingAmount?: number;
-
   avatarUrl?: string | null;
   createdAt?: number;
-
-  // ✅ tolerate legacy/alternate shapes without breaking UI
-  // (some backends may send these)
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  [k: string]: any;
+  [k: string]: unknown;
 };
 
 const TAG_META: Record<PatientTag, { label: string; className: string }> = {
@@ -45,7 +33,6 @@ const TAG_META: Record<PatientTag, { label: string; className: string }> = {
   F: { label: 'F', className: 'bg-pink-50 text-pink-700 ring-1 ring-pink-200' },
 };
 
-// ✅ Z should be gray (not amber)
 const ZERO_BILLED_META = {
   label: 'Z',
   className: 'bg-zinc-50 text-zinc-700 ring-1 ring-zinc-200',
@@ -63,16 +50,8 @@ function initials(name: string) {
   return (s.slice(0, 2).toUpperCase() || 'P').trim();
 }
 
-// ✅ Make Z visible even if the upstream field name differs.
-// Preference order:
-// 1) explicit checkbox flag: zeroBilled truthy
-// 2) legacy flags: isZeroBilled / zero_billed / zeroBilledVisit / visit.zeroBilled
-// 3) fallback: billingAmount <= 0 (only when a numeric billingAmount exists)
 function isZeroBilled(p: PatientsPanelItem): boolean {
-  // 1) preferred flag (avoid redundant Boolean() cast)
   if (p.zeroBilled) return true;
-
-  // 2) legacy flags (read safely as unknown and coerce)
   const anyP = p as unknown as Record<string, unknown>;
   const visit = (anyP['visit'] as Record<string, unknown> | undefined) ?? undefined;
 
@@ -84,7 +63,6 @@ function isZeroBilled(p: PatientsPanelItem): boolean {
 
   if (legacy) return true;
 
-  // 3) fallback from billingAmount
   if (typeof p.billingAmount === 'number' && !Number.isNaN(p.billingAmount)) {
     return p.billingAmount <= 0;
   }
@@ -193,7 +171,6 @@ function RealPill({ p, onOpen }: { p: PatientsPanelItem; onOpen: (visitId: strin
               <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
                 <span className="truncate">{p.doctorName}</span>
 
-                {/* ✅ show only N/F */}
                 <Badge
                   variant="secondary"
                   className={cn(
@@ -205,7 +182,6 @@ function RealPill({ p, onOpen }: { p: PatientsPanelItem; onOpen: (visitId: strin
                   {tagMeta.label}
                 </Badge>
 
-                {/* ✅ show Z next to N/F, in gray */}
                 {showZ ? (
                   <Badge
                     variant="secondary"
@@ -313,9 +289,7 @@ export default function PatientsPanel({
         </Button>
       </div>
 
-      <div
-        className={cn('px-2 pb-4', shouldScroll ? 'max-h-[268px] overflow-y-auto dms-scroll' : '')}
-      >
+      <div className={cn('px-2 pb-4', shouldScroll ? 'max-h-67 overflow-y-auto dms-scroll' : '')}>
         <ul className="space-y-1">
           {loading ? (
             Array.from({ length: VISIBLE_ROWS }).map((_, i) => <SkeletonPill key={i} i={i} />)

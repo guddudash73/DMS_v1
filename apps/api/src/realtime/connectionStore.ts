@@ -14,7 +14,6 @@ if (!CONNECTIONS_TABLE) {
   console.warn('[realtime] DDB_CONNECTIONS_TABLE not set');
 }
 
-// GSI for listing all WS connections efficiently
 const CONN_GSI_NAME = 'EntityTypeIndex';
 const CONN_ENTITY = 'WS_CONNECTION';
 
@@ -29,7 +28,7 @@ export interface ConnectionRecord {
   createdAt: number;
 }
 
-const TTL_SECONDS = 3 * 60 * 60; // keep a bit > 2h max ws duration
+const TTL_SECONDS = 3 * 60 * 60;
 function ttlEpochSeconds() {
   return Math.floor(Date.now() / 1000) + TTL_SECONDS;
 }
@@ -46,11 +45,9 @@ export async function addConnection(record: ConnectionRecord): Promise<void> {
           SK: 'META',
           entityType: CONN_ENTITY,
 
-          // GSI keys
           GSI1PK: CONN_ENTITY,
           GSI1SK: record.connectionId,
 
-          // TTL attribute (enable TTL on table to auto-expire)
           ttl: ttlEpochSeconds(),
 
           ...record,

@@ -1,4 +1,3 @@
-// apps/web/app/(clinic)/visits/[visitId]/checkout/printing/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -7,10 +6,8 @@ import { toast } from 'react-toastify';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 
-// ✅ Calendar UI (shadcn-style)
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
@@ -24,13 +21,13 @@ import {
   useGetVisitRxQuery,
   useListVisitXraysQuery,
   useGetVisitBillQuery,
-  useGetDoctorsQuery,
 } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
 import type { Billing } from '@dcm/types';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 type FollowUpContact = 'CALL' | 'SMS' | 'WHATSAPP' | 'OTHER';
+type UnknownRecord = Record<string, unknown>;
 
 function IconCheck(props: React.SVGProps<SVGSVGElement>) {
   return (
@@ -45,8 +42,6 @@ function IconCheck(props: React.SVGProps<SVGSVGElement>) {
     </svg>
   );
 }
-
-type UnknownRecord = Record<string, unknown>;
 
 function isRecord(v: unknown): v is UnknownRecord {
   return typeof v === 'object' && v !== null;
@@ -136,24 +131,11 @@ function normalizeSex(raw: unknown): PatientSex | undefined {
   return undefined;
 }
 
-function looksLikeDoctorIdLabel(name?: string) {
-  if (!name) return true;
-  const s = name.trim();
-  if (!s) return true;
-
-  if (/^Doctor\s*\(.+\)$/i.test(s)) return true;
-
-  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return true;
-
-  return false;
-}
-
 function parseFollowUpContact(v: string): FollowUpContact {
   if (v === 'CALL' || v === 'SMS' || v === 'WHATSAPP' || v === 'OTHER') return v;
   return 'CALL';
 }
 
-// ✅ NEW: ISO date (YYYY-MM-DD) → Date (local safe)
 function isoToDate(iso: string): Date | null {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   if (!m) return null;
@@ -187,23 +169,18 @@ export default function VisitCheckoutPrintingPage() {
   const xraysQuery = useListVisitXraysQuery({ visitId }, { skip: !visitId });
   const xrayIds = (xraysQuery.data?.items ?? []).map((x) => x.xrayId);
 
-  // ✅ Only fetch bill if it exists according to visit meta
   const billExists =
     !!visit &&
     (getBoolFromRecordOpt(visitRec, 'checkedOut') === true ||
       getNumFromRecord(visitRec, 'billingAmount') !== undefined);
 
   const shouldFetchBill = !!visitId && !!visit && billExists;
-
   const billQuery = useGetVisitBillQuery({ visitId }, { skip: !shouldFetchBill });
 
   const billData: unknown = billQuery.data ?? null;
 
-  // keep runtime safe: only pass a valid Billing object (or null)
   const billingForPrint: Billing | null =
     isRecord(billData) && getStrFromRecord(billData, 'billNo') ? (billData as Billing) : null;
-
-  const doctorsQuery = useGetDoctorsQuery(undefined);
 
   const [xrayPrintOpen, setXrayPrintOpen] = React.useState(false);
   const [billPrintOpen, setBillPrintOpen] = React.useState(false);
@@ -236,46 +213,6 @@ export default function VisitCheckoutPrintingPage() {
   const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
   const patientSex = normalizeSex(patientSexRaw);
 
-  const doctorId = getStrFromRecord(visitRec, 'doctorId');
-
-  const doctorFromList = React.useMemo(() => {
-    const listUnknown: unknown = doctorsQuery.data ?? [];
-    const list = Array.isArray(listUnknown) ? listUnknown : [];
-    if (!doctorId) return null;
-
-    for (const item of list) {
-      const rec: UnknownRecord = isRecord(item) ? item : {};
-      if (getStrFromRecord(rec, 'doctorId') === doctorId) return rec;
-    }
-    return null;
-  }, [doctorsQuery.data, doctorId]);
-
-  const doctorFromListRec: UnknownRecord = isRecord(doctorFromList) ? doctorFromList : {};
-
-  const doctorNameResolved =
-    getStrFromRecord(doctorFromListRec, 'fullName') ??
-    getStrFromRecord(doctorFromListRec, 'name') ??
-    getStrFromRecord(doctorFromListRec, 'displayName') ??
-    undefined;
-
-  const doctorRegNoResolved =
-    getStrFromRecord(doctorFromListRec, 'registrationNumber') ?? undefined;
-
-  const resolvedDoctorName = React.useMemo(() => {
-    if (doctorNameResolved && !looksLikeDoctorIdLabel(doctorNameResolved))
-      return doctorNameResolved;
-    if (doctorsQuery.isLoading || doctorsQuery.isFetching) return undefined;
-    return doctorId ? `Doctor (${doctorId})` : undefined;
-  }, [doctorNameResolved, doctorsQuery.isLoading, doctorsQuery.isFetching, doctorId]);
-
-  const resolvedDoctorRegdLabel = React.useMemo(() => {
-    if (doctorRegNoResolved) return `B.D.S Regd. - ${doctorRegNoResolved}`;
-    if (doctorsQuery.isLoading || doctorsQuery.isFetching) return undefined;
-    return undefined;
-  }, [doctorRegNoResolved, doctorsQuery.isLoading, doctorsQuery.isFetching]);
-
-  const doctorLabelForCards = resolvedDoctorName ?? (doctorId ? `Doctor (${doctorId})` : 'Doctor');
-
   const visitCreatedDateLabel = visitCreatedAtMs
     ? `Visit: ${toLocalISODate(new Date(visitCreatedAtMs))}`
     : undefined;
@@ -294,12 +231,10 @@ export default function VisitCheckoutPrintingPage() {
   const rxAvailable = !!rx;
   const xraysAvailable = xrayIds.length > 0;
 
-  // ✅ readiness now uses billExists + actual bill (or loading state)
   const billAvailable = billExists && !!billingForPrint;
 
   const [followUpEnabled, setFollowUpEnabled] = React.useState(false);
 
-  // ✅ keep ISO string in state (for querystring), but drive UI using Calendar Date
   const [followUpDate, setFollowUpDate] = React.useState(() => {
     const d = new Date();
     d.setDate(d.getDate() + 7);
@@ -332,6 +267,8 @@ export default function VisitCheckoutPrintingPage() {
 
   type RxSheetProps = React.ComponentProps<typeof PrescriptionPrintSheet>;
   const RxSheet = PrescriptionPrintSheet as React.ComponentType<RxSheetProps>;
+
+  const ageSexLabel = patientAge !== undefined ? `${patientAge} / ${patientSex ?? '—'}` : '—';
 
   return (
     <section className="p-4 2xl:p-8">
@@ -407,17 +344,10 @@ export default function VisitCheckoutPrintingPage() {
 
         <Card className="rounded-2xl border bg-white p-4">
           <div className="text-xs text-gray-500">Doctor</div>
-          <div className="mt-1 text-base font-semibold text-gray-900">
-            {doctorLabelForCards ?? '—'}
-          </div>
+          <div className="mt-1 text-base font-semibold text-gray-900">—</div>
           <div className="mt-1 text-sm text-gray-600">
             {visitDateLabel?.replace('Visit:', '').trim() || '—'}
           </div>
-          {!doctorNameResolved && doctorId ? (
-            <div className="mt-1 text-[11px] text-amber-600">
-              Showing doctor id (name not available).
-            </div>
-          ) : null}
         </Card>
 
         <Card className="rounded-2xl border bg-white p-4">
@@ -512,7 +442,6 @@ export default function VisitCheckoutPrintingPage() {
           </div>
         </Card>
 
-        {/* Follow-up card */}
         <Card className="lg:col-span-5 rounded-2xl border bg-white p-6">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -537,7 +466,6 @@ export default function VisitCheckoutPrintingPage() {
                   <div>
                     <div className="text-xs font-semibold text-gray-700">Follow-up date</div>
 
-                    {/* ✅ Calendar popover */}
                     <Popover open={followUpCalendarOpen} onOpenChange={setFollowUpCalendarOpen}>
                       <PopoverTrigger asChild>
                         <Button
@@ -638,8 +566,8 @@ export default function VisitCheckoutPrintingPage() {
         patientSex={patientSex}
         sdId={patientSdId}
         opdNo={opdNo}
-        doctorName={resolvedDoctorName}
-        doctorRegdLabel={resolvedDoctorRegdLabel}
+        doctorName={undefined}
+        doctorRegdLabel={undefined}
         visitDateLabel={visitCreatedDateLabel}
         lines={rx?.lines ?? []}
         receptionNotes={rx?.receptionNotes ?? ''}
@@ -656,8 +584,9 @@ export default function VisitCheckoutPrintingPage() {
         billing={billingForPrint}
         patientName={patientName}
         patientPhone={patientPhone}
-        doctorName={doctorLabelForCards}
-        visitId={visitId}
+        ageSexLabel={ageSexLabel}
+        opdNo={opdNo}
+        sdId={patientSdId}
         visitDateLabel={visitDateLabel}
         onAfterPrint={() => setBillPrintOpen(false)}
       />

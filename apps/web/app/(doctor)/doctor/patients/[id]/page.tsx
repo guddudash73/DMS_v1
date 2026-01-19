@@ -1,4 +1,3 @@
-// apps/web/app/(doctor)/doctor/patients/[id]/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -174,7 +173,6 @@ export default function DoctorPatientDetailPage() {
     error: rawVisitsError,
   } = useGetPatientVisitsQuery(patientId);
 
-  // still used in patient details (visits count / last visit)
   const { data: summary } = useGetPatientSummaryQuery(patientId);
 
   const [selectedDate, setSelectedDate] = React.useState<string>('');
@@ -205,27 +203,23 @@ export default function DoctorPatientDetailPage() {
 
   const visits: Visit[] = visitsData?.items ?? [];
 
-  // sort newest first
   const sortedVisits = React.useMemo(() => {
     const items = [...visits];
     items.sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0));
     return items;
   }, [visits]);
 
-  // date filter
   const filteredVisits = React.useMemo(() => {
     if (!selectedDate) return sortedVisits;
     return sortedVisits.filter((v) => v.visitDate === selectedDate);
   }, [sortedVisits, selectedDate]);
 
-  // map for anchor lookup
   const allById = React.useMemo(() => {
     const m = new Map<string, Visit>();
     for (const v of sortedVisits) m.set(v.visitId, v);
     return m;
   }, [sortedVisits]);
 
-  // group followups under anchor
   const grouped = React.useMemo(() => {
     const anchorById = new Map<string, Visit>();
     const followupsByAnchor = new Map<string, Visit[]>();
@@ -246,7 +240,6 @@ export default function DoctorPatientDetailPage() {
       followupsByAnchor.set(anchorId, arr);
     }
 
-    // if followups exist but anchor isn't in filtered list, still show anchor if we can find it
     for (const [anchorId] of followupsByAnchor) {
       if (!anchorById.has(anchorId)) {
         const fromAll = allById.get(anchorId);
@@ -254,7 +247,6 @@ export default function DoctorPatientDetailPage() {
       }
     }
 
-    // anchors ordered newest first (visitDate desc)
     const anchorsOrdered = Array.from(anchorById.values()).sort((a, b) => {
       const ad = a.visitDate || '';
       const bd = b.visitDate || '';
@@ -262,7 +254,6 @@ export default function DoctorPatientDetailPage() {
       return (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0);
     });
 
-    // followups ordered oldest -> newest under anchor
     for (const [anchorId, arr] of followupsByAnchor) {
       arr.sort((a, b) => (a.updatedAt ?? a.createdAt ?? 0) - (b.updatedAt ?? b.createdAt ?? 0));
       followupsByAnchor.set(anchorId, arr);
@@ -271,7 +262,6 @@ export default function DoctorPatientDetailPage() {
     return { anchorsOrdered, followupsByAnchor };
   }, [filteredVisits, allById]);
 
-  // pagination by anchors
   const PAGE_SIZE = 4;
   const [page, setPage] = React.useState<number>(1);
 
@@ -293,10 +283,7 @@ export default function DoctorPatientDetailPage() {
 
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
-      {/* ✅ removed the follow-up strip from the top entirely */}
-
       <div className="flex flex-col gap-4">
-        {/* Patient details card (slightly taller) */}
         <Card className="rounded-2xl border-none bg-white px-8 py-8 shadow-sm">
           <h2 className="mb-4 text-lg font-semibold text-gray-900">Patient Details:</h2>
 
@@ -459,7 +446,6 @@ export default function DoctorPatientDetailPage() {
 
                     return (
                       <React.Fragment key={anchorId}>
-                        {/* Anchor (NEW) row */}
                         <TableRow className="hover:bg-gray-50/60">
                           <TableCell className="px-6 py-4 text-sm font-medium text-gray-900">
                             {formatVisitDate(anchor.visitDate)}
@@ -516,7 +502,6 @@ export default function DoctorPatientDetailPage() {
                           </TableCell>
                         </TableRow>
 
-                        {/* Followups (reduced row height) */}
                         {followups.map((f) => {
                           const anchorRef = allById.get(getAnchorVisitId(f) ?? '') ?? anchor;
 
@@ -524,7 +509,7 @@ export default function DoctorPatientDetailPage() {
                             <TableRow key={f.visitId} className="bg-white hover:bg-gray-50/60">
                               <TableCell className="px-6 py-2 align-top">
                                 <div className="flex items-start gap-3">
-                                  <div className="mt-0.5 h-8 w-[2px] rounded-full bg-gray-200" />
+                                  <div className="mt-0.5 h-8 w-0.5 rounded-full bg-gray-200" />
                                   <div className="text-[13px] font-medium text-gray-900">
                                     {formatVisitDate(f.visitDate)}
                                   </div>

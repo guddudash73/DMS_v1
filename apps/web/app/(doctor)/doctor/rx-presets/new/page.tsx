@@ -1,4 +1,3 @@
-// apps/web/app/(doctor)/doctor/rx-presets/new/page.tsx
 'use client';
 
 import { useRouter } from 'next/navigation';

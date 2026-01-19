@@ -1,4 +1,3 @@
-// apps/api/src/middlewares/auth.ts
 import type { Request, Response, NextFunction } from 'express';
 import type { Role } from '@dcm/types';
 import { verifyAccessToken } from '../lib/authTokens';
@@ -49,7 +48,6 @@ export const authMiddleware = async (req: Request, _res: Response, next: NextFun
       return next(new AuthError('USER_INACTIVE', 403, 'USER_INACTIVE'));
     }
 
-    // ✅ Production-safe: role is sourced from DB (prevents stale-token privilege drift)
     req.auth = { userId: user.userId, role: user.role };
     return next();
   } catch {

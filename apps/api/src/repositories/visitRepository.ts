@@ -1,4 +1,3 @@
-// apps/api/src/repositories/visitRepository.ts
 import { randomUUID, createHash } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
@@ -64,10 +63,6 @@ const buildOpdTagCounterKey = (visitDate: string, tag: VisitTag) => ({
   SK: 'META',
 });
 
-/**
- * Tiny helpers to avoid `any` when reading DynamoDB Item props.
- * (No behavior change: just safe property access.)
- */
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null;
 
 const getStringProp = (v: unknown, key: string): string | null => {
@@ -76,11 +71,6 @@ const getStringProp = (v: unknown, key: string): string | null => {
   return typeof val === 'string' ? val : null;
 };
 
-/**
- * Increment a counter atomically.
- * - Uses ADD which is atomic in DynamoDB.
- * - Returns the updated value ("last").
- */
 async function nextCounter(key: { PK: string; SK: string }): Promise<number> {
   const { Attributes } = await docClient.send(
     new UpdateCommand({
@@ -143,8 +133,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
   private isValidTransition(from: VisitStatus, to: VisitStatus, isOffline: boolean): boolean {
     if (from === 'QUEUED' && to === 'IN_PROGRESS') return true;
     if (from === 'IN_PROGRESS' && to === 'DONE') return true;
-
-    // ✅ offline visits can skip directly to DONE
     if (isOffline && from === 'QUEUED' && to === 'DONE') return true;
 
     return false;
@@ -152,8 +140,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
 
   async create(input: VisitCreate, opts?: { idempotencyKey?: string }): Promise<Visit> {
     const now = Date.now();
-
-    // ✅ Idempotency: ONLY dedupe if caller provides a key (does NOT restrict multiple open visits)
     const idemKeyRaw = opts?.idempotencyKey?.trim();
     const idemKey = idemKeyRaw && idemKeyRaw.length > 0 ? idemKeyRaw : undefined;
 
@@ -162,7 +148,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
 
     const inputHash = createHash('sha256').update(JSON.stringify(input)).digest('hex');
 
-    // 1) If we already created a visit for this idempotency key, return it (no counter increments)
     if (idempotencyDdbKey) {
       const { Item } = await docClient.send(
         new GetCommand({
@@ -176,7 +161,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
       const prevHash = getStringProp(Item, 'inputHash');
 
       if (prevVisitId) {
-        // Optional safety: if same key used with different payload, treat as misuse
         if (prevHash && prevHash !== inputHash) {
           throw new VisitCreateRuleViolationError(
             'Idempotency-Key reused with different request payload',
@@ -185,7 +169,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
 
         const existingVisit = await this.getById(prevVisitId);
         if (existingVisit) return existingVisit;
-        // If mapping exists but visit missing, fall through (rare)
       }
     }
 
@@ -195,7 +178,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
     const status: VisitStatus = 'QUEUED';
     const tag: VisitTag | undefined = input.tag;
 
-    // ✅ Validate follow-up anchor visit rules (do NOT restrict multiple open visits)
     if (tag === 'F') {
       const anchorId = input.anchorVisitId;
       if (!anchorId) {
@@ -211,17 +193,13 @@ export class DynamoDBVisitRepository implements VisitRepository {
         throw new VisitCreateRuleViolationError('anchorVisitId must belong to the same patient');
       }
 
-      // NOTE: tags are now N/F only; anchor should be N or undefined (older records might not have tag)
       if (anchor.tag && anchor.tag !== 'N') {
         throw new VisitCreateRuleViolationError('anchorVisitId must point to an N (new) visit');
       }
     }
 
-    // ✅ stable daily patient number for the date (never changes)
-    // ✅ stable tag counter for OPD formatting
     const tagForCounter: VisitTag = tag ?? 'N';
 
-    // If either counter write fails transiently, allow retry by caller (repo throws)
     const dailySeq = await nextCounter(buildOpdDailyCounterKey(visitDate));
     const tagSeq = await nextCounter(buildOpdTagCounterKey(visitDate, tagForCounter));
     const opdNo = formatOpdNo(visitDate, dailySeq, tagForCounter, tagSeq);
@@ -233,13 +211,9 @@ export class DynamoDBVisitRepository implements VisitRepository {
       status,
       visitDate,
       opdNo,
-
-      // ✅ stable daily number (use this in queue + token)
       dailyPatientNumber: dailySeq,
-
       checkedOut: false,
       checkedOutAt: undefined,
-
       createdAt: now,
       updatedAt: now,
 
@@ -262,7 +236,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
       ...buildGsi3Keys(visitDate, visitId),
     };
 
-    // ✅ idempotency record to prevent duplicate visits on retries
     const idemItem = idempotencyDdbKey
       ? {
           ...idempotencyDdbKey,
@@ -309,7 +282,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
 
       return base;
     } catch (err) {
-      // If we lost a race, fetch the idempotency winner and return that visit
       if (idempotencyDdbKey) {
         const { Item } = await docClient.send(
           new GetCommand({
@@ -439,7 +411,6 @@ export class DynamoDBVisitRepository implements VisitRepository {
     const visits = (Items ?? []) as Visit[];
     const filtered = status ? visits.filter((v) => v.status === status) : visits;
 
-    // Keep queue stable (createdAt ascending)
     filtered.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
     return filtered;
   }

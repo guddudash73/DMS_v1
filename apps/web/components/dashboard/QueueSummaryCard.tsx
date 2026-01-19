@@ -1,4 +1,3 @@
-// apps/web/components/dashboard/QueueSummaryCard.tsx
 'use client';
 
 import * as React from 'react';
@@ -22,7 +21,6 @@ export default function QueueSummaryCard({ date }: QueueSummaryCardProps) {
   const effectiveDate = date ?? getTodayIso();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
-  // ✅ same cache as DoctorQueueCard (and dashboard patients list, if you switch it too)
   const { data, isLoading, isFetching, isError } = useGetPatientQueueQuery(
     { date: effectiveDate },
     { skip: !canUseApi },

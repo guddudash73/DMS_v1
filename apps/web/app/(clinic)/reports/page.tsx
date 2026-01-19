@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import { useRouter } from 'next/navigation';
 
 import { Card } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
@@ -34,7 +35,6 @@ function safeNum(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
-// ✅ helpers for ISO <-> Date (local midnight) to avoid timezone drift
 function parseISODateToLocalDate(iso: string): Date | null {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null;
   const [y, m, d] = iso.split('-').map((x) => Number(x));
@@ -83,7 +83,14 @@ function SectionTitle({ title, desc }: { title: string; desc?: string }) {
   );
 }
 
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL && process.env.NEXT_PUBLIC_API_BASE_URL.length > 0
+    ? process.env.NEXT_PUBLIC_API_BASE_URL
+    : 'http://localhost:4000';
+
 export default function ReportsPage() {
+  const router = useRouter();
+
   const auth = useAuth();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
@@ -91,15 +98,48 @@ export default function ReportsPage() {
 
   const [selectedDate, setSelectedDate] = React.useState<string>(() => clinicDateISO(new Date()));
   const [drilldownDate, setDrilldownDate] = React.useState<string | null>(null);
-
-  // ✅ NEW: calendar popover state
   const [datePickerOpen, setDatePickerOpen] = React.useState(false);
-
-  // ✅ NEW: Date object for calendar (derived from ISO)
   const selectedDateObj = React.useMemo(
     () => parseISODateToLocalDate(selectedDate) ?? new Date(),
     [selectedDate],
   );
+  const paymentsHref = React.useMemo(() => {
+    return `/reports/payments?date=${encodeURIComponent(selectedDate)}`;
+  }, [selectedDate]);
+
+  const [downloading, setDownloading] = React.useState(false);
+  const downloadReportPdf = React.useCallback(async () => {
+    if (!canUseApi || !auth.accessToken) return;
+
+    setDownloading(true);
+    try {
+      const url = `${API_BASE_URL}/reports/daily/pdf?date=${encodeURIComponent(selectedDate)}`;
+
+      const resp = await fetch(url, {
+        method: 'GET',
+        credentials: 'include',
+        headers: {
+          authorization: `Bearer ${auth.accessToken}`,
+        },
+      });
+
+      if (!resp.ok) throw new Error('Failed to download PDF');
+
+      const blob = await resp.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = `daily-report-${selectedDate}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      window.URL.revokeObjectURL(blobUrl);
+    } finally {
+      setDownloading(false);
+    }
+  }, [API_BASE_URL, auth.accessToken, canUseApi, selectedDate]);
 
   React.useEffect(() => {
     setDrilldownDate(null);
@@ -128,7 +168,6 @@ export default function ReportsPage() {
   const zeroBilledVisits = safeNum(summary?.zeroBilledVisits);
   const totalVisitors = safeNum(summary?.totalPatients);
 
-  // ✅ NEW: received totals
   const onlineReceived = safeNum(report?.onlineReceivedTotal);
   const offlineReceived = safeNum(report?.offlineReceivedTotal);
   const receivedTotal = onlineReceived + offlineReceived;
@@ -149,7 +188,7 @@ export default function ReportsPage() {
   if (drilldownDate) {
     return (
       <section className={pageWrapperClass}>
-        <div className="mx-auto flex h-full w-full max-w-[1200px] flex-col gap-6 2xl:gap-10">
+        <div className="mx-auto flex h-full w-full max-w-300 flex-col gap-6 2xl:gap-10">
           <VisitorsRatioChart onDateSelect={(d) => setDrilldownDate(d)} />
           <DailyVisitsBreakdownPanel date={drilldownDate} onBack={() => setDrilldownDate(null)} />
         </div>
@@ -172,7 +211,6 @@ export default function ReportsPage() {
             <div className="rounded-2xl border bg-white px-3 py-2 shadow-sm">
               <div className="text-[11px] text-muted-foreground">Report date</div>
 
-              {/* ✅ REPLACED: manual <input type="date" /> -> calendar popover */}
               <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
                 <PopoverTrigger asChild>
                   <Button
@@ -199,6 +237,17 @@ export default function ReportsPage() {
                 </PopoverContent>
               </Popover>
             </div>
+
+            <Button
+              type="button"
+              variant="outline"
+              className="h-10 rounded-2xl px-3 text-xs cursor-pointer"
+              disabled={!canUseApi || downloading}
+              onClick={downloadReportPdf}
+              title="Download daily report as PDF"
+            >
+              {downloading ? 'Downloading…' : 'Download PDF'}
+            </Button>
           </div>
         </div>
 
@@ -212,16 +261,28 @@ export default function ReportsPage() {
           </div>
         ) : null}
 
-        {/* Top stats */}
         <div className="grid grid-cols-1 gap-6 2xl:gap-10 sm:grid-cols-2 lg:grid-cols-4">
-          {/* ✅ REPLACED: Total visits card -> Payments received */}
           <StatCard
             label="Payments received"
             value={<span className="tabular-nums">{currencyINR(receivedTotal)}</span>}
             sub={
-              <span>
-                Online {currencyINR(onlineReceived)} · Offline {currencyINR(offlineReceived)}
-              </span>
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate">
+                  Online {currencyINR(onlineReceived)} · Offline {currencyINR(offlineReceived)}
+                </span>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 rounded-xl px-2 text-[11px] cursor-pointer"
+                  disabled={!canUseApi}
+                  onClick={() => router.push(paymentsHref)}
+                  title="View all received payments"
+                >
+                  View all →
+                </Button>
+              </div>
             }
             loading={reportLoading}
           />
@@ -252,7 +313,6 @@ export default function ReportsPage() {
           />
         </div>
 
-        {/* Chart + Highlights */}
         <div className="grid grid-cols-1 gap-6 2xl:gap-10 lg:grid-cols-3">
           <div className="lg:col-span-2">
             <VisitorsRatioChart onDateSelect={(d) => setDrilldownDate(d)} />
@@ -306,7 +366,6 @@ export default function ReportsPage() {
           </Card>
         </div>
 
-        {/* Procedures */}
         <Card className="rounded-2xl border-none bg-white shadow-sm">
           <div className="p-4 md:p-5">
             <SectionTitle

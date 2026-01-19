@@ -1,4 +1,3 @@
-// apps/api/test/patients-uniqueness.test.ts
 import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -50,8 +49,6 @@ describe('Patients – phone+name uniqueness', () => {
     const phoneFmt1 = '+91 7749 123 456';
     const { patientId: p1Id } = await createPatient('Phone Test User', phoneFmt1);
     expect(p1Id).toBeDefined();
-
-    // Same phone (different formatting), different name => allowed
     const phoneFmt2 = '07749-123-456';
     const res2 = await request(app)
       .post('/patients')
@@ -67,8 +64,6 @@ describe('Patients – phone+name uniqueness', () => {
     const p2Id = res2.body.patientId as string;
     registerPatient(p2Id);
     expect(p2Id).toBeDefined();
-
-    // Same phone (normalized), same name => rejected
     const res3 = await request(app)
       .post('/patients')
       .set('Authorization', receptionAuthHeader)
@@ -90,8 +85,6 @@ describe('Patients – phone+name uniqueness', () => {
 
     const { patientId: bId } = await createPatient('Patient B', '+91 8888 111 222');
     expect(bId).toBeDefined();
-
-    // Change B's phone to A's phone => allowed (name differs)
     const res1 = await request(app)
       .patch(`/patients/${bId}`)
       .set('Authorization', receptionAuthHeader)
@@ -102,8 +95,6 @@ describe('Patients – phone+name uniqueness', () => {
 
     expect(res1.body.patientId).toBe(bId);
     expect(res1.body.name).toBe('Patient B');
-
-    // Now change B's name to A => conflict because phone+name matches A
     const res2 = await request(app)
       .patch(`/patients/${bId}`)
       .set('Authorization', receptionAuthHeader)

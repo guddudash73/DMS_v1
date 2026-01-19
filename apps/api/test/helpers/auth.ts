@@ -7,7 +7,6 @@ const app = createApp();
 
 let seeded = false;
 
-// cache per-role bearer strings (sync getters)
 const bearerByRole: Partial<Record<Role, string>> = {};
 let inflight: Partial<Record<Role, Promise<string>>> = {};
 
@@ -36,15 +35,7 @@ async function fetchBearer(role: Role): Promise<string> {
   return `Bearer ${accessToken}`;
 }
 
-/**
- * Synchronous header getters that return a real string.
- * Internally they cache the token once fetched.
- *
- * IMPORTANT: before first use in a test run, you must call `await warmAuth()`
- * from a beforeAll (once per test file or in global setup).
- */
 export async function warmAuth() {
-  // prime all three in parallel, and cache them
   const [reception, doctor, admin] = await Promise.all([
     fetchBearer('RECEPTION'),
     fetchBearer('DOCTOR'),
@@ -59,7 +50,6 @@ export async function warmAuth() {
 function getBearerSync(role: Role): string {
   const b = bearerByRole[role];
   if (!b) {
-    // Fail loudly with a useful message instead of silent 401s
     throw new Error(`Auth header for ${role} not warmed. Call 'await warmAuth()' in beforeAll().`);
   }
   return b;

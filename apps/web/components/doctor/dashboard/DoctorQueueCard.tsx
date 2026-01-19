@@ -42,7 +42,6 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 }
 
 function getIsOffline(v: PatientQueueItem): boolean {
-  // tolerate alternate shapes without using `any`
   return isRecord(v) && v['isOffline'] === true;
 }
 
@@ -52,11 +51,10 @@ function getDailyPatientNumber(v: PatientQueueItem): number | null {
   return typeof raw === 'number' && Number.isFinite(raw) && raw >= 1 ? raw : null;
 }
 
-/** ✅ Tiny offline badge */
 function OfflineBadge() {
   return (
     <span
-      className="ml-1.5 inline-flex items-center rounded border border-gray-200 bg-gray-100 px-1.5 py-[1px] text-[9px] font-medium leading-none text-gray-600"
+      className="ml-1.5 inline-flex items-center rounded border border-gray-200 bg-gray-100 px-1.5 py-px text-[9px] font-medium leading-none text-gray-600"
       title="Offline visit"
     >
       OFF
@@ -85,7 +83,7 @@ function QueueItemRow({
       title="Open visit"
     >
       <span className="min-w-0 truncate font-medium">
-        <span className="mr-2 inline-flex h-6 min-w-[44px] items-center justify-center rounded-lg border bg-gray-50 px-2 text-[11px] font-semibold text-gray-700">
+        <span className="mr-2 inline-flex h-6 min-w-11 items-center justify-center rounded-lg border bg-gray-50 px-2 text-[11px] font-semibold text-gray-700">
           {dailyPatientNumber ? `#${dailyPatientNumber}` : '—'}
         </span>
 
@@ -117,14 +115,11 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
 
   const todayIso = React.useMemo(() => clinicDateISO(new Date()), []);
 
-  // ✅ ONE request only: /visits/queue?date=YYYY-MM-DD
   const queueQ = useGetPatientQueueQuery(
     { date: todayIso },
     {
       skip: !canUseApi,
 
-      // ✅ avoids flicker on background refetch:
-      // keep cached data visible while fetching updated data
       selectFromResult: (r) => ({
         ...r,
         items: (r.data?.items ?? []) as PatientQueueItem[],
@@ -133,12 +128,10 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
     },
   );
 
-  // ✅ FIX: use doctor route
   const openDoctorVisit = (visitId: string) => {
     router.push(`/doctor/visits/${visitId}`);
   };
 
-  // ✅ derive columns from one list
   const byStatus = React.useMemo(() => {
     const waiting: PatientQueueItem[] = [];
     const inProgress: PatientQueueItem[] = [];
@@ -159,7 +152,6 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
     { status: 'DONE', data: byStatus.done },
   ];
 
-  // ✅ show placeholders only when there's no cached data yet
   const showSkeleton = queueQ.isLoading && !queueQ.hasData;
 
   return (
@@ -182,7 +174,6 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
         {cols.map((c) => {
           const visits = c.data;
 
-          // For DONE, show latest first; others oldest first.
           const ordered =
             c.status === 'DONE'
               ? [...visits].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
@@ -237,7 +228,6 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
         })}
       </div>
 
-      {/* ✅ Optional tiny “syncing” hint without flicker */}
       {queueQ.isFetching && queueQ.hasData ? (
         <div className="mt-3 text-[10px] text-gray-400">Syncing…</div>
       ) : null}

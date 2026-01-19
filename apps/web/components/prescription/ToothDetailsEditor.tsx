@@ -184,7 +184,7 @@ export function ToothDetailsEditor({ value, onChange, disabled }: Props) {
               disabled={disabled}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              className="min-h-[38px] resize-none rounded-xl"
+              className="min-h-9.5 resize-none rounded-xl"
               placeholder="Optional notes…"
             />
           </div>
