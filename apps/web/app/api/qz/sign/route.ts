@@ -1,9 +1,42 @@
+// apps/web/app/api/qz/sign/route.ts
 import { NextResponse } from 'next/server';
 import crypto from 'node:crypto';
+import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 
 export const runtime = 'nodejs';
 
 type Body = { request?: string };
+
+let cachedPem: string | null = null;
+let cachedAtMs = 0;
+
+async function loadPemFromSecretsManager(): Promise<string> {
+  const secretId = process.env.QZ_PRIVATE_KEY_SECRET_ID;
+  if (!secretId) throw new Error('QZ_PRIVATE_KEY_SECRET_ID not set');
+
+  // simple 5 minute cache per lambda container
+  const now = Date.now();
+  if (cachedPem && now - cachedAtMs < 5 * 60 * 1000) return cachedPem;
+
+  const client = new SecretsManagerClient({});
+  const resp = await client.send(new GetSecretValueCommand({ SecretId: secretId }));
+
+  const value = resp.SecretString;
+  if (!value) throw new Error('SecretString missing');
+
+  // store base64 PEM or raw PEM; support both
+  const maybePem = value.includes('BEGIN PRIVATE KEY')
+    ? value
+    : Buffer.from(value, 'base64').toString('utf8');
+
+  if (!maybePem.includes('BEGIN PRIVATE KEY')) {
+    throw new Error('Decoded key is not a PEM private key');
+  }
+
+  cachedPem = maybePem.trim();
+  cachedAtMs = now;
+  return cachedPem;
+}
 
 export async function POST(req: Request) {
   try {
@@ -14,22 +47,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: 'BAD_REQUEST' }, { status: 400 });
     }
 
-    const pemB64 = process.env.QZ_PRIVATE_KEY_PEM_BASE64;
-    if (!pemB64 || typeof pemB64 !== 'string' || pemB64.trim().length === 0) {
-      return NextResponse.json(
-        { error: 'QZ_KEY_MISSING', message: 'QZ_PRIVATE_KEY_PEM_BASE64 not set' },
-        { status: 500 },
-      );
-    }
-
-    const privateKeyPem = Buffer.from(pemB64, 'base64').toString('utf8').trim();
-
-    if (!privateKeyPem.includes('BEGIN PRIVATE KEY')) {
-      return NextResponse.json(
-        { error: 'QZ_KEY_INVALID', message: 'Decoded key is not a PEM private key' },
-        { status: 500 },
-      );
-    }
+    const privateKeyPem = await loadPemFromSecretsManager();
 
     const signature = crypto.sign('RSA-SHA512', Buffer.from(requestToSign, 'utf8'), {
       key: privateKeyPem,

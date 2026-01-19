@@ -1,0 +1,49 @@
+name: Deploy (prod)
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: us-east-1
+      SST_STAGE: prod
+
+      # SST needs this for state encryption/decryption
+      SST_PASSPHRASE: ${{ secrets.SST_PASSPHRASE }}
+
+      # Used by infra/web.ts -> Next runtime env
+      QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Pin npm
+        run: npm install -g npm@11.6.2
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Configure AWS creds (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::512491905643:role/github-actions-sarangi-dcm-deploy
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Deploy with SST
+        run: npx sst deploy --stage $SST_STAGE
