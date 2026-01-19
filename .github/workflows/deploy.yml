@@ -21,7 +21,7 @@ jobs:
       SST_PASSPHRASE: ${{ secrets.SST_PASSPHRASE }}
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
 
-      # ✅ NEW: provide websocket base url as a plain string
+      # Optional during bootstrap; set after first successful prod deploy
       NEXT_PUBLIC_WS_BASE_URL: ${{ secrets.NEXT_PUBLIC_WS_BASE_URL }}
 
       NODE_OPTIONS: --max-old-space-size=8192
@@ -61,7 +61,11 @@ jobs:
           test -f packages/config/dist/env.js
           test -n "${SST_PASSPHRASE}"
           test -n "${QZ_PRIVATE_KEY_SECRET_ID}"
-          test -n "${NEXT_PUBLIC_WS_BASE_URL}"
+
+          # ✅ Bootstrap-friendly: WS URL may not exist before first deploy
+          if [ -z "${NEXT_PUBLIC_WS_BASE_URL}" ]; then
+            echo "::warning::NEXT_PUBLIC_WS_BASE_URL is not set. Realtime UI will not connect until after first prod deploy. Set it and redeploy."
+          fi
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
