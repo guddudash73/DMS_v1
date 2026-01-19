@@ -127,7 +127,7 @@ jobs:
       - name: Deploy
         run: |
           set -euxo pipefail
-          npx sst deploy --stage "$SST_STAGE" --no-types
+          npx sst deploy --stage "$SST_STAGE" --continue
 
       - name: Dump SST logs on failure
         if: failure()
