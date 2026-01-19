@@ -1,4 +1,3 @@
-// sst.config.ts
 /// <reference path="./.sst/platform/config.d.ts" />
 
 export default $config({
@@ -11,24 +10,25 @@ export default $config({
   },
 
   async run() {
-    // 1) realtime (kept)
-    await import('./infra/realtime');
-
-    // 2) storage + router + api + web
+    // Create base resources first (reduces cross-module cycles)
     const { mainTable, xrayBucket } = await import('./infra/storage');
 
+    // Realtime can be created before Router. It does not need the Router.
+    await import('./infra/realtime');
+
+    // Router for same-origin routing (/api -> lambda; web -> next)
     const router = new sst.aws.Router('AppRouter');
 
+    // API behind Router (/api)
     const { createApi } = await import('./infra/api');
-    const apiFn = createApi(router);
+    createApi(router);
 
+    // Web behind Router (default)
     const { createWeb } = await import('./infra/web');
     createWeb(router);
 
-    // Optional outputs if you want
+    // ✅ Keep outputs small & stable (avoid huge Pulumi graphs in CLI output)
     return {
-      apiUrl: apiFn.url,
-      routerUrl: router.url,
       tableName: mainTable.name,
       xrayBucket: xrayBucket.name,
     };

@@ -9,10 +9,10 @@ export function createApi(router: sst.aws.Router) {
 
   const apiFn = new sst.aws.Function('Api', {
     runtime: 'nodejs20.x',
-
     handler: 'apps/api/src/lambda.handler',
 
-    link: [mainTable, xrayBucket, connectionsTable],
+    // ✅ Explicitly link secrets so SST knows these are required by the function
+    link: [mainTable, xrayBucket, connectionsTable, jwtAccessSecret, jwtRefreshSecret],
 
     environment: {
       NODE_ENV: 'production',

@@ -1,9 +1,8 @@
 /// <reference path="../.sst/platform/config.d.ts" />
 
-import { realtimeWs } from './realtime';
-
 export function createWeb(router: sst.aws.Router) {
   const qzSecretId = process.env.QZ_PRIVATE_KEY_SECRET_ID ?? '';
+  const wsBaseUrl = process.env.NEXT_PUBLIC_WS_BASE_URL ?? '';
 
   const web = new sst.aws.Nextjs('Web', {
     path: 'apps/web',
@@ -15,8 +14,9 @@ export function createWeb(router: sst.aws.Router) {
       // same-origin API via Router -> /api
       NEXT_PUBLIC_API_BASE_URL: '/api',
 
-      // Your client helper appends "/$default" if missing, so provide base URL only
-      NEXT_PUBLIC_WS_BASE_URL: realtimeWs.url,
+      // ✅ Provide WS URL as a plain string (configured in GitHub Secrets)
+      // Example: wss://<your-ws-domain>/<stage>
+      NEXT_PUBLIC_WS_BASE_URL: wsBaseUrl,
 
       // server-only (NOT NEXT_PUBLIC)
       QZ_PRIVATE_KEY_SECRET_ID: qzSecretId,
@@ -30,12 +30,16 @@ export function createWeb(router: sst.aws.Router) {
     ],
   });
 
-  // ✅ Optional but recommended:
-  // Fail fast during deploy if missing in prod stage.
-  // (If you want stage-aware gating, we can add SST_STAGE checks.)
+  // Fail-fast warnings (prod safety)
   if (!qzSecretId) {
     console.warn(
       '[warn] QZ_PRIVATE_KEY_SECRET_ID is empty. /api/qz/sign will fail until you set it in GitHub Secrets.',
+    );
+  }
+
+  if (!wsBaseUrl) {
+    console.warn(
+      '[warn] NEXT_PUBLIC_WS_BASE_URL is empty. Realtime websocket client will not connect until set.',
     );
   }
 

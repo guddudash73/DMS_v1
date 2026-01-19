@@ -24,14 +24,12 @@ const jwtRefreshSecret = new sst.Secret('JWT_REFRESH_SECRET');
 
 export const realtimeWs = new sst.aws.ApiGatewayWebSocket('RealtimeWs');
 
-// ─────────────────────────────────────────────
-// $connect
-// ─────────────────────────────────────────────
 realtimeWs.route('$connect', {
   runtime: 'nodejs20.x',
   handler: 'apps/api/src/realtime/wsConnect.handler',
 
-  link: [connectionsTable],
+  // ✅ Explicit
+  link: [connectionsTable, jwtAccessSecret, jwtRefreshSecret],
 
   environment: {
     NODE_ENV: 'production',
@@ -46,9 +44,6 @@ realtimeWs.route('$connect', {
   },
 });
 
-// ─────────────────────────────────────────────
-// $disconnect
-// ─────────────────────────────────────────────
 realtimeWs.route('$disconnect', {
   runtime: 'nodejs20.x',
   handler: 'apps/api/src/realtime/wsDisconnect.handler',
@@ -60,9 +55,6 @@ realtimeWs.route('$disconnect', {
   },
 });
 
-// ─────────────────────────────────────────────
-// $default
-// ─────────────────────────────────────────────
 realtimeWs.route('$default', {
   runtime: 'nodejs20.x',
   handler: 'apps/api/src/realtime/wsDefault.handler',

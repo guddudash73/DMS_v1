@@ -20,6 +20,10 @@ jobs:
       SST_STAGE: prod
       SST_PASSPHRASE: ${{ secrets.SST_PASSPHRASE }}
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
+
+      # ✅ NEW: provide websocket base url as a plain string
+      NEXT_PUBLIC_WS_BASE_URL: ${{ secrets.NEXT_PUBLIC_WS_BASE_URL }}
+
       NODE_OPTIONS: --max-old-space-size=8192
       SST_TELEMETRY_DISABLED: '1'
       TURBO_TELEMETRY_DISABLED: '1'
@@ -57,65 +61,75 @@ jobs:
           test -f packages/config/dist/env.js
           test -n "${SST_PASSPHRASE}"
           test -n "${QZ_PRIVATE_KEY_SECRET_ID}"
+          test -n "${NEXT_PUBLIC_WS_BASE_URL}"
 
       - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::512491905643:role/github-actions-sarangi-dcm-deploy
           aws-region: ${{ env.AWS_REGION }}
 
-      - run: |
+      - name: Patch Pulumi error rendering (prevents RangeError masking)
+        run: |
           set -euxo pipefail
           npx sst version >/dev/null
+
           node <<'NODE'
           const fs = require("fs");
-          const path = require("path");
 
-          const candidates = [
-            ".sst/platform/node_modules/@pulumi/cmd/run/error.ts",
+          const targets = [
             ".sst/platform/node_modules/@pulumi/cmd/run/error.js",
+            ".sst/platform/node_modules/@pulumi/cmd/run/error.ts",
+            ".sst/platform/node_modules/@pulumi/pulumi/cmd/run/error.js",
+            ".sst/platform/node_modules/@pulumi/pulumi/cmd/run/error.ts",
           ];
 
-          const patch = (file) => {
-            if (!fs.existsSync(file)) return false;
-            let s = fs.readFileSync(file, "utf8");
-            if (s.includes("SAFE_PULUMI_ERROR_MESSAGE")) return true;
+          const needle = "return util.inspect(err, { colors: true });";
 
-            const re = /function\s+defaultErrorMessage\s*\([\s\S]*?\)\s*\{[\s\S]*?\n\}/m;
-            if (!re.test(s)) {
-              console.log("[patch] defaultErrorMessage not found in", file);
-              return false;
+          const replacement = `
+          try {
+            return util.inspect(err, { colors: true });
+          } catch (inspectError) {
+            const max = 20000;
+            const trunc = (s) =>
+              typeof s === "string" && s.length > max
+                ? s.slice(0, max) + "\\n... [truncated " + (s.length - max) + " chars]"
+                : s;
+
+            const msg = typeof err?.message === "string" ? err.message : undefined;
+            const stack = typeof err?.stack === "string" ? err.stack : undefined;
+            return trunc(msg) || trunc(stack) || ("Pulumi error (inspection failed): " + String(inspectError?.message || inspectError));
+          }`.trim();
+
+          let patched = 0;
+
+          for (const file of targets) {
+            if (!fs.existsSync(file)) continue;
+            const s = fs.readFileSync(file, "utf8");
+            if (s.includes("inspection failed")) continue;
+
+            if (s.includes(needle)) {
+              fs.writeFileSync(file, s.replace(needle, replacement), "utf8");
+              console.log("[pulumi-error-patch] patched:", file);
+              patched++;
             }
+          }
 
-            const replacement = `function defaultErrorMessage(err) {
-            // SAFE_PULUMI_ERROR_MESSAGE
-              try {
-                if (err && typeof err === "object") {
-                  const msg = err.message || err.toString();
-                  if (typeof msg === "string" && msg.length) return msg;
-                }
-                return String(err);
-              } catch (e) {
-                return "Pulumi error (failed to render safely)";
-              }
-            }`;
-
-            s = s.replace(re, replacement);
-            fs.writeFileSync(file, s, "utf8");
-            console.log("[patch] patched", file);
-            return true;
-          };
-
-          let ok = false;
-          for (const f of candidates) ok = patch(f) || ok;
-
-          if (!ok) {
-            console.log("[patch] no files patched; listing pulumi run dir:");
-            const dir = ".sst/platform/node_modules/@pulumi/cmd/run";
-            if (fs.existsSync(dir)) console.log(fs.readdirSync(dir));
-            process.exit(0);
+          console.log("[pulumi-error-patch] total patched:", patched);
+          if (patched === 0) {
+            console.log("[pulumi-error-patch] WARNING: nothing patched.");
           }
           NODE
 
-      - run: |
+      - name: Deploy
+        run: |
           set -euxo pipefail
           npx sst deploy --stage "$SST_STAGE"
+
+      - name: Dump SST logs on failure
+        if: failure()
+        run: |
+          set -euxo pipefail
+          echo "===== .sst/log/sst.log (tail) ====="
+          test -f .sst/log/sst.log && tail -n 400 .sst/log/sst.log || true
+          echo "===== .sst/log (ls) ====="
+          ls -la .sst/log || true
