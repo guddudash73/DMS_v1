@@ -2,8 +2,7 @@ name: Deploy (prod)
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
 
 permissions:
   id-token: write
@@ -16,13 +15,12 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-
     env:
       AWS_REGION: us-east-1
       SST_STAGE: prod
       SST_PASSPHRASE: ${{ secrets.SST_PASSPHRASE }}
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
-      NODE_OPTIONS: '--max-old-space-size=4096'
+      NODE_OPTIONS: --max-old-space-size=8192
       SST_TELEMETRY_DISABLED: '1'
       TURBO_TELEMETRY_DISABLED: '1'
       HUSKY: '0'
@@ -35,14 +33,11 @@ jobs:
           node-version: '20'
           cache: npm
 
-      - name: Pin npm
-        run: npm install -g npm@11.6.2
+      - run: npm install -g npm@11.6.2
 
-      - name: Install dependencies
-        run: npm ci --ignore-scripts
+      - run: npm ci --ignore-scripts
 
-      - name: Remove preinstalled Pulumi binaries
-        run: |
+      - run: |
           set -euxo pipefail
           which pulumi || true
           which pulumi-language-nodejs || true
@@ -54,36 +49,45 @@ jobs:
           which pulumi || true
           which pulumi-language-nodejs || true
 
-      - name: Build workspace packages
-        run: |
+      - run: |
           set -euxo pipefail
           npm run build --workspace=@dcm/config
           npm run build --workspace=@dcm/types
           test -f packages/types/dist/index.js
           test -f packages/config/dist/env.js
-          test -n "$SST_PASSPHRASE"
-          test -n "$QZ_PRIVATE_KEY_SECRET_ID"
+          test -n "${SST_PASSPHRASE}"
+          test -n "${QZ_PRIVATE_KEY_SECRET_ID}"
 
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
+      - uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::512491905643:role/github-actions-sarangi-dcm-deploy
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Patch Pulumi error renderer (unchanged logic)
-        run: |
+      - run: |
           set -euxo pipefail
-          npx sst --help >/dev/null 2>&1 || true
+          npx sst version >/dev/null
           node <<'NODE'
           const fs = require("fs");
-          const path = ".sst/platform/node_modules/@pulumi/cmd/run/error.js";
-          if (!fs.existsSync(path)) process.exit(0);
-          let s = fs.readFileSync(path, "utf8");
-          if (s.includes("SAFE_PULUMI_ERROR_MESSAGE")) process.exit(0);
-          s = s.replace(
-            /function defaultErrorMessage\([\s\S]*?\)\s*\{[\s\S]*?\n\}/m,
-            `function defaultErrorMessage(err) {
-              // SAFE_PULUMI_ERROR_MESSAGE
+          const path = require("path");
+
+          const candidates = [
+            ".sst/platform/node_modules/@pulumi/cmd/run/error.ts",
+            ".sst/platform/node_modules/@pulumi/cmd/run/error.js",
+          ];
+
+          const patch = (file) => {
+            if (!fs.existsSync(file)) return false;
+            let s = fs.readFileSync(file, "utf8");
+            if (s.includes("SAFE_PULUMI_ERROR_MESSAGE")) return true;
+
+            const re = /function\s+defaultErrorMessage\s*\([\s\S]*?\)\s*\{[\s\S]*?\n\}/m;
+            if (!re.test(s)) {
+              console.log("[patch] defaultErrorMessage not found in", file);
+              return false;
+            }
+
+            const replacement = `function defaultErrorMessage(err) {
+            // SAFE_PULUMI_ERROR_MESSAGE
               try {
                 if (err && typeof err === "object") {
                   const msg = err.message || err.toString();
@@ -93,10 +97,25 @@ jobs:
               } catch (e) {
                 return "Pulumi error (failed to render safely)";
               }
-            }`
-          );
-          fs.writeFileSync(path, s, "utf8");
+            }`;
+
+            s = s.replace(re, replacement);
+            fs.writeFileSync(file, s, "utf8");
+            console.log("[patch] patched", file);
+            return true;
+          };
+
+          let ok = false;
+          for (const f of candidates) ok = patch(f) || ok;
+
+          if (!ok) {
+            console.log("[patch] no files patched; listing pulumi run dir:");
+            const dir = ".sst/platform/node_modules/@pulumi/cmd/run";
+            if (fs.existsSync(dir)) console.log(fs.readdirSync(dir));
+            process.exit(0);
+          }
           NODE
 
-      - name: Deploy with SST
-        run: npx sst deploy --stage "$SST_STAGE"
+      - run: |
+          set -euxo pipefail
+          npx sst deploy --stage "$SST_STAGE"
