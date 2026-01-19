@@ -9,6 +9,15 @@ export function createApi(router: sst.aws.Router) {
     runtime: 'nodejs20.x',
     handler: 'apps/api/src/lambda.handler',
 
+    /**
+     * ✅ PRODUCTION FIX: native dependency packaging
+     * sharp is a native module and must be installed into the Lambda bundle.
+     * Without this, the runtime bundle.mjs will import "sharp" but it won't exist in /var/task/node_modules.
+     */
+    nodejs: {
+      install: ['sharp'],
+    },
+
     link: [mainTable, xrayBucket, connectionsTable],
 
     environment: {
