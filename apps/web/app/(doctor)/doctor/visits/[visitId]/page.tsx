@@ -1,15 +1,13 @@
 'use client';
 
 import * as React from 'react';
+import dynamic from 'next/dynamic';
 import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'react-toastify';
 
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-
-import { PrescriptionPreview } from '@/components/prescription/PrescriptionPreview';
-import { XrayTrayReadOnly } from '@/components/xray/XrayTrayReadOnly';
 
 import {
   useGetVisitByIdQuery,
@@ -43,8 +41,48 @@ import {
 
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
-import { PaginationControl } from '@/components/ui/pagination-control';
+
+// ✅ Lazy-load heavier UI widgets
+const Calendar = dynamic(() => import('@/components/ui/calendar').then((m) => m.Calendar), {
+  ssr: false,
+  loading: () => <div className="h-64 w-72 animate-pulse rounded-2xl bg-gray-100" />,
+});
+
+const PaginationControl = dynamic(
+  () => import('@/components/ui/pagination-control').then((m) => m.PaginationControl),
+  {
+    ssr: false,
+    loading: () => <div className="h-10 w-full animate-pulse rounded-xl bg-gray-100" />,
+  },
+);
+
+// ✅ Lazy-load the two biggest components on this page
+const PrescriptionPreview = dynamic(
+  () => import('@/components/prescription/PrescriptionPreview').then((m) => m.PrescriptionPreview),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="rounded-2xl border bg-white p-4">
+        <div className="h-4 w-48 animate-pulse rounded bg-gray-100" />
+        <div className="mt-4 space-y-2">
+          <div className="h-3 w-full animate-pulse rounded bg-gray-100" />
+          <div className="h-3 w-5/6 animate-pulse rounded bg-gray-100" />
+          <div className="h-3 w-4/6 animate-pulse rounded bg-gray-100" />
+          <div className="h-3 w-3/6 animate-pulse rounded bg-gray-100" />
+        </div>
+        <div className="mt-4 h-32 animate-pulse rounded-xl bg-gray-50" />
+      </div>
+    ),
+  },
+);
+
+const XrayTrayReadOnly = dynamic(
+  () => import('@/components/xray/XrayTrayReadOnly').then((m) => m.XrayTrayReadOnly),
+  {
+    ssr: false,
+    loading: () => <div className="h-72 w-full animate-pulse rounded-2xl bg-gray-100" />,
+  },
+);
 
 import { clinicDateISO, formatClinicDateShort } from '@/src/lib/clinicTime';
 
