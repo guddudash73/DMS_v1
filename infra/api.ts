@@ -1,3 +1,4 @@
+// infra/api.ts
 /// <reference path="../.sst/platform/config.d.ts" />
 
 import { mainTable, xrayBucket } from './storage';
@@ -9,20 +10,20 @@ export function createApi(router: sst.aws.Router) {
     runtime: 'nodejs20.x',
     handler: 'apps/api/src/lambda.handler',
 
-    /**
-     * ✅ PRODUCTION FIX: native dependency packaging for Lambda
-     *
-     * Native modules like bcrypt + sharp require a platform-specific .node binary.
-     * When esbuild bundles your handler, those binaries may not be included.
-     *
-     * `nodejs.install` forces SST to run an install step inside the Lambda bundle
-     * so the correct Linux x64 Node 20 binaries are present at /var/task/node_modules.
-     */
     nodejs: {
       install: ['bcrypt', 'sharp'],
     },
 
     link: [mainTable, xrayBucket, connectionsTable],
+
+    // ✅ REQUIRED so REST API lambdas can PostToConnection
+    // TEMP: wildcard to avoid ARN mistakes; tighten after we confirm it works.
+    permissions: [
+      {
+        actions: ['execute-api:ManageConnections'],
+        resources: ['*'],
+      },
+    ],
 
     environment: {
       NODE_ENV: 'production',
@@ -35,7 +36,11 @@ export function createApi(router: sst.aws.Router) {
       JWT_ACCESS_SECRET: jwtAccessSecret.value,
       JWT_REFRESH_SECRET: jwtRefreshSecret.value,
 
+      // Browser-facing WS URL (ok to keep)
       REALTIME_WS_URL: realtimeWs.url,
+
+      // ✅ Backend SDK-facing management endpoint (this is what wsClient.ts needs)
+      REALTIME_WS_ENDPOINT: realtimeWs.managementEndpoint,
     },
 
     url: {

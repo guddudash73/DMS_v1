@@ -1,29 +1,33 @@
+// apps/api/src/realtime/publisher.ts
 import { PostToConnectionCommand } from '@aws-sdk/client-apigatewaymanagementapi';
 import { listConnections, removeConnection } from './connectionStore';
 import { logError, logInfo } from '../lib/logger';
 import { getWsClient } from './wsClient';
 
-export type ClinicQueueUpdatedEvent = {
-  visitDate: string;
-};
+export type ClinicQueueUpdatedEvent = { visitDate: string };
 
-export type RealtimeEvent = {
-  type: 'ClinicQueueUpdated';
-  payload: ClinicQueueUpdatedEvent;
-};
+export type RealtimeEvent =
+  | { type: 'ClinicQueueUpdated'; payload: ClinicQueueUpdatedEvent }
+  | { type: 'ping' }
+  | { type: 'pong' };
 
 export async function publishClinicQueueUpdated(event: ClinicQueueUpdatedEvent): Promise<void> {
   const wsClient = getWsClient();
   if (!wsClient) {
-    console.warn('[realtime] REALTIME_WS_ENDPOINT not set; skipping ClinicQueueUpdated event');
+    logInfo('realtime_publish_skipped', { reason: 'ws_client_null' });
     return;
   }
 
   const connections = await listConnections();
-  if (connections.length === 0) return;
+  if (connections.length === 0) {
+    logInfo('realtime_publish_skipped', { reason: 'no_connections' });
+    return;
+  }
 
   const payload: RealtimeEvent = { type: 'ClinicQueueUpdated', payload: event };
   const data = Buffer.from(JSON.stringify(payload));
+
+  logInfo('realtime_publish_start', { count: connections.length, visitDate: event.visitDate });
 
   await Promise.all(
     connections.map(async (conn) => {
@@ -34,10 +38,10 @@ export async function publishClinicQueueUpdated(event: ClinicQueueUpdatedEvent):
             Data: data,
           }),
         );
-      } catch (err: unknown) {
-        const e = err as { $metadata?: { httpStatusCode?: number } };
+      } catch (err: any) {
+        const code = err?.$metadata?.httpStatusCode;
 
-        if (e?.$metadata?.httpStatusCode === 410) {
+        if (code === 410) {
           await removeConnection(conn.connectionId);
           logInfo('realtime_connection_gone', { connectionId: conn.connectionId });
           return;
@@ -45,12 +49,13 @@ export async function publishClinicQueueUpdated(event: ClinicQueueUpdatedEvent):
 
         logError('realtime_post_failed', {
           connectionId: conn.connectionId,
-          error:
-            err instanceof Error
-              ? { name: err.name, message: err.message }
-              : { message: String(err) },
+          httpStatusCode: code,
+          name: err?.name,
+          message: err?.message ?? String(err),
         });
       }
     }),
   );
+
+  logInfo('realtime_publish_done', { visitDate: event.visitDate });
 }
