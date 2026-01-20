@@ -29,6 +29,9 @@ export const s3Client = new S3Client({
   ...(env.S3_ENDPOINT ? { forcePathStyle: true } : {}),
   requestHandler: httpHandler,
   maxAttempts: 3,
+
+  requestChecksumCalculation: 'WHEN_REQUIRED',
+  responseChecksumValidation: 'WHEN_REQUIRED',
 });
 
 export const TABLE_NAME = env.DDB_TABLE_NAME;

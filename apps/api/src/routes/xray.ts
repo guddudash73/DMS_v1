@@ -124,7 +124,6 @@ router.post(
           contentType,
           contentLength: size,
           expiresInSeconds: 90,
-          serverSideEncryption: 'AES256',
         }),
       );
     } catch (err) {

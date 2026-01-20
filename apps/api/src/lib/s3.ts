@@ -11,10 +11,8 @@ type PresignUploadParams = {
   bucket: string;
   key: string;
   contentType: string;
-  contentLength: number;
+  contentLength: number; // still validated, but not signed into S3 request
   expiresInSeconds?: number;
-  serverSideEncryption?: 'AES256' | 'aws:kms';
-  sseKmsKeyId?: string;
 };
 
 type PresignDownloadParams = {
@@ -52,9 +50,9 @@ export const getPresignedUploadUrl = async (params: PresignUploadParams): Promis
     Bucket: params.bucket,
     Key: params.key,
     ContentType: params.contentType,
-    ContentLength: params.contentLength,
-    ServerSideEncryption: params.serverSideEncryption ?? 'AES256',
-    ...(params.sseKmsKeyId ? { SSEKMSKeyId: params.sseKmsKeyId } : {}),
+
+    // ❌ Do NOT sign ContentLength (browser handles it; mismatch => 403)
+    // ❌ Do NOT force SSE headers for browser PUT; use bucket default encryption instead
   });
 
   const signed = await getSignedUrl(s3Client, command, {

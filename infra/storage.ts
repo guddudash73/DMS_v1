@@ -21,6 +21,19 @@ export const mainTable = new sst.aws.Dynamo('MainTable', {
 });
 
 export const xrayBucket = new sst.aws.Bucket('XrayBucket', {
-  // prevents public access; CloudFront access is via OAC when needed
-  access: 'cloudfront',
+  /**
+   * ✅ PRIVATE bucket (default).
+   * Do NOT set access: "public".
+   * Do NOT set access: "cloudfront" unless you are *serving* objects via Router/CloudFront.
+   * Presigned URLs work with a private bucket.
+   */
+
+  // ✅ Browser uploads need CORS for presigned PUT
+  cors: {
+    allowMethods: ['GET', 'PUT', 'HEAD'],
+    allowOrigins: ['*'], // tighten to your CloudFront domain later
+    allowHeaders: ['*'],
+    exposeHeaders: ['ETag'],
+    // maxAge is optional; leaving it out avoids type mismatch across SST versions
+  },
 });
