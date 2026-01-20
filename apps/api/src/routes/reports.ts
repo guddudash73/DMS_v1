@@ -511,44 +511,63 @@ router.get(
 
     doc.pipe(res);
 
-    // ✅ Lambda-safe font loading:
-    // - In prod (Lambda), fonts should be packaged under: /var/task/assets/fonts
-    //   which appears as: path.join(process.cwd(), 'assets', 'fonts')
-    // - In dev (local), keep your existing fallback path.
-    const fontsCandidates = [
-      path.join(process.cwd(), 'assets', 'fonts'),
-      path.join(__dirname, 'assets', 'fonts'),
-      path.join(process.cwd(), 'apps', 'api', 'src', 'assets', 'fonts'), // dev fallback
-    ];
+    // ✅ Font bootstrapping must be defensive.
+    // IMPORTANT: pdfkit may try to initialize Standard fonts (Helvetica.afm) during PDFDocument creation.
+    // If pdfkit is bundled without its /data folder, Lambda will crash BEFORE this runs.
+    // So this code is correct, but you MUST also fix infra to ship pdfkit data.
+    // (See note below.)
 
-    const pickFontsDir = () => {
-      for (const dir of fontsCandidates) {
-        if (fs.existsSync(dir)) return dir;
+    const resolveFontDir = (): string | null => {
+      const candidates = [
+        // Lambda packaged assets (via SST copyFiles -> assets/fonts)
+        path.join(process.cwd(), 'assets', 'fonts'),
+        // Sometimes bundlers relocate relative to compiled file
+        path.join(__dirname, 'assets', 'fonts'),
+        // Local dev fallback
+        path.join(process.cwd(), 'apps', 'api', 'src', 'assets', 'fonts'),
+      ];
+
+      for (const dir of candidates) {
+        try {
+          if (fs.existsSync(dir)) return dir;
+        } catch {
+          // ignore
+        }
       }
       return null;
     };
 
-    const fontsDir = pickFontsDir();
-    const fontRegularPath = fontsDir ? path.join(fontsDir, 'NotoSans-Regular.ttf') : null;
-    const fontBoldPath = fontsDir ? path.join(fontsDir, 'NotoSans-Bold.ttf') : null;
+    const fontsDir = resolveFontDir();
+    const fontRegularPath = fontsDir ? path.join(fontsDir, 'NotoSans-Regular.ttf') : '';
+    const fontBoldPath = fontsDir ? path.join(fontsDir, 'NotoSans-Bold.ttf') : '';
 
     let hasFonts = false;
 
     try {
       if (fontRegularPath && fontBoldPath) {
-        doc.registerFont('AppFont', fontRegularPath);
-        doc.registerFont('AppFont-Bold', fontBoldPath);
-        hasFonts = true;
+        // Only register if both exist (avoid throwing)
+        if (fs.existsSync(fontRegularPath) && fs.existsSync(fontBoldPath)) {
+          doc.registerFont('AppFont', fontRegularPath);
+          doc.registerFont('AppFont-Bold', fontBoldPath);
+          hasFonts = true;
+        }
       }
     } catch {
-      // ✅ If fonts are missing or unreadable, don't crash the request.
-      // PDF still generates using built-in Helvetica.
       hasFonts = false;
     }
 
+    // ✅ Force a default font immediately, before any widthOfString()/text() calls.
+    if (hasFonts) {
+      doc.font('AppFont');
+    } else {
+      // If pdfkit standard fonts are available, this is fine.
+      // If they are missing, infra must be fixed (see below).
+      doc.font('Helvetica');
+    }
+
     const font = (w: 'regular' | 'bold') => {
-      if (!hasFonts) return w === 'bold' ? doc.font('Helvetica-Bold') : doc.font('Helvetica');
-      return w === 'bold' ? doc.font('AppFont-Bold') : doc.font('AppFont');
+      if (hasFonts) return w === 'bold' ? doc.font('AppFont-Bold') : doc.font('AppFont');
+      return w === 'bold' ? doc.font('Helvetica-Bold') : doc.font('Helvetica');
     };
 
     const left = doc.page.margins.left;

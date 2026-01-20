@@ -12,34 +12,25 @@ export function createApi(router: sst.aws.Router) {
     runtime: 'nodejs20.x',
     handler: 'apps/api/src/lambda.handler',
 
+    // ✅ Key fix: make pdfkit a real node_module (so its /data/*.afm files exist)
     nodejs: {
-      install: ['bcrypt', 'sharp'],
+      install: ['bcrypt', 'sharp', 'pdfkit'],
     },
 
-    // ✅ Add this: bundle fonts into the Lambda package
+    // ✅ Copy our own fonts into the Lambda package so we can use TTFs reliably
     copyFiles: [
-      // copy both font files into /assets/fonts in the Lambda root
       {
-        from: 'apps/api/src/assets/fonts/NotoSans-Regular.ttf',
-        to: 'assets/fonts/NotoSans-Regular.ttf',
+        from: 'apps/api/src/assets/fonts',
+        to: 'assets/fonts',
       },
-      {
-        from: 'apps/api/src/assets/fonts/NotoSans-Bold.ttf',
-        to: 'assets/fonts/NotoSans-Bold.ttf',
-      },
+      { from: 'node_modules/pdfkit/js/data', to: 'data' },
     ],
 
     link: [mainTable, xrayBucket, connectionsTable],
 
     permissions: [
-      {
-        actions: ['execute-api:ManageConnections'],
-        resources: ['*'],
-      },
-      {
-        actions: ['secretsmanager:GetSecretValue'],
-        resources: ['*'],
-      },
+      { actions: ['execute-api:ManageConnections'], resources: ['*'] },
+      { actions: ['secretsmanager:GetSecretValue'], resources: ['*'] },
     ],
 
     environment: {
@@ -56,15 +47,11 @@ export function createApi(router: sst.aws.Router) {
       REALTIME_WS_URL: realtimeWs.url,
       REALTIME_WS_ENDPOINT: realtimeWs.managementEndpoint,
 
-      // ✅ add this
       QZ_PRIVATE_KEY_SECRET_ID: qzSecretId,
     },
 
     url: {
-      router: {
-        instance: router,
-        path: '/api',
-      },
+      router: { instance: router, path: '/api' },
     },
   });
 
