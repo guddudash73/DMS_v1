@@ -26,6 +26,7 @@ import { clinicDateISO } from '../lib/date';
 import PDFDocument from 'pdfkit';
 import fs from 'node:fs';
 import path from 'node:path';
+import { PassThrough } from 'node:stream';
 
 const router = express.Router();
 
@@ -502,6 +503,7 @@ router.get(
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', `attachment; filename="daily-report-${date}.pdf"`);
+    res.setHeader('Cache-Control', 'no-store');
 
     const doc = new PDFDocument({
       size: 'A4',
@@ -509,7 +511,18 @@ router.get(
       compress: true,
     });
 
-    doc.pipe(res);
+    // Buffer the PDF (Lambda-safe)
+    const stream = new PassThrough();
+    const chunks: Buffer[] = [];
+
+    stream.on('data', (c) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)));
+    stream.on('error', (e) => {
+      // If something goes wrong while generating PDF, fail the request properly.
+      // (At this point headers may already be set; best-effort.)
+      console.error('pdf_stream_error', e);
+    });
+
+    doc.pipe(stream);
 
     // ✅ Font bootstrapping must be defensive.
     // IMPORTANT: pdfkit may try to initialize Standard fonts (Helvetica.afm) during PDFDocument creation.
@@ -557,13 +570,7 @@ router.get(
     }
 
     // ✅ Force a default font immediately, before any widthOfString()/text() calls.
-    if (hasFonts) {
-      doc.font('AppFont');
-    } else {
-      // If pdfkit standard fonts are available, this is fine.
-      // If they are missing, infra must be fixed (see below).
-      doc.font('Helvetica');
-    }
+    doc.font(hasFonts ? 'AppFont' : 'Helvetica');
 
     const font = (w: 'regular' | 'bold') => {
       if (hasFonts) return w === 'bold' ? doc.font('AppFont-Bold') : doc.font('AppFont');
@@ -967,6 +974,17 @@ router.get(
     }
 
     doc.end();
+
+    // Wait for stream end, then send buffer
+    await new Promise<void>((resolve, reject) => {
+      stream.on('finish', resolve);
+      stream.on('end', resolve);
+      stream.on('error', reject);
+    });
+
+    const pdfBuffer = Buffer.concat(chunks);
+    res.setHeader('Content-Length', String(pdfBuffer.length));
+    return res.status(200).end(pdfBuffer);
   }),
 );
 
