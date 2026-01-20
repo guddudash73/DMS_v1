@@ -47,6 +47,9 @@ export function createApi(router: sst.aws.Router) {
       REALTIME_WS_URL: realtimeWs.url,
       REALTIME_WS_ENDPOINT: realtimeWs.managementEndpoint,
 
+      ACCESS_TOKEN_TTL_SEC: '900',
+      REFRESH_TOKEN_TTL_SEC: String(3 * 24 * 60 * 60),
+
       QZ_PRIVATE_KEY_SECRET_ID: qzSecretId,
     },
 

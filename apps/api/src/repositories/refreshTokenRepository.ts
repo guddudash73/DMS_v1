@@ -29,13 +29,19 @@ export interface RefreshTokenRepository {
   consume(params: { userId: string; jti: string }): Promise<RefreshTokenRecord | null>;
 }
 
+const TTL_ATTR = 'ttl' as const;
+
 export class DynamoDBRefreshTokenRepository implements RefreshTokenRepository {
   async create(params: { userId: string; jti: string; expiresAt: number }): Promise<void> {
     const now = Date.now();
+
+    // expiresAt is ms in your app; Dynamo TTL needs seconds.
+    const ttl = Math.floor(params.expiresAt / 1000);
+
     const record: RefreshTokenRecord = {
       userId: params.userId,
       jti: params.jti,
-      expiresAt: params.expiresAt,
+      expiresAt: params.expiresAt, // keep ms for app logic (you already compare using ms)
       valid: true,
       createdAt: now,
     };
@@ -47,6 +53,9 @@ export class DynamoDBRefreshTokenRepository implements RefreshTokenRepository {
           ...buildRefreshTokenKey(params.userId, params.jti),
           entityType: 'REFRESH_TOKEN',
           ...record,
+
+          // ✅ DynamoDB TTL field
+          [TTL_ATTR]: ttl,
         },
         ConditionExpression: 'attribute_not_exists(PK)',
       }),
@@ -69,6 +78,7 @@ export class DynamoDBRefreshTokenRepository implements RefreshTokenRepository {
     if (!Item.valid || typeof Item.expiresAt !== 'number' || Item.expiresAt < now) {
       return null;
     }
+
     const { Attributes } = await docClient.send(
       new UpdateCommand({
         TableName: TABLE_NAME,
