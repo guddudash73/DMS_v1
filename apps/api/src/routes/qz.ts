@@ -1,15 +1,18 @@
 import express from 'express';
 import crypto from 'node:crypto';
+import { z } from 'zod';
 import { SecretsManagerClient, GetSecretValueCommand } from '@aws-sdk/client-secrets-manager';
 
 const router = express.Router();
 
-type Body = { request?: string };
+const Body = z.object({
+  request: z.string().min(1),
+});
 
 let cachedPem: string | null = null;
 let cachedAtMs = 0;
 
-async function loadPemFromSecretsManager(): Promise<string> {
+async function loadPem(): Promise<string> {
   const secretId = process.env.QZ_PRIVATE_KEY_SECRET_ID;
   if (!secretId) throw new Error('QZ_PRIVATE_KEY_SECRET_ID not set');
 
@@ -22,36 +25,29 @@ async function loadPemFromSecretsManager(): Promise<string> {
   const value = resp.SecretString;
   if (!value) throw new Error('SecretString missing');
 
-  const maybePem = value.includes('BEGIN PRIVATE KEY')
+  const pem = value.includes('BEGIN PRIVATE KEY')
     ? value
     : Buffer.from(value, 'base64').toString('utf8');
 
-  if (!maybePem.includes('BEGIN PRIVATE KEY')) {
-    throw new Error('Decoded key is not a PEM private key');
-  }
+  if (!pem.includes('BEGIN PRIVATE KEY')) throw new Error('Secret is not a PEM private key');
 
-  cachedPem = maybePem.trim();
+  cachedPem = pem.trim();
   cachedAtMs = now;
   return cachedPem;
 }
 
 router.post('/sign', async (req, res) => {
   try {
-    const body = req.body as Body;
-    const requestToSign = body?.request;
+    const parsed = Body.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json({ error: 'BAD_REQUEST' });
 
-    if (!requestToSign || typeof requestToSign !== 'string') {
-      return res.status(400).json({ error: 'BAD_REQUEST' });
-    }
+    const pem = await loadPem();
 
-    const privateKeyPem = await loadPemFromSecretsManager();
-
-    // Keep consistent with your current frontend setting (SHA512)
-    const sig = crypto.sign('RSA-SHA512', Buffer.from(requestToSign, 'utf8'), {
-      key: privateKeyPem,
+    const signature = crypto.sign('RSA-SHA512', Buffer.from(parsed.data.request, 'utf8'), {
+      key: pem,
     });
 
-    return res.status(200).json({ signature: sig.toString('base64') });
+    return res.status(200).json({ signature: signature.toString('base64') });
   } catch (err) {
     console.error('[qz/sign] failed:', err);
     return res.status(500).json({

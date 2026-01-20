@@ -6,6 +6,8 @@ import { connectionsTable, realtimeWs } from './realtime';
 import { jwtAccessSecret, jwtRefreshSecret } from './secrets';
 
 export function createApi(router: sst.aws.Router) {
+  const qzSecretId = process.env.QZ_PRIVATE_KEY_SECRET_ID ?? '';
+
   const apiFn = new sst.aws.Function('Api', {
     runtime: 'nodejs20.x',
     handler: 'apps/api/src/lambda.handler',
@@ -16,11 +18,13 @@ export function createApi(router: sst.aws.Router) {
 
     link: [mainTable, xrayBucket, connectionsTable],
 
-    // ✅ REQUIRED so REST API lambdas can PostToConnection
-    // TEMP: wildcard to avoid ARN mistakes; tighten after we confirm it works.
     permissions: [
       {
         actions: ['execute-api:ManageConnections'],
+        resources: ['*'],
+      },
+      {
+        actions: ['secretsmanager:GetSecretValue'],
         resources: ['*'],
       },
     ],
@@ -36,11 +40,11 @@ export function createApi(router: sst.aws.Router) {
       JWT_ACCESS_SECRET: jwtAccessSecret.value,
       JWT_REFRESH_SECRET: jwtRefreshSecret.value,
 
-      // Browser-facing WS URL (ok to keep)
       REALTIME_WS_URL: realtimeWs.url,
-
-      // ✅ Backend SDK-facing management endpoint (this is what wsClient.ts needs)
       REALTIME_WS_ENDPOINT: realtimeWs.managementEndpoint,
+
+      // ✅ add this
+      QZ_PRIVATE_KEY_SECRET_ID: qzSecretId,
     },
 
     url: {

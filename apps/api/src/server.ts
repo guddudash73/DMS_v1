@@ -195,7 +195,7 @@ export const createApp = () => {
     followupsRouter,
   );
 
-  app.use('/qz', qzRoutes);
+  routes.use('/qz', qzRoutes);
 
   // Mount routes at BOTH base paths
   app.use(routes);
