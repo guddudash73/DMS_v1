@@ -22,16 +22,30 @@ async function loadPem(): Promise<string> {
   const client = new SecretsManagerClient({});
   const resp = await client.send(new GetSecretValueCommand({ SecretId: secretId }));
 
-  const value = resp.SecretString;
-  if (!value) throw new Error('SecretString missing');
+  if (!resp.SecretString) {
+    throw new Error('SecretString missing');
+  }
 
-  const pem = value.includes('BEGIN PRIVATE KEY')
-    ? value
-    : Buffer.from(value, 'base64').toString('utf8');
+  let raw = resp.SecretString.trim();
 
-  if (!pem.includes('BEGIN PRIVATE KEY')) throw new Error('Secret is not a PEM private key');
+  // ✅ YOUR CASE: secret stored as { pem: "-----BEGIN PRIVATE KEY-----..." }
+  if (raw.startsWith('{')) {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.pem === 'string') {
+      raw = parsed.pem;
+    } else {
+      throw new Error('Secret JSON does not contain "pem" field');
+    }
+  }
 
-  cachedPem = pem.trim();
+  // Handle escaped newlines
+  raw = raw.replace(/\\n/g, '\n').trim();
+
+  if (!raw.includes('BEGIN PRIVATE KEY') && !raw.includes('BEGIN RSA PRIVATE KEY')) {
+    throw new Error('Secret is not a PEM private key');
+  }
+
+  cachedPem = raw;
   cachedAtMs = now;
   return cachedPem;
 }
