@@ -1,3 +1,4 @@
+// apps/web/src/lib/printing/qz.ts
 import qz from 'qz-tray';
 
 async function fetchTextOrEmpty(url: string): Promise<string> {
@@ -13,6 +14,31 @@ async function fetchTextOrEmpty(url: string): Promise<string> {
   }
 }
 
+function normalizeBaseUrl(url: string): string {
+  // Trim whitespace and remove trailing slashes
+  return url.trim().replace(/\/+$/, '');
+}
+
+function buildSignUrl(): string {
+  const raw = process.env.NEXT_PUBLIC_API_BASE_URL;
+
+  // If NEXT_PUBLIC_API_BASE_URL is missing at build time, DO NOT fall back to relative `/qz/sign`
+  // because that will hit CloudFront/static origin and 404.
+  if (!raw || raw.trim().length === 0) {
+    console.error(
+      '[qz] NEXT_PUBLIC_API_BASE_URL is not set. QZ signature endpoint will be unavailable in production.',
+    );
+    return '/api/qz/sign'; // local dev fallback (Next dev server may have this route)
+  }
+
+  const base = normalizeBaseUrl(raw);
+
+  // Support both styles:
+  // - base = https://api.example.com            -> https://api.example.com/qz/sign
+  // - base = https://api.example.com/api        -> https://api.example.com/api/qz/sign
+  return `${base}/qz/sign`;
+}
+
 let securityInitialized = false;
 let connectInFlight: Promise<void> | null = null;
 
@@ -20,30 +46,47 @@ export async function initQzSecurity() {
   if (securityInitialized) return;
   securityInitialized = true;
 
+  // Must exist in apps/web/public/qz/digital-certificate.txt for prod
   qz.security.setCertificatePromise(async () => {
     return await fetchTextOrEmpty('/qz/digital-certificate.txt');
   });
 
+  // QZ expects SHA512 when using RSA private key signing
   qz.security.setSignatureAlgorithm('SHA512');
 
   qz.security.setSignaturePromise(async (toSign: string) => {
-    const API_BASE =
-      process.env.NEXT_PUBLIC_API_BASE_URL && process.env.NEXT_PUBLIC_API_BASE_URL.length > 0
-        ? process.env.NEXT_PUBLIC_API_BASE_URL
-        : '';
+    const signUrl = buildSignUrl();
 
-    const signUrl = API_BASE ? `${API_BASE}/qz/sign` : '/qz/sign';
+    try {
+      const res = await fetch(signUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store',
+        body: JSON.stringify({ request: toSign }),
+      });
 
-    const res = await fetch(signUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      cache: 'no-store',
-      body: JSON.stringify({ request: toSign }),
-    });
+      if (!res.ok) {
+        // Keep returning '' so QZ will prompt, but log the root cause for debugging
+        console.error('[qz] signature endpoint failed', {
+          signUrl,
+          status: res.status,
+        });
+        return '';
+      }
 
-    if (!res.ok) return '';
-    const json = (await res.json()) as any;
-    return typeof json?.signature === 'string' ? json.signature : '';
+      const json = (await res.json()) as unknown;
+      const sig = (json as any)?.signature;
+
+      if (typeof sig !== 'string' || sig.length === 0) {
+        console.error('[qz] signature missing in response', { signUrl, json });
+        return '';
+      }
+
+      return sig;
+    } catch (err) {
+      console.error('[qz] signature fetch failed', { signUrl, err });
+      return '';
+    }
   });
 }
 
@@ -53,6 +96,7 @@ export async function ensureQzConnected() {
   if (!connectInFlight) {
     connectInFlight = (async () => {
       await initQzSecurity();
+      // usingSecure:false means ws://localhost:8182 (typical QZ Tray)
       await qz.websocket.connect({ usingSecure: false });
     })().finally(() => {
       connectInFlight = null;
