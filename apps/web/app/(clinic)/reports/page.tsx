@@ -123,7 +123,10 @@ export default function ReportsPage() {
         },
       });
 
-      if (!resp.ok) throw new Error('Failed to download PDF');
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => '');
+        throw new Error(`Failed to download PDF (${resp.status}): ${text}`);
+      }
 
       const blob = await resp.blob();
       const blobUrl = window.URL.createObjectURL(blob);

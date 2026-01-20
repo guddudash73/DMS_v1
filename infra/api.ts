@@ -16,6 +16,19 @@ export function createApi(router: sst.aws.Router) {
       install: ['bcrypt', 'sharp'],
     },
 
+    // ✅ Add this: bundle fonts into the Lambda package
+    copyFiles: [
+      // copy both font files into /assets/fonts in the Lambda root
+      {
+        from: 'apps/api/src/assets/fonts/NotoSans-Regular.ttf',
+        to: 'assets/fonts/NotoSans-Regular.ttf',
+      },
+      {
+        from: 'apps/api/src/assets/fonts/NotoSans-Bold.ttf',
+        to: 'assets/fonts/NotoSans-Bold.ttf',
+      },
+    ],
+
     link: [mainTable, xrayBucket, connectionsTable],
 
     permissions: [

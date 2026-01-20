@@ -511,14 +511,39 @@ router.get(
 
     doc.pipe(res);
 
-    const fontsDir = path.join(process.cwd(), 'apps', 'api', 'src', 'assets', 'fonts');
-    const fontRegularPath = path.join(fontsDir, 'NotoSans-Regular.ttf');
-    const fontBoldPath = path.join(fontsDir, 'NotoSans-Bold.ttf');
-    const hasFonts = fs.existsSync(fontRegularPath) && fs.existsSync(fontBoldPath);
+    // ✅ Lambda-safe font loading:
+    // - In prod (Lambda), fonts should be packaged under: /var/task/assets/fonts
+    //   which appears as: path.join(process.cwd(), 'assets', 'fonts')
+    // - In dev (local), keep your existing fallback path.
+    const fontsCandidates = [
+      path.join(process.cwd(), 'assets', 'fonts'),
+      path.join(__dirname, 'assets', 'fonts'),
+      path.join(process.cwd(), 'apps', 'api', 'src', 'assets', 'fonts'), // dev fallback
+    ];
 
-    if (hasFonts) {
-      doc.registerFont('AppFont', fontRegularPath);
-      doc.registerFont('AppFont-Bold', fontBoldPath);
+    const pickFontsDir = () => {
+      for (const dir of fontsCandidates) {
+        if (fs.existsSync(dir)) return dir;
+      }
+      return null;
+    };
+
+    const fontsDir = pickFontsDir();
+    const fontRegularPath = fontsDir ? path.join(fontsDir, 'NotoSans-Regular.ttf') : null;
+    const fontBoldPath = fontsDir ? path.join(fontsDir, 'NotoSans-Bold.ttf') : null;
+
+    let hasFonts = false;
+
+    try {
+      if (fontRegularPath && fontBoldPath) {
+        doc.registerFont('AppFont', fontRegularPath);
+        doc.registerFont('AppFont-Bold', fontBoldPath);
+        hasFonts = true;
+      }
+    } catch {
+      // ✅ If fonts are missing or unreadable, don't crash the request.
+      // PDF still generates using built-in Helvetica.
+      hasFonts = false;
     }
 
     const font = (w: 'regular' | 'bold') => {

@@ -65,10 +65,11 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, next) => {
   }
 
   const maybeDomain = err as DomainError;
-  if (maybeDomain && typeof maybeDomain.code === 'string') {
-    const status =
-      maybeDomain.statusCode && maybeDomain.statusCode >= 400 ? maybeDomain.statusCode : 400;
 
+  // ✅ Only treat as "domain error" if statusCode is explicitly set.
+  // This prevents Node system errors (ENOENT, EACCES, etc.) from becoming 400s.
+  if (maybeDomain && typeof maybeDomain.statusCode === 'number' && maybeDomain.statusCode >= 400) {
+    const status = maybeDomain.statusCode;
     const candidate: Partial<ErrorResponse> = {
       error: maybeDomain.code || 'INTERNAL_SERVER_ERROR',
       message: maybeDomain.message || 'Unexpected error',
