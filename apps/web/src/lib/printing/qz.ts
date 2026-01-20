@@ -27,7 +27,14 @@ export async function initQzSecurity() {
   qz.security.setSignatureAlgorithm('SHA512');
 
   qz.security.setSignaturePromise(async (toSign: string) => {
-    const res = await fetch('/api/qz/sign', {
+    const API_BASE =
+      process.env.NEXT_PUBLIC_API_BASE_URL && process.env.NEXT_PUBLIC_API_BASE_URL.length > 0
+        ? process.env.NEXT_PUBLIC_API_BASE_URL
+        : '';
+
+    const signUrl = API_BASE ? `${API_BASE}/qz/sign` : '/qz/sign';
+
+    const res = await fetch(signUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       cache: 'no-store',

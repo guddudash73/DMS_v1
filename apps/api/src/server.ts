@@ -25,6 +25,7 @@ import { genericSensitiveRateLimiter } from './middlewares/rateLimit';
 import { logInfo } from './lib/logger';
 import { errorHandler } from './middlewares/errorHandler';
 import { createSecurityMiddleware } from './middlewares/securityHeaders';
+import qzRoutes from './routes/qz';
 
 const env = parseEnv(process.env);
 
@@ -193,6 +194,8 @@ export const createApp = () => {
     requireRole('RECEPTION', 'ADMIN'),
     followupsRouter,
   );
+
+  app.use('/qz', qzRoutes);
 
   // Mount routes at BOTH base paths
   app.use(routes);
