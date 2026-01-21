@@ -752,10 +752,9 @@ export const apiSlice = createApi({
     }),
 
     getDoctors: builder.query<DoctorPublicListItem[], void>({
-      query: () => ({
-        url: '/doctors',
-      }),
+      query: () => ({ url: '/doctors' }),
       providesTags: ['Doctors'],
+      keepUnusedDataFor: 60 * 60, // ✅ 1 hour
     }),
 
     adminGetDoctors: builder.query<AdminDoctorListItem[], void>({
@@ -825,10 +824,9 @@ export const apiSlice = createApi({
     }),
 
     getPatientById: builder.query<Patient, string>({
-      query: (patientId) => ({
-        url: `/patients/${patientId}`,
-      }),
+      query: (patientId) => ({ url: `/patients/${patientId}` }),
       providesTags: (_result, _error, id) => [{ type: 'Patient' as const, id }],
+      keepUnusedDataFor: 60 * 10, // ✅ 10 mins
     }),
 
     getPatientVisits: builder.query<{ items: Visit[] }, string>({
@@ -1020,6 +1018,7 @@ export const apiSlice = createApi({
         method: 'GET',
       }),
       providesTags: (_r, _e, arg) => [{ type: 'Xrays' as const, id: arg.visitId }],
+      keepUnusedDataFor: 60 * 5, // ✅ 5 mins
     }),
 
     deleteXray: builder.mutation<{ ok: true }, { visitId: string; xrayId: string }>({
@@ -1039,6 +1038,7 @@ export const apiSlice = createApi({
         method: 'GET',
         params: size ? { size } : undefined,
       }),
+      keepUnusedDataFor: 60 * 2, // ✅ 2 mins (signed URL expiry safety)
     }),
 
     searchMedicines: builder.query<
@@ -1254,11 +1254,9 @@ export const apiSlice = createApi({
     }),
 
     getVisitById: builder.query<Visit, string>({
-      query: (visitId) => ({
-        url: `/visits/${visitId}`,
-        method: 'GET',
-      }),
+      query: (visitId) => ({ url: `/visits/${visitId}`, method: 'GET' }),
       providesTags: (_result, _error, visitId) => [{ type: 'Visit' as const, id: visitId }],
+      keepUnusedDataFor: 60 * 10, // ✅ 10 mins
     }),
 
     getVisitRx: builder.query<{ rx: Prescription | null }, { visitId: string; version?: number }>({
@@ -1268,6 +1266,7 @@ export const apiSlice = createApi({
         params: typeof version === 'number' ? { version } : undefined,
       }),
       providesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
+      keepUnusedDataFor: 60 * 10, // ✅ 10 mins
     }),
 
     getVisitRxVersions: builder.query<{ versions: number[] }, { visitId: string }>({

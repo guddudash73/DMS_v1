@@ -2,11 +2,12 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
+import { useDispatch } from 'react-redux';
 
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/src/hooks/useAuth';
 import { clinicDateISO } from '@/src/lib/clinicTime';
-import { useGetPatientQueueQuery } from '@/src/store/api';
+import { api, useGetPatientQueueQuery } from '@/src/store/api';
 
 import type { PatientQueueItem, Visit } from '@dcm/types';
 
@@ -51,6 +52,12 @@ function getDailyPatientNumber(v: PatientQueueItem): number | null {
   return typeof raw === 'number' && Number.isFinite(raw) && raw >= 1 ? raw : null;
 }
 
+function getPatientIdFromQueueItem(v: PatientQueueItem): string | null {
+  // some payloads may include patientId directly; keep safe
+  const pid = (v as any)?.patientId ?? v.patientId;
+  return typeof pid === 'string' && pid.trim() ? pid.trim() : null;
+}
+
 function OfflineBadge() {
   return (
     <span
@@ -66,12 +73,14 @@ function QueueItemRow({
   label,
   status,
   onClick,
+  onPrefetch,
   isOffline,
   dailyPatientNumber,
 }: {
   label: string;
   status: VisitStatus;
   onClick: () => void;
+  onPrefetch?: () => void;
   isOffline?: boolean;
   dailyPatientNumber?: number | null;
 }) {
@@ -79,6 +88,8 @@ function QueueItemRow({
     <button
       type="button"
       onClick={onClick}
+      onPointerEnter={onPrefetch} // desktop hover
+      onPointerDown={onPrefetch} // mobile "touchstart-like"
       className="flex h-10 w-full cursor-pointer items-center justify-between rounded-xl bg-white px-3 text-left text-xs text-gray-800 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black/10"
       title="Open visit"
     >
@@ -110,6 +121,7 @@ type DoctorQueueCardProps = {
 
 export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
   const router = useRouter();
+  const dispatch = useDispatch();
   const auth = useAuth();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
@@ -119,13 +131,49 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
     { date: todayIso },
     {
       skip: !canUseApi,
-
       selectFromResult: (r) => ({
         ...r,
         items: (r.data?.items ?? []) as PatientQueueItem[],
         hasData: Boolean(r.data),
       }),
     },
+  );
+
+  const prefetchVisit = React.useCallback(
+    (item: PatientQueueItem) => {
+      const visitId = item.visitId;
+      if (!visitId) return;
+
+      // 1) Prefetch route chunk
+      router.prefetch(`/doctor/visits/${visitId}`);
+
+      // 2) Prefetch hot data for that visit
+      dispatch(
+        api.util.prefetch('getVisitById', visitId, {
+          force: false,
+        }) as any,
+      );
+
+      dispatch(
+        api.util.prefetch(
+          'getVisitRx',
+          { visitId },
+          {
+            force: false,
+          },
+        ) as any,
+      );
+
+      const patientId = getPatientIdFromQueueItem(item);
+      if (patientId) {
+        dispatch(
+          api.util.prefetch('getPatientById', patientId, {
+            force: false,
+          }) as any,
+        );
+      }
+    },
+    [dispatch, router],
   );
 
   const openDoctorVisit = (visitId: string) => {
@@ -206,6 +254,7 @@ export default function DoctorQueueCard({ onViewAll }: DoctorQueueCardProps) {
                         key={v.visitId}
                         label={getVisitLabel(v)}
                         status={v.status}
+                        onPrefetch={() => prefetchVisit(v)}
                         onClick={() => openDoctorVisit(v.visitId)}
                         isOffline={getIsOffline(v)}
                         dailyPatientNumber={getDailyPatientNumber(v)}
