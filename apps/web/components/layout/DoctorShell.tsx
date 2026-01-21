@@ -106,6 +106,9 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
     };
   }, [auth.userId, me?.doctorProfile?.fullName, me?.displayName]);
 
+  // -----------------------------
+  // Patient Search (Doctor)
+  // -----------------------------
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -115,6 +118,8 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
   const resultsContainerRef = useRef<HTMLDivElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
+  const [hasSettledForTerm, setHasSettledForTerm] = useState(false);
+
   useEffect(() => {
     const handle = window.setTimeout(() => {
       const trimmed = searchTerm.trim();
@@ -122,29 +127,40 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
       setCursor(undefined);
       setPatients([]);
       setDropdownOpen(Boolean(trimmed));
+      setHasSettledForTerm(trimmed.length === 0);
     }, 300);
+
     return () => window.clearTimeout(handle);
   }, [searchTerm]);
 
   const {
-    data: searchData,
+    currentData: searchCurrentData,
     isLoading: searchLoading,
+    isFetching: searchFetching,
     error: searchRawError,
   } = useGetPatientsQuery(
     { query: debouncedTerm || undefined, limit: 10, cursor },
-    { skip: !debouncedTerm || auth.status === 'unauthenticated' },
+    {
+      skip: !debouncedTerm || auth.status === 'unauthenticated',
+      refetchOnMountOrArgChange: true,
+    },
   );
 
-  useEffect(() => {
-    if (!searchData) return;
+  const isSearching = Boolean(debouncedTerm) && (searchLoading || searchFetching);
 
+  useEffect(() => {
+    if (!searchCurrentData) return;
+    setHasSettledForTerm(true);
+
+    // Doctor search here doesn’t paginate yet; but if cursor gets used later,
+    // this merge keeps behavior safe.
     setPatients((prev) => {
       const byId = new Map<string, Patient>();
       for (const p of prev) byId.set(p.patientId, p);
-      for (const p of searchData.items) byId.set(p.patientId, p);
+      for (const p of searchCurrentData.items) byId.set(p.patientId, p);
       return Array.from(byId.values());
     });
-  }, [searchData]);
+  }, [searchCurrentData]);
 
   const searchErrorMessage = (() => {
     if (!searchRawError) return null;
@@ -158,6 +174,7 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
     setDebouncedTerm('');
     setPatients([]);
     setCursor(undefined);
+    setHasSettledForTerm(true);
   };
 
   const goToPatientProfile = (patientId: string) => {
@@ -227,12 +244,30 @@ export default function DoctorShell({ children }: { children: React.ReactNode })
             {dropdownOpen && (
               <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-2xl border bg-white shadow-lg">
                 <div ref={resultsContainerRef} className="max-h-64 overflow-y-auto rounded-2xl">
-                  {searchLoading && (
+                  {isSearching && patients.length === 0 && (
                     <div className="px-3 py-2 text-xs text-gray-500">Searching…</div>
                   )}
 
-                  {searchErrorMessage && (
+                  {searchErrorMessage && !isSearching && (
                     <div className="px-3 py-2 text-xs text-red-600">{searchErrorMessage}</div>
+                  )}
+
+                  {!searchErrorMessage &&
+                    !isSearching &&
+                    patients.length === 0 &&
+                    debouncedTerm &&
+                    hasSettledForTerm && (
+                      <div className="px-3 py-2 text-xs text-gray-500">
+                        {auth.status === 'unauthenticated'
+                          ? 'Please log in to search patients.'
+                          : 'No patients match your search.'}
+                      </div>
+                    )}
+
+                  {!debouncedTerm && (
+                    <div className="px-3 py-2 text-xs text-gray-500">
+                      Type to search patients by phone or name.
+                    </div>
                   )}
 
                   {patients.map((p) => (

@@ -62,7 +62,6 @@ const mainNav: NavItem[] = [
   { label: 'New Patient', href: '/patients/new', icon: UserPlus },
   { label: 'Daily Report', href: '/reports', icon: FileText },
   { label: 'WBC/Reminder Call', href: '/reminders', icon: Headphones },
-
   { label: 'Preset Print', href: '/preset-print', icon: Printer },
 ];
 
@@ -181,6 +180,9 @@ export default function ClinicShell({ children }: ClinicShellProps) {
     (typeof newPatientsToday === 'number' ? newPatientsToday : 0) +
     (typeof followupPatientsToday === 'number' ? followupPatientsToday : 0);
 
+  // -----------------------------
+  // Patient Search
+  // -----------------------------
   const [searchTerm, setSearchTerm] = useState('');
   const [debouncedTerm, setDebouncedTerm] = useState('');
   const [cursor, setCursor] = useState<string | undefined>(undefined);
@@ -192,42 +194,60 @@ export default function ClinicShell({ children }: ClinicShellProps) {
   const resultsContainerRef = useRef<HTMLDivElement | null>(null);
   const sentinelRef = useRef<HTMLDivElement | null>(null);
 
+  // Track whether the *current term* has completed at least one request.
+  // This prevents "No patients match..." from showing while we're still waiting.
+  const [hasSettledForTerm, setHasSettledForTerm] = useState(false);
+
   useEffect(() => {
     const handle = window.setTimeout(() => {
       const trimmed = searchTerm.trim();
       setDebouncedTerm(trimmed);
+
+      // Reset pagination + results for the new term
       setCursor(undefined);
       setPatients([]);
       setHasMore(false);
       setNextCursor(null);
+
+      // For a non-empty term, open dropdown and mark "not settled yet"
       setDropdownOpen(Boolean(trimmed));
+      setHasSettledForTerm(trimmed.length === 0); // empty term is trivially "settled"
     }, 300);
+
     return () => window.clearTimeout(handle);
   }, [searchTerm]);
 
   const {
-    data: searchData,
+    currentData: searchCurrentData,
     isLoading: searchLoading,
     isFetching: searchFetching,
     error: searchRawError,
   } = useGetPatientsQuery(
     { query: debouncedTerm || undefined, limit: 10, cursor },
-    { skip: !debouncedTerm || auth.status === 'unauthenticated' },
+    {
+      skip: !debouncedTerm || auth.status === 'unauthenticated',
+      refetchOnMountOrArgChange: true,
+    },
   );
 
+  const isSearching = Boolean(debouncedTerm) && (searchLoading || searchFetching);
+
   useEffect(() => {
-    if (!searchData) return;
+    // IMPORTANT: use currentData so we never apply stale results from previous args.
+    if (!searchCurrentData) return;
+
+    setHasSettledForTerm(true);
 
     setPatients((prev) => {
       const byId = new Map<string, Patient>();
       for (const p of prev) byId.set(p.patientId, p);
-      for (const p of searchData.items) byId.set(p.patientId, p);
+      for (const p of searchCurrentData.items) byId.set(p.patientId, p);
       return Array.from(byId.values());
     });
 
-    setHasMore(Boolean(searchData.nextCursor));
-    setNextCursor(searchData.nextCursor ?? null);
-  }, [searchData]);
+    setHasMore(Boolean(searchCurrentData.nextCursor));
+    setNextCursor(searchCurrentData.nextCursor ?? null);
+  }, [searchCurrentData]);
 
   const searchErrorMessage = (() => {
     if (!searchRawError) return null;
@@ -269,6 +289,7 @@ export default function ClinicShell({ children }: ClinicShellProps) {
     setCursor(undefined);
     setHasMore(false);
     setNextCursor(null);
+    setHasSettledForTerm(true);
   };
 
   const goToPatientProfile = (patientId: string) => {
@@ -362,23 +383,34 @@ export default function ClinicShell({ children }: ClinicShellProps) {
             {dropdownOpen && (
               <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-2xl border bg-white shadow-lg">
                 <div ref={resultsContainerRef} className="max-h-64 overflow-y-auto rounded-2xl">
-                  {searchLoading && patients.length === 0 && (
+                  {/* Show searching whenever current term is still fetching */}
+                  {isSearching && patients.length === 0 && (
                     <div className="px-3 py-2 text-xs text-gray-500">Searching…</div>
                   )}
 
-                  {searchErrorMessage && !searchLoading && (
+                  {searchErrorMessage && !isSearching && (
                     <div className="px-3 py-2 text-xs text-red-600">{searchErrorMessage}</div>
                   )}
 
-                  {!searchLoading && !searchErrorMessage && patients.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-gray-500">
-                      {!debouncedTerm
-                        ? 'Type to search patients by phone or name.'
-                        : auth.status === 'checking'
+                  {/* Only show empty-state AFTER the current term has settled */}
+                  {!searchErrorMessage &&
+                    !isSearching &&
+                    patients.length === 0 &&
+                    debouncedTerm &&
+                    hasSettledForTerm && (
+                      <div className="px-3 py-2 text-xs text-gray-500">
+                        {auth.status === 'checking'
                           ? 'Checking session…'
                           : auth.status === 'unauthenticated'
                             ? 'Please log in to search patients.'
                             : 'No patients match your search.'}
+                      </div>
+                    )}
+
+                  {/* Helper text when user hasn’t typed anything */}
+                  {!debouncedTerm && (
+                    <div className="px-3 py-2 text-xs text-gray-500">
+                      Type to search patients by phone or name.
                     </div>
                   )}
 
