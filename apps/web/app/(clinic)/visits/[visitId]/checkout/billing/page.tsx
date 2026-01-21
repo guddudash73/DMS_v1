@@ -28,6 +28,8 @@ type PatientSex = 'M' | 'F' | 'O' | 'U';
 type FollowUpContact = 'CALL' | 'SMS' | 'WHATSAPP' | 'OTHER';
 type UnknownRecord = Record<string, unknown>;
 
+type PrintAction = 'RX' | 'XRAY' | 'BILL' | null;
+
 function IconCheck(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
@@ -160,8 +162,6 @@ function isoToDate(iso: string): Date | null {
   const d = new Date(y, mo, da);
   return Number.isFinite(d.getTime()) ? d : null;
 }
-
-type PrintAction = 'RX' | 'XRAY' | 'BILL' | null;
 
 export default function VisitCheckoutPrintingPage() {
   const params = useParams<{ visitId: string }>();
@@ -298,34 +298,39 @@ export default function VisitCheckoutPrintingPage() {
   const [pendingAction, setPendingAction] = React.useState<PrintAction>(null);
 
   const startAction = (action: Exclude<PrintAction, null>) => {
+    // guard: avoid double click races
+    if (pendingAction) return;
     setPendingAction(action);
   };
 
-  const clearAction = () => {
-    setPendingAction(null);
-  };
+  const clearAction = () => setPendingAction(null);
 
   React.useEffect(() => {
     if (!pendingAction) return;
 
     if (pendingAction === 'RX') {
       if (isRxFetching) return;
+
       if (!rxAvailable) {
         clearAction();
         toast.info('No prescription available for this visit.');
         return;
       }
+
+      // navigation will replace UI immediately
       router.push(`/visits/${visitId}/checkout/printing/prescription`);
       return;
     }
 
     if (pendingAction === 'XRAY') {
       if (isXraysFetching) return;
+
       if (!xraysAvailable) {
         clearAction();
         toast.info('No X-rays uploaded for this visit.');
         return;
       }
+
       setXrayPrintOpen(true);
       window.setTimeout(() => clearAction(), 0);
       return;
@@ -333,11 +338,13 @@ export default function VisitCheckoutPrintingPage() {
 
     if (pendingAction === 'BILL') {
       if (isBillFetching) return;
+
       if (!billAvailable) {
         clearAction();
         toast.info('No bill found for this visit.');
         return;
       }
+
       setBillPrintOpen(true);
       window.setTimeout(() => clearAction(), 0);
     }
@@ -357,6 +364,9 @@ export default function VisitCheckoutPrintingPage() {
   const rxDisabled = !visitId || (!rxAvailable && !isRxFetching);
   const xrayDisabled = !visitId || (!xraysAvailable && !isXraysFetching);
   const billDisabled = !visitId || (billExists ? !billAvailable && !isBillFetching : true);
+
+  // while one is pending, lock other actions
+  const actionLocked = pendingAction !== null;
 
   return (
     <section className="p-4 2xl:p-8">
@@ -406,7 +416,7 @@ export default function VisitCheckoutPrintingPage() {
             variant="default"
             className="rounded-xl bg-black text-white hover:bg-black/90 cursor-pointer"
             onClick={onDone}
-            disabled={doneSuccess}
+            disabled={doneSuccess || actionLocked}
           >
             {doneSuccess ? (
               <span className="inline-flex items-center gap-2">
@@ -452,7 +462,9 @@ export default function VisitCheckoutPrintingPage() {
             <div className="text-right font-medium text-gray-900">{opdNo ?? '—'}</div>
 
             <div className="text-gray-500">Age / Sex</div>
-            <div className="text-right font-medium text-gray-900">{ageSexLabel}</div>
+            <div className="text-right font-medium text-gray-900">
+              {patientAge !== undefined ? `${patientAge} / ${patientSex ?? '—'}` : '—'}
+            </div>
 
             <div className="text-gray-500">Checked out</div>
             <div className="text-right font-medium text-gray-900">{checkedOut ? 'Yes' : 'No'}</div>
@@ -527,7 +539,7 @@ export default function VisitCheckoutPrintingPage() {
               variant="outline"
               className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
               onClick={() => startAction('RX')}
-              disabled={rxDisabled || pendingAction !== null}
+              disabled={rxDisabled || actionLocked}
               title={
                 rxDisabled ? (isRxFetching ? 'Preparing…' : 'No prescription available') : 'Print'
               }
@@ -540,7 +552,7 @@ export default function VisitCheckoutPrintingPage() {
               variant="outline"
               className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
               onClick={() => startAction('XRAY')}
-              disabled={xrayDisabled || pendingAction !== null}
+              disabled={xrayDisabled || actionLocked}
               title={
                 xrayDisabled ? (isXraysFetching ? 'Preparing…' : 'No X-rays uploaded') : 'Print'
               }
@@ -553,7 +565,7 @@ export default function VisitCheckoutPrintingPage() {
               variant="outline"
               className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
               onClick={() => startAction('BILL')}
-              disabled={billDisabled || pendingAction !== null}
+              disabled={billDisabled || actionLocked}
               title={
                 billDisabled
                   ? billExists && isBillFetching
@@ -579,6 +591,7 @@ export default function VisitCheckoutPrintingPage() {
               variant="outline"
               className="rounded-xl cursor-pointer"
               onClick={() => setFollowUpEnabled((v) => !v)}
+              disabled={actionLocked}
             >
               {followUpEnabled ? 'Disable' : 'Enable'}
             </Button>
@@ -597,6 +610,7 @@ export default function VisitCheckoutPrintingPage() {
                           type="button"
                           variant="outline"
                           className="mt-1 h-10 w-full justify-start rounded-xl bg-white px-3 text-sm font-normal cursor-pointer"
+                          disabled={actionLocked}
                         >
                           {followUpDate ? followUpDate : 'Select a date'}
                         </Button>
@@ -623,6 +637,7 @@ export default function VisitCheckoutPrintingPage() {
                       className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm cursor-pointer"
                       value={followUpContact}
                       onChange={(e) => setFollowUpContact(parseFollowUpContact(e.target.value))}
+                      disabled={actionLocked}
                     >
                       <option value="CALL" className="cursor-pointer">
                         CALL
@@ -646,6 +661,7 @@ export default function VisitCheckoutPrintingPage() {
                       placeholder="e.g., stitch removal / review pain / follow-up check"
                       value={followUpReason}
                       onChange={(e) => setFollowUpReason(e.target.value)}
+                      disabled={actionLocked}
                     />
                   </div>
 
@@ -653,6 +669,7 @@ export default function VisitCheckoutPrintingPage() {
                     <Button
                       type="button"
                       className="w-full rounded-2xl bg-black py-5 text-white hover:bg-black/90 cursor-pointer"
+                      disabled={actionLocked}
                       onClick={() => {
                         if (!/^\d{4}-\d{2}-\d{2}$/.test(followUpDate)) {
                           toast.error('Follow-up date must be YYYY-MM-DD.');
@@ -668,6 +685,7 @@ export default function VisitCheckoutPrintingPage() {
                       type="button"
                       variant="outline"
                       className="w-full rounded-2xl py-5 cursor-pointer"
+                      disabled={actionLocked}
                       onClick={() => goToFollowups('list')}
                     >
                       View Follow-ups
