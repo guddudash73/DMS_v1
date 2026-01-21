@@ -298,8 +298,7 @@ export default function VisitCheckoutPrintingPage() {
   const [pendingAction, setPendingAction] = React.useState<PrintAction>(null);
 
   const startAction = (action: Exclude<PrintAction, null>) => {
-    // guard: avoid double click races
-    if (pendingAction) return;
+    if (pendingAction) return; // prevent double click races
     setPendingAction(action);
   };
 
@@ -317,7 +316,6 @@ export default function VisitCheckoutPrintingPage() {
         return;
       }
 
-      // navigation will replace UI immediately
       router.push(`/visits/${visitId}/checkout/printing/prescription`);
       return;
     }
@@ -331,8 +329,13 @@ export default function VisitCheckoutPrintingPage() {
         return;
       }
 
-      setXrayPrintOpen(true);
-      window.setTimeout(() => clearAction(), 0);
+      // ✅ IMPORTANT: open only after XrayPrintSheet had a chance to be mounted (prefetched)
+      // This prevents blank print pages caused by printing before images finish rendering.
+      window.setTimeout(() => {
+        setXrayPrintOpen(true);
+        clearAction();
+      }, 0);
+
       return;
     }
 
@@ -365,7 +368,6 @@ export default function VisitCheckoutPrintingPage() {
   const xrayDisabled = !visitId || (!xraysAvailable && !isXraysFetching);
   const billDisabled = !visitId || (billExists ? !billAvailable && !isBillFetching : true);
 
-  // while one is pending, lock other actions
   const actionLocked = pendingAction !== null;
 
   return (
@@ -397,6 +399,7 @@ export default function VisitCheckoutPrintingPage() {
                 variant="outline"
                 className="rounded-xl cursor-pointer"
                 onClick={() => router.back()}
+                disabled={actionLocked}
               >
                 Back
               </Button>
@@ -405,6 +408,7 @@ export default function VisitCheckoutPrintingPage() {
                 variant="outline"
                 className="rounded-xl cursor-pointer"
                 onClick={() => router.push(`/visits/${visitId}/checkout/billing`)}
+                disabled={actionLocked}
               >
                 Billing
               </Button>
@@ -462,9 +466,7 @@ export default function VisitCheckoutPrintingPage() {
             <div className="text-right font-medium text-gray-900">{opdNo ?? '—'}</div>
 
             <div className="text-gray-500">Age / Sex</div>
-            <div className="text-right font-medium text-gray-900">
-              {patientAge !== undefined ? `${patientAge} / ${patientSex ?? '—'}` : '—'}
-            </div>
+            <div className="text-right font-medium text-gray-900">{ageSexLabel}</div>
 
             <div className="text-gray-500">Checked out</div>
             <div className="text-right font-medium text-gray-900">{checkedOut ? 'Yes' : 'No'}</div>
@@ -639,18 +641,10 @@ export default function VisitCheckoutPrintingPage() {
                       onChange={(e) => setFollowUpContact(parseFollowUpContact(e.target.value))}
                       disabled={actionLocked}
                     >
-                      <option value="CALL" className="cursor-pointer">
-                        CALL
-                      </option>
-                      <option value="SMS" className="cursor-pointer">
-                        SMS
-                      </option>
-                      <option value="WHATSAPP" className="cursor-pointer">
-                        WHATSAPP
-                      </option>
-                      <option value="OTHER" className="cursor-pointer">
-                        OTHER
-                      </option>
+                      <option value="CALL">CALL</option>
+                      <option value="SMS">SMS</option>
+                      <option value="WHATSAPP">WHATSAPP</option>
+                      <option value="OTHER">OTHER</option>
                     </select>
                   </div>
 
@@ -702,15 +696,16 @@ export default function VisitCheckoutPrintingPage() {
         </Card>
       </div>
 
-      {/* Only mount print sheets when user prints (prevents extra print dialogs) */}
-      {xrayPrintOpen && (
-        <XrayPrintSheet
-          open={xrayPrintOpen}
-          xrayIds={xrayIds}
-          onAfterPrint={() => setXrayPrintOpen(false)}
-        />
-      )}
+      {/* ✅ IMPORTANT FIX:
+          Pre-mount XrayPrintSheet with open={false} so it can load/cache xray assets.
+          This prevents blank prints caused by printing before images render. */}
+      <XrayPrintSheet
+        open={xrayPrintOpen}
+        xrayIds={xrayIds}
+        onAfterPrint={() => setXrayPrintOpen(false)}
+      />
 
+      {/* ✅ Keep bill sheet conditional (avoids extra print dialogs / double print bug) */}
       {billPrintOpen && (
         <BillPrintSheet
           open={billPrintOpen}
