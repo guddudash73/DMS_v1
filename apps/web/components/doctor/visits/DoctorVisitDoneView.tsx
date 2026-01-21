@@ -213,16 +213,32 @@ export function DoctorVisitDoneView(props: {
     <>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <Card className="lg:col-span-6 rounded-2xl border bg-white p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <ClipboardList className="h-4 w-4 text-gray-700" />
-            <div className="text-sm font-semibold text-gray-900">Prescription</div>
+          <div className="mb-3 flex gap-2">
+            <div>
+              <div className="flex gap-1 items-center">
+                <ClipboardList className="h-4 w-4 text-gray-700" />
+                <div className="text-sm font-semibold text-gray-900">Prescription</div>
+              </div>
+
+              <div className="text-xs text-gray-500">{visitDate ? visitDate.trim() : ''}</div>
+            </div>
+
+            {showHistory ? (
+              <div className="rounded-x pl-1 text-[11px] text-gray-600">
+                {historyLoading
+                  ? 'Loading visit history…'
+                  : `Showing visit history (${rxChain.visitIds.length} visit${
+                      rxChain.visitIds.length === 1 ? '' : 's'
+                    }).`}
+              </div>
+            ) : null}
 
             {/* ✅ Toggle added here, minimal UI impact */}
             <div className="ml-auto flex items-center gap-2">
               <button
                 type="button"
                 className={[
-                  'rounded-full px-3 py-1 text-[11px] font-medium transition',
+                  'rounded-full px-3 py-1 text-[11px] font-medium transition cursor-pointer',
                   showHistory
                     ? 'bg-black text-white hover:bg-black/90'
                     : 'bg-gray-100 text-gray-800 hover:bg-gray-200',
@@ -232,20 +248,8 @@ export function DoctorVisitDoneView(props: {
               >
                 {showHistory ? 'Hide history' : 'Show history'}
               </button>
-
-              <div className="text-xs text-gray-500">{visitDate ? visitDate.trim() : ''}</div>
             </div>
           </div>
-
-          {showHistory ? (
-            <div className="mb-3 rounded-xl border bg-gray-50 px-3 py-2 text-[11px] text-gray-600">
-              {historyLoading
-                ? 'Loading visit history…'
-                : `Showing chained visit history (${rxChain.visitIds.length} visit${
-                    rxChain.visitIds.length === 1 ? '' : 's'
-                  }).`}
-            </div>
-          ) : null}
 
           <div className="min-w-0 overflow-x-hidden">
             <PrescriptionPreview

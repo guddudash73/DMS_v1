@@ -184,7 +184,7 @@ export function DoctorVisitHistoryPanel(props: {
                 disabled={!expanded}
                 title={!expanded ? 'Expand to filter by date' : undefined}
               >
-                <CalendarIcon className="h-4 w-4" />
+                <CalendarIcon className="h-4 w-4 cursor-pointer" />
                 <span className={selectedDateStr ? 'text-gray-900' : 'text-gray-500'}>
                   {dateLabel}
                 </span>
@@ -221,7 +221,7 @@ export function DoctorVisitHistoryPanel(props: {
           <Button
             type="button"
             variant="outline"
-            className="rounded-xl"
+            className="rounded-xl cursor-pointer"
             onClick={() => setExpanded((v) => !v)}
           >
             {expanded ? 'Hide' : 'Show'}
@@ -322,7 +322,7 @@ export function DoctorVisitHistoryPanel(props: {
                             <Button
                               type="button"
                               variant="outline"
-                              className="h-8 rounded-xl px-3 text-xs"
+                              className="h-8 rounded-xl px-3 text-xs cursor-pointer"
                               onClick={() => onOpenRxQuick(anchor.visitId)}
                             >
                               View Rx
@@ -330,7 +330,7 @@ export function DoctorVisitHistoryPanel(props: {
                             <Button
                               type="button"
                               variant="outline"
-                              className="h-8 rounded-xl px-3 text-xs"
+                              className="h-8 rounded-xl px-3 text-xs cursor-pointer"
                               onClick={() => onOpenXrayQuick(anchor.visitId)}
                             >
                               X-rays
@@ -338,7 +338,7 @@ export function DoctorVisitHistoryPanel(props: {
                             <Button
                               type="button"
                               variant="outline"
-                              className="h-8 rounded-xl px-3 text-xs"
+                              className="h-8 rounded-xl px-3 text-xs cursor-pointer"
                               onClick={() => onOpenVisit(anchor.visitId)}
                             >
                               View

@@ -310,7 +310,7 @@ export function DoctorVisitPageClient() {
             <Button
               type="button"
               variant="outline"
-              className="rounded-xl"
+              className="rounded-xl cursor-pointer"
               onClick={onStartRevision}
               disabled={sessionMuted || startRevisionState.isLoading || loading || hasError}
               title={sessionMuted ? sessionMutedReason : 'Start editing this DONE visit'}
@@ -322,7 +322,7 @@ export function DoctorVisitPageClient() {
           <Button
             type="button"
             variant="outline"
-            className="rounded-xl"
+            className="rounded-xl cursor-pointer"
             onClick={() => router.back()}
           >
             Back
@@ -332,7 +332,7 @@ export function DoctorVisitPageClient() {
             <Button
               type="button"
               className={[
-                'rounded-xl',
+                'rounded-xl cursor-pointer',
                 sessionMuted
                   ? 'bg-gray-200 text-gray-600 hover:bg-gray-200'
                   : 'bg-black text-white hover:bg-black/90',

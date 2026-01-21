@@ -542,7 +542,7 @@ export default function ClinicVisitInfoPageClient() {
             <Button
               type="button"
               variant="outline"
-              className="rounded-xl"
+              className="rounded-xl cursor-pointer"
               onClick={() => router.push(`/visits/${visitId}/checkout/billing`)}
             >
               Edit bill
@@ -552,7 +552,7 @@ export default function ClinicVisitInfoPageClient() {
           <Button
             type="button"
             variant="default"
-            className="rounded-xl bg-black text-white hover:bg-black/90"
+            className="rounded-xl bg-black text-white hover:bg-black/90 cursor-pointer"
             disabled={primaryDisabled}
             title={
               !visit
@@ -593,11 +593,22 @@ export default function ClinicVisitInfoPageClient() {
             </div>
 
             {/* ✅ Toggle lives ONLY here */}
+
+            {showHistory ? (
+              <div className="mb-3 px-3 text-[11px] text-gray-600">
+                {historyLoading
+                  ? 'Loading visit history…'
+                  : `Showing visit history (${rxChain.visitIds.length} visit${
+                      rxChain.visitIds.length === 1 ? '' : 's'
+                    }).`}
+              </div>
+            ) : null}
+
             <div className="flex items-center gap-2">
               <button
                 type="button"
                 className={[
-                  'rounded-full px-3 py-1 text-[11px] font-medium transition',
+                  'rounded-full px-3 py-1 text-[11px] font-medium transition cursor-pointer',
                   showHistory
                     ? 'bg-black text-white hover:bg-black/90'
                     : 'bg-gray-100 text-gray-800 hover:bg-gray-200',
@@ -609,16 +620,6 @@ export default function ClinicVisitInfoPageClient() {
               </button>
             </div>
           </div>
-
-          {showHistory ? (
-            <div className="mb-3 rounded-xl border bg-gray-50 px-3 py-2 text-[11px] text-gray-600">
-              {historyLoading
-                ? 'Loading visit history…'
-                : `Showing chained visit history (${rxChain.visitIds.length} visit${
-                    rxChain.visitIds.length === 1 ? '' : 's'
-                  }).`}
-            </div>
-          ) : null}
 
           {versionOptions.length > 0 ? (
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-gray-50 px-3 py-2">
@@ -713,7 +714,7 @@ export default function ClinicVisitInfoPageClient() {
               <Button
                 type="button"
                 variant="default"
-                className="rounded-xl bg-black text-white hover:bg-black/90"
+                className="rounded-xl bg-black text-white hover:bg-black/90 cursor-pointer"
                 onClick={() => void onSaveNotes()}
                 disabled={updateNotesState.isLoading || !rxToShow || !isViewingLatest}
                 title={
