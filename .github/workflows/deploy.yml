@@ -15,12 +15,19 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+
     env:
       AWS_REGION: us-east-1
       SST_STAGE: prod
       SST_PASSPHRASE: ${{ secrets.SST_PASSPHRASE }}
+
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
       NEXT_PUBLIC_WS_BASE_URL: ${{ secrets.NEXT_PUBLIC_WS_BASE_URL }}
+
+      # Domain / cert (make sure cert covers trial.dcm.tcplgroups.com)
+      APP_DOMAIN: trial.dcm.tcplgroups.com
+      APP_CERT_ARN: ${{ secrets.APP_CERT_ARN }}
+
       NODE_OPTIONS: --max-old-space-size=8192
       SST_TELEMETRY_DISABLED: '1'
       TURBO_TELEMETRY_DISABLED: '1'
@@ -34,35 +41,27 @@ jobs:
           node-version: '20'
           cache: npm
 
-      - run: npm install -g npm@11.6.2
+      - name: Pin npm
+        run: npm install -g npm@11.6.2
 
-      # ✅ IMPORTANT: allow scripts so sharp can install correctly
-      - run: npm ci
+      - name: Install deps
+        run: npm ci
 
-      - run: |
-          set -euxo pipefail
-          which pulumi || true
-          which pulumi-language-nodejs || true
-          sudo rm -f /usr/local/bin/pulumi || true
-          sudo rm -f /usr/local/bin/pulumi-language-nodejs || true
-          sudo rm -f /usr/local/bin/pulumi-language-python || true
-          sudo rm -f /usr/local/bin/pulumi-language-go || true
-          sudo rm -f /usr/local/bin/pulumi-language-dotnet || true
-          which pulumi || true
-          which pulumi-language-nodejs || true
-
-      - run: |
+      - name: Preflight checks
+        run: |
           set -euxo pipefail
           npm run build --workspace=@dcm/config
           npm run build --workspace=@dcm/types
           test -f packages/types/dist/index.js
           test -f packages/config/dist/env.js
+
           test -n "${SST_PASSPHRASE}"
           test -n "${QZ_PRIVATE_KEY_SECRET_ID}"
+          test -n "${APP_DOMAIN}"
+          test -n "${APP_CERT_ARN}"
 
-          # ✅ Bootstrap-friendly: WS URL may not exist before first deploy
           if [ -z "${NEXT_PUBLIC_WS_BASE_URL}" ]; then
-            echo "::warning::NEXT_PUBLIC_WS_BASE_URL is not set. Realtime UI will not connect until after first prod deploy. Set it and redeploy."
+            echo "::warning::NEXT_PUBLIC_WS_BASE_URL is empty. Realtime UI will not connect until set."
           fi
 
       - uses: aws-actions/configure-aws-credentials@v4
@@ -70,10 +69,14 @@ jobs:
           role-to-assume: arn:aws:iam::512491905643:role/github-actions-sarangi-dcm-deploy
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Install SST platform (so we can patch Pulumi renderer)
+        run: |
+          set -euxo pipefail
+          npx sst version
+
       - name: Patch Pulumi error rendering (prevents RangeError masking)
         run: |
           set -euxo pipefail
-          npx sst version >/dev/null
 
           node <<'NODE'
           const fs = require("fs");
@@ -108,7 +111,6 @@ jobs:
             if (!fs.existsSync(file)) continue;
             const s = fs.readFileSync(file, "utf8");
             if (s.includes("inspection failed")) continue;
-
             if (s.includes(needle)) {
               fs.writeFileSync(file, s.replace(needle, replacement), "utf8");
               console.log("[pulumi-error-patch] patched:", file);
@@ -118,7 +120,7 @@ jobs:
 
           console.log("[pulumi-error-patch] total patched:", patched);
           if (patched === 0) {
-            console.log("[pulumi-error-patch] WARNING: nothing patched.");
+            console.log("[pulumi-error-patch] WARNING: nothing patched (paths may have changed).");
           }
           NODE
 
@@ -127,11 +129,34 @@ jobs:
           set -euxo pipefail
           npx sst deploy --stage "$SST_STAGE"
 
-      - name: Dump SST logs on failure
+      - name: Dump logs on failure
         if: failure()
         run: |
           set -euxo pipefail
-          echo "===== .sst/log/sst.log (tail) ====="
-          test -f .sst/log/sst.log && tail -n 400 .sst/log/sst.log || true
+
           echo "===== .sst/log (ls) ====="
           ls -la .sst/log || true
+
+          echo "===== .sst/log/sst.log (tail) ====="
+          test -f .sst/log/sst.log && tail -n 600 .sst/log/sst.log || true
+
+          echo "===== .sst/log/pulumi.log (tail) ====="
+          test -f .sst/log/pulumi.log && tail -n 600 .sst/log/pulumi.log || true
+
+          echo "===== Find eventlog.json ====="
+          EVENTLOG=$(ls -1 .sst/pulumi/*/eventlog.json 2>/dev/null | head -n 1 || true)
+          echo "eventlog path: $EVENTLOG"
+          if [ -n "$EVENTLOG" ]; then
+            echo "===== eventlog.json (tail) ====="
+            tail -n 200 "$EVENTLOG" || true
+          fi
+
+      - name: Upload SST logs as artifact
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sst-logs
+          path: |
+            .sst/log/*
+            .sst/pulumi/*/eventlog.json
+          if-no-files-found: ignore
