@@ -101,6 +101,67 @@ const getBillItems = (bill: unknown): BillItemLike[] => {
   return b.items as BillItemLike[];
 };
 
+// ---- Visit summary helpers (same idea as printing page) ----
+type PatientSex = 'M' | 'F' | 'O' | 'U';
+
+function toLocalISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function safeParseDobToDate(dob: unknown): Date | null {
+  if (!dob) return null;
+
+  if (typeof dob === 'number' && Number.isFinite(dob)) {
+    const d = new Date(dob);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+
+  if (typeof dob === 'string') {
+    const s = dob.trim();
+    if (!s) return null;
+
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+    if (m) {
+      const y = Number(m[1]);
+      const mo = Number(m[2]) - 1;
+      const da = Number(m[3]);
+      const d = new Date(y, mo, da);
+      return Number.isFinite(d.getTime()) ? d : null;
+    }
+
+    const d = new Date(s);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }
+
+  if (dob instanceof Date) return Number.isFinite(dob.getTime()) ? dob : null;
+
+  return null;
+}
+
+function calculateAge(dob: Date, at: Date): number {
+  let age = at.getFullYear() - dob.getFullYear();
+  const m = at.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && at.getDate() < dob.getDate())) age -= 1;
+  return age < 0 ? 0 : age;
+}
+
+function normalizeSex(raw: unknown): PatientSex | undefined {
+  if (!raw) return undefined;
+  const s = String(raw).trim().toUpperCase();
+
+  if (s === 'M' || s === 'MALE') return 'M';
+  if (s === 'F' || s === 'FEMALE') return 'F';
+  if (s === 'O' || s === 'OTHER') return 'O';
+  if (s === 'U' || s === 'UNKNOWN') return 'U';
+
+  if (s === 'M' || s === 'F' || s === 'O' || s === 'U') return s as PatientSex;
+
+  return undefined;
+}
+
 export default function VisitCheckoutBillingPage() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -219,12 +280,53 @@ export default function VisitCheckoutBillingPage() {
   const patientName = patientQuery.data?.name;
   const patientPhone = patientQuery.data?.phone;
 
-  const legacyDoctorId =
-    getStr(visit, 'doctorId') ?? getStr(visit, 'providerId') ?? getStr(visit, 'assignedDoctorId');
+  // ---- Visit summary fields (replaces Doctor card) ----
+  const visitRec: UnknownRecord = isRecord(visit) ? (visit as UnknownRecord) : {};
+  const patientRec: UnknownRecord = isRecord(patientQuery.data)
+    ? (patientQuery.data as UnknownRecord)
+    : {};
 
-  const doctorLabel = legacyDoctorId ? `Doctor (${legacyDoctorId})` : 'Doctor';
-  const visitDateLabel = getStr(visit, 'visitDate') ?? '—';
+  const patientSdId = getStr(patientRec, 'sdId') ?? getStr(visitRec, 'sdId') ?? undefined;
 
+  const opdNo =
+    getStr(visitRec, 'opdNo') ??
+    getStr(visitRec, 'opdId') ??
+    getStr(visitRec, 'opdNumber') ??
+    undefined;
+
+  const patientDobRaw =
+    (patientRec as any).dob ??
+    (patientRec as any).dateOfBirth ??
+    (patientRec as any).birthDate ??
+    (patientRec as any).dobIso ??
+    null;
+
+  const patientSexRaw =
+    (patientRec as any).sex ?? (patientRec as any).gender ?? (patientRec as any).patientSex ?? null;
+
+  const patientDob = safeParseDobToDate(patientDobRaw);
+  const visitCreatedAtMs = getNum(visitRec, 'createdAt') ?? Date.now();
+
+  const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
+  const patientSex = normalizeSex(patientSexRaw);
+  const ageSexLabel = patientAge !== undefined ? `${patientAge} / ${patientSex ?? '—'}` : '—';
+
+  const checkedOut = getBool(visitRec, 'checkedOut') === true;
+
+  const visitCreatedDateLabel = visitCreatedAtMs
+    ? `Visit: ${toLocalISODate(new Date(visitCreatedAtMs))}`
+    : undefined;
+
+  const visitDateLabel = getStr(visitRec, 'visitDate')
+    ? `Visit: ${String((visitRec as any).visitDate)}`
+    : undefined;
+
+  const visitDateDisplay =
+    visitDateLabel?.replace('Visit:', '').trim() ||
+    visitCreatedDateLabel?.replace('Visit:', '').trim() ||
+    '—';
+
+  // ---- Refs / inputs ----
   const serviceRef = React.useRef<HTMLInputElement | null>(null);
   const amountRef = React.useRef<HTMLInputElement | null>(null);
   const addBtnRef = React.useRef<HTMLButtonElement | null>(null);
@@ -313,10 +415,8 @@ export default function VisitCheckoutBillingPage() {
         await visitQuery.refetch();
       } catch (err: unknown) {
         const e = err as ApiError;
-
         const msg =
           getStr(e.data, 'message') || getErrorMessage(err) || 'Failed to mark visit DONE.';
-
         toast.error(msg);
         return;
       }
@@ -454,6 +554,7 @@ export default function VisitCheckoutBillingPage() {
         </Card>
       ) : null}
 
+      {/* ✅ Top cards: Patient + Visit summary + Bill status */}
       <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-3">
         <Card className="rounded-2xl border bg-white p-4">
           <div className="text-xs text-gray-500">Patient</div>
@@ -462,9 +563,24 @@ export default function VisitCheckoutBillingPage() {
         </Card>
 
         <Card className="rounded-2xl border bg-white p-4">
-          <div className="text-xs text-gray-500">Doctor</div>
-          <div className="mt-1 text-base font-semibold text-gray-900">{doctorLabel}</div>
-          <div className="mt-1 text-sm text-gray-600">{visitDateLabel}</div>
+          <div className="text-xs text-gray-500">Visit summary</div>
+
+          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+            <div className="text-gray-500">Visit date</div>
+            <div className="text-right font-medium text-gray-900">{visitDateDisplay}</div>
+
+            <div className="text-gray-500">SD ID</div>
+            <div className="text-right font-medium text-gray-900">{patientSdId ?? '—'}</div>
+
+            <div className="text-gray-500">OPD No</div>
+            <div className="text-right font-medium text-gray-900">{opdNo ?? '—'}</div>
+
+            <div className="text-gray-500">Age / Sex</div>
+            <div className="text-right font-medium text-gray-900">{ageSexLabel}</div>
+
+            <div className="text-gray-500">Checked out</div>
+            <div className="text-right font-medium text-gray-900">{checkedOut ? 'Yes' : 'No'}</div>
+          </div>
         </Card>
 
         <Card className="rounded-2xl border bg-white p-4">
@@ -499,7 +615,6 @@ export default function VisitCheckoutBillingPage() {
               Tax {computed.tax.toFixed(2)}
             </div>
 
-            {/* ✅ NEW: payment received flags */}
             <div className="mt-4 flex flex-wrap items-center gap-4">
               <label className="flex items-center gap-2 text-sm text-gray-800">
                 <input
