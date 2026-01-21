@@ -31,7 +31,7 @@ jobs:
       APP_DOMAIN: trial.tcplgroups.com
       APP_CERT_ARN: ${{ secrets.APP_CERT_ARN }}
 
-      # ✅ NEW: JWT secrets stored in GitHub
+      # JWT secrets stored in GitHub
       JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
       JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
 
@@ -88,6 +88,13 @@ jobs:
           role-to-assume: arn:aws:iam::512491905643:role/github-actions-sarangi-dcm-deploy
           aws-region: ${{ env.AWS_REGION }}
 
+      # ✅ NEW: Bootstrap SST BEFORE trying to set secrets
+      - name: SST Bootstrap (required before setting secrets)
+        run: |
+          set -euxo pipefail
+          npx sst version
+          npx sst bootstrap --stage "$SST_STAGE"
+
       - name: Patch Pulumi error rendering (prevents RangeError masking)
         run: |
           set -euxo pipefail
@@ -140,12 +147,10 @@ jobs:
           }
           NODE
 
-      # ✅ NEW: Seed SST secrets from GitHub before deploying
+      # ✅ Seed SST secrets from GitHub before deploying
       - name: Seed SST secrets (JWT) for prod stage
         run: |
           set -euxo pipefail
-
-          # These set the SST-managed secrets used by infra/secrets.ts
           npx sst secret set JWT_ACCESS_SECRET "$JWT_ACCESS_SECRET" --stage "$SST_STAGE"
           npx sst secret set JWT_REFRESH_SECRET "$JWT_REFRESH_SECRET" --stage "$SST_STAGE"
 
