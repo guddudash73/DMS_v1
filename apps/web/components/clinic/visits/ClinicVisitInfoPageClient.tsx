@@ -196,6 +196,9 @@ export default function ClinicVisitInfoPageClient() {
 
   const visitId = String(params?.visitId ?? '');
 
+  // ✅ Toggle ONLY in this page
+  const [showHistory, setShowHistory] = React.useState(false);
+
   const visitQuery = useGetVisitByIdQuery(visitId, {
     skip: !visitId,
     refetchOnMountOrArgChange: true,
@@ -212,15 +215,18 @@ export default function ClinicVisitInfoPageClient() {
   });
 
   const doctorsQuery = useGetDoctorsQuery(undefined);
+
+  // ✅ IMPORTANT: do NOT fetch visit history unless toggle is ON
   const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', {
-    skip: !patientId,
+    skip: !patientId || !showHistory,
     refetchOnMountOrArgChange: true,
   });
 
   const allVisitsRaw = React.useMemo(() => {
+    if (!showHistory) return [];
     const items = getProp(visitsQuery.data, 'items');
     return Array.isArray(items) ? (items as Visit[]) : [];
-  }, [visitsQuery.data]);
+  }, [visitsQuery.data, showHistory]);
 
   const versionsQuery = useGetVisitRxVersionsQuery(
     { visitId },
@@ -441,8 +447,15 @@ export default function ClinicVisitInfoPageClient() {
     updateVisitStatusState.isLoading ||
     (!isCheckedOut && !visitDone && !isOfflineVisit);
 
+  // ✅ Build chain only when toggle is ON; otherwise keep it light (current visit only)
   const rxChain = React.useMemo(() => {
     const meta = new Map<string, Visit>();
+    if (visit?.visitId) meta.set(visit.visitId, visit);
+
+    if (!showHistory) {
+      return { visitIds: [visitId], meta, currentVisitId: visitId };
+    }
+
     for (const v of allVisitsRaw) meta.set(v.visitId, v);
     if (visit?.visitId) meta.set(visit.visitId, visit);
 
@@ -494,7 +507,7 @@ export default function ClinicVisitInfoPageClient() {
     const limitedIds = idx >= 0 ? chainIdsOrdered.slice(0, idx + 1) : [visitId];
 
     return { visitIds: limitedIds, meta, currentVisitId: visitId };
-  }, [allVisitsRaw, visit, visitId]);
+  }, [allVisitsRaw, visit, visitId, showHistory]);
 
   const versionOptions = React.useMemo(() => {
     if (!versions.length) return [];
@@ -511,11 +524,10 @@ export default function ClinicVisitInfoPageClient() {
 
   const rxReady = !!rxToShow;
 
-  // ✅ Option A: keep chain metadata, but only fetch older visits when user toggles
-  const [showHistory, setShowHistory] = React.useState(false);
-
   type PreviewProps = React.ComponentProps<typeof PrescriptionPreview>;
   const Preview = PrescriptionPreview as React.ComponentType<PreviewProps>;
+
+  const historyLoading = showHistory && (visitsQuery.isLoading || visitsQuery.isFetching);
 
   return (
     <section className="p-4 2xl:p-8">
@@ -572,12 +584,41 @@ export default function ClinicVisitInfoPageClient() {
 
       <div className="grid w-full grid-cols-1 gap-4 lg:grid-cols-10">
         <div className="lg:col-span-6 rounded-2xl border bg-white p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <div className="text-lg font-semibold text-gray-900">Prescription</div>
-            <div className="text-xs text-gray-500">
-              {rxLoading ? 'Loading…' : rxReady ? 'Ready' : 'No prescription'}
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-lg font-semibold text-gray-900">Prescription</div>
+              <div className="text-xs text-gray-500">
+                {rxLoading ? 'Loading…' : rxReady ? 'Ready' : 'No prescription'}
+              </div>
+            </div>
+
+            {/* ✅ Toggle lives ONLY here */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                className={[
+                  'rounded-full px-3 py-1 text-[11px] font-medium transition',
+                  showHistory
+                    ? 'bg-black text-white hover:bg-black/90'
+                    : 'bg-gray-100 text-gray-800 hover:bg-gray-200',
+                ].join(' ')}
+                onClick={() => setShowHistory((v) => !v)}
+                title="Toggle previous visit history in prescription"
+              >
+                {showHistory ? 'Hide history' : 'Show history'}
+              </button>
             </div>
           </div>
+
+          {showHistory ? (
+            <div className="mb-3 rounded-xl border bg-gray-50 px-3 py-2 text-[11px] text-gray-600">
+              {historyLoading
+                ? 'Loading visit history…'
+                : `Showing chained visit history (${rxChain.visitIds.length} visit${
+                    rxChain.visitIds.length === 1 ? '' : 's'
+                  }).`}
+            </div>
+          ) : null}
 
           {versionOptions.length > 0 ? (
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-gray-50 px-3 py-2">
@@ -614,27 +655,6 @@ export default function ClinicVisitInfoPageClient() {
             </div>
           ) : null}
 
-          {/* ✅ Toggle: keep chain, but don’t fetch history until enabled */}
-          <div className="mb-3 flex items-center justify-between rounded-xl border bg-white px-3 py-2">
-            <div className="text-xs text-gray-700">
-              Visits in chain:{' '}
-              <span className="font-semibold text-gray-900">{rxChain.visitIds.length}</span>
-            </div>
-
-            <button
-              type="button"
-              className="rounded-xl border bg-white px-3 py-1 text-xs font-medium text-gray-800 hover:bg-gray-50"
-              onClick={() => setShowHistory((v) => !v)}
-              title={
-                showHistory
-                  ? 'Hide previous visits'
-                  : 'Show previous visits (loads older prescriptions)'
-              }
-            >
-              {showHistory ? 'Hide history' : 'Show history'}
-            </button>
-          </div>
-
           <div className="min-w-0 overflow-hidden">
             <Preview
               patientName={patientName as PreviewProps['patientName']}
@@ -653,10 +673,10 @@ export default function ClinicVisitInfoPageClient() {
               }
               receptionNotes={notes}
               toothDetails={toothDetails}
-              currentVisitId={rxChain.currentVisitId}
-              chainVisitIds={rxChain.visitIds}
-              visitMetaMap={rxChain.meta}
-              historyEnabled={showHistory} // ✅ NEW: prevents history fetch until true
+              // ✅ Only pass chain props when toggle is ON
+              currentVisitId={showHistory ? rxChain.currentVisitId : undefined}
+              chainVisitIds={showHistory ? rxChain.visitIds : undefined}
+              visitMetaMap={showHistory ? rxChain.meta : undefined}
             />
           </div>
         </div>

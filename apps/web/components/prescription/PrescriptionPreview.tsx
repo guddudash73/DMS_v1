@@ -21,13 +21,12 @@ type Props = {
   visitDateLabel?: string;
   lines: RxLineType[];
   receptionNotes?: string;
+
   currentVisitId?: string;
   chainVisitIds?: string[];
   visitMetaMap?: Map<string, Visit>;
-  toothDetails?: ToothDetail[];
 
-  // ✅ NEW: default false. If false, do NOT fetch older visit prescriptions.
-  historyEnabled?: boolean;
+  toothDetails?: ToothDetail[];
 };
 
 const FREQ_LABEL: Record<RxLineType['frequency'], string> = {
@@ -129,9 +128,6 @@ function VisitRxPreviewBlock(props: {
   showOpdInline?: boolean;
   opdInlineText?: string;
   currentToothDetails: ToothDetail[];
-
-  // ✅ controls whether this block is allowed to fetch
-  canFetchHistory: boolean;
 }) {
   const {
     visitId,
@@ -141,14 +137,9 @@ function VisitRxPreviewBlock(props: {
     showOpdInline,
     opdInlineText,
     currentToothDetails,
-    canFetchHistory,
   } = props;
 
-  // ✅ IMPORTANT: don’t fetch unless history is enabled AND it’s not the current visit
-  const rxQuery = useGetVisitRxQuery(
-    { visitId },
-    { skip: !canFetchHistory || isCurrent || !visitId },
-  );
+  const rxQuery = useGetVisitRxQuery({ visitId }, { skip: isCurrent || !visitId });
 
   const lines = isCurrent ? currentLines : (rxQuery.data?.rx?.lines ?? []);
   const toothDetails = isCurrent ? currentToothDetails : (rxQuery.data?.rx?.toothDetails ?? []);
@@ -220,8 +211,6 @@ export function PrescriptionPreview({
   visitMetaMap: visitMetaMapProp,
 
   toothDetails: toothDetailsProp,
-
-  historyEnabled: historyEnabledProp = false,
 }: Props) {
   const hasNotes = !!receptionNotes?.trim();
   const ageSex = formatAgeSex(patientAge, patientSex);
@@ -255,29 +244,26 @@ export function PrescriptionPreview({
     [visitMetaMapProp],
   );
 
-  // ✅ history feature exists only if we have chain meta
-  const historyAvailable =
+  // ✅ If chain props are provided, history is ON by default
+  const historyEnabled =
     !!currentVisitIdProp &&
     !!chainVisitIdsProp &&
     chainVisitIdsProp.length > 0 &&
     !!visitMetaMapProp;
 
-  // ✅ ONLY enable history rendering/fetching when user toggles it ON
-  const historyEnabled = historyAvailable && historyEnabledProp === true;
-
   const anchorVisitId = useMemo(() => {
-    if (!historyAvailable) return undefined;
+    if (!historyEnabled) return undefined;
     return chainVisitIds[0];
-  }, [historyAvailable, chainVisitIds]);
+  }, [historyEnabled, chainVisitIds]);
 
   const headerOpdNo = useMemo(() => {
-    if (historyAvailable && anchorVisitId) {
+    if (historyEnabled && anchorVisitId) {
       const anchorVisit = visitMetaMap.get(anchorVisitId);
       const anchorOpd = getVisitOpdNo(anchorVisit);
       if (anchorOpd) return anchorOpd;
     }
     return opdNo ?? '—';
-  }, [historyAvailable, anchorVisitId, visitMetaMap, opdNo]);
+  }, [historyEnabled, anchorVisitId, visitMetaMap, opdNo]);
 
   const CONTACT_NUMBER = '9938942846';
   const ADDRESS_ONE_LINE = 'A-33, STALWART COMPLEX, UNIT - IV, BHUBANESWAR';
@@ -304,8 +290,6 @@ export function PrescriptionPreview({
   }, []);
 
   const currentToothDetails = useMemo(() => toothDetailsProp ?? [], [toothDetailsProp]);
-
-  // if history is OFF, show current tooth details inline (same as before)
   const showCurrentToothDetails = !historyEnabled && currentToothDetails.length > 0;
 
   return (
@@ -435,7 +419,6 @@ export function PrescriptionPreview({
               </div>
 
               <div className="min-h-0 flex-1 px-6 pt-4">
-                {/* ✅ If history is OFF, show current visit only (no extra fetches). */}
                 {!historyEnabled ? (
                   <>
                     {showCurrentToothDetails ? (
@@ -459,7 +442,6 @@ export function PrescriptionPreview({
                     )}
                   </>
                 ) : (
-                  // ✅ History ON: render chain blocks (and allow fetching older visit RX)
                   <div className="space-y-4">
                     {chainVisitIds.map((id) => {
                       const v = visitMetaMap.get(id);
@@ -477,7 +459,6 @@ export function PrescriptionPreview({
                           showOpdInline={!isAnchor}
                           opdInlineText={opdInline}
                           currentToothDetails={currentToothDetails}
-                          canFetchHistory={true}
                         />
                       );
                     })}
