@@ -199,20 +199,20 @@ function PaginationBar(props: { page: number; total: number; onChange: (p: numbe
   const { page, total, onChange } = props;
   if (total <= 1) return null;
 
-  const btn = (active: boolean) =>
+  const mkBtn = (active: boolean, disabled?: boolean) =>
     [
       'h-8 min-w-8 rounded-lg border px-2 text-xs font-semibold transition',
+      disabled ? 'opacity-50 cursor-not-allowed' : '',
       active ? 'bg-black text-white border-black' : 'bg-white text-gray-800 hover:bg-gray-50',
     ].join(' ');
 
   return (
-    <div className="absolute left-0 right-0 top-3 flex items-center justify-center gap-2">
+    <div className="mt-3 flex items-center justify-center gap-2">
       <button
         type="button"
-        className={btn(false)}
+        className={mkBtn(false, page <= 1)}
         onClick={() => onChange(Math.max(1, page - 1))}
         disabled={page <= 1}
-        title="Previous page"
       >
         Prev
       </button>
@@ -221,7 +221,7 @@ function PaginationBar(props: { page: number; total: number; onChange: (p: numbe
         <button
           key={p}
           type="button"
-          className={btn(p === page)}
+          className={mkBtn(p === page)}
           onClick={() => onChange(p)}
           title={`Page ${p}`}
         >
@@ -231,10 +231,9 @@ function PaginationBar(props: { page: number; total: number; onChange: (p: numbe
 
       <button
         type="button"
-        className={btn(false)}
+        className={mkBtn(false, page >= total)}
         onClick={() => onChange(Math.min(total, page + 1))}
         disabled={page >= total}
-        title="Next page"
       >
         Next
       </button>
@@ -289,7 +288,6 @@ export function PrescriptionPreview({
     [visitMetaMapProp],
   );
 
-  // ✅ History enabled only if caller provided all three
   const historyEnabled =
     !!currentVisitIdProp &&
     !!chainVisitIdsProp &&
@@ -357,7 +355,6 @@ export function PrescriptionPreview({
     setPage(1);
   }, [historyEnabled, chainVisitIds.join('|')]);
 
-  // measure key to remeasure blocks when content changes
   const measureKey = useMemo(() => {
     return [
       historyEnabled ? 'H' : 'N',
@@ -370,7 +367,7 @@ export function PrescriptionPreview({
 
   const shouldMeasure = historyEnabled && chainVisitIds.length > 1;
 
-  // measure caps (actual available height) and blocks
+  // measure caps and blocks
   useEffect(() => {
     if (!shouldMeasure) {
       setPages([chainVisitIds]);
@@ -381,7 +378,6 @@ export function PrescriptionPreview({
     if (!root) return;
 
     const measure = () => {
-      // caps
       if (measureFirstCapRef.current) {
         const h = measureFirstCapRef.current.getBoundingClientRect().height;
         if (Number.isFinite(h) && h > 0) setCapFirst(Math.floor(h));
@@ -391,7 +387,6 @@ export function PrescriptionPreview({
         if (Number.isFinite(h) && h > 0) setCapNext(Math.floor(h));
       }
 
-      // block heights
       const kids = Array.from(root.querySelectorAll('[data-rx-block="1"]')) as HTMLElement[];
       const heights = kids.map((k) => Math.ceil(k.getBoundingClientRect().height));
       setBlockHeights(heights);
@@ -404,35 +399,36 @@ export function PrescriptionPreview({
     return () => ro.disconnect();
   }, [shouldMeasure, measureKey]);
 
-  // split into pages using measured caps
+  // split into pages with “no partial visit” guarantee
   useEffect(() => {
     if (!historyEnabled) {
       setPages([chainVisitIds]);
       return;
     }
-
     if (!shouldMeasure) {
       setPages([chainVisitIds]);
       return;
     }
-
     if (!blockHeights.length || blockHeights.length !== chainVisitIds.length) {
       setPages([chainVisitIds]);
       return;
     }
 
+    // ✅ safety margin to guarantee we never clip the last block
+    // (handles font load differences, rounding, borders, etc.)
+    const SAFETY = 18;
+
     const result: string[][] = [];
     let cur: string[] = [];
     let used = 0;
-
     let cap = capFirst;
 
     for (let i = 0; i < chainVisitIds.length; i++) {
       const id = chainVisitIds[i];
       const h = blockHeights[i] ?? 0;
 
-      // if adding would overflow, start a new page (but only if current page has something)
-      if (cur.length > 0 && used + h > cap) {
+      // if this block won't fully fit, push it to next page
+      if (cur.length > 0 && used + h > cap - SAFETY) {
         result.push(cur);
         cur = [];
         used = 0;
@@ -447,8 +443,9 @@ export function PrescriptionPreview({
 
     // ensure reception notes fit on last page; if not, create a notes-only page
     if (hasNotes) {
-      const APPROX_NOTES_H = 110;
+      const APPROX_NOTES_H = 120;
       const lastCap = result.length === 1 ? capFirst : capNext;
+
       const lastIds = result[result.length - 1] ?? [];
       const lastUsed = lastIds
         .map((id) => {
@@ -457,7 +454,9 @@ export function PrescriptionPreview({
         })
         .reduce((a, b) => a + b, 0);
 
-      if (lastUsed + APPROX_NOTES_H > lastCap) result.push([]);
+      if (lastUsed + APPROX_NOTES_H > lastCap - SAFETY) {
+        result.push([]);
+      }
     }
 
     setPages(result.length ? result : [chainVisitIds]);
@@ -513,39 +512,30 @@ export function PrescriptionPreview({
     );
   };
 
-  // Only show notes on LAST page (same behavior as before)
+  // Only show notes on LAST page
   const shouldShowNotesOnThisPage = hasNotes && page === totalPages;
 
   // ---------------------------------------
   // ✅ Offscreen measurement template
   // ---------------------------------------
-  // We measure:
-  // - the actual content area height on page 1 (below header)
-  // - the content area height on blank page
   const measureTemplate = shouldMeasure ? (
     <div className="pointer-events-none absolute left-[-99999px] top-0 opacity-0">
       <div style={{ width: BASE_W }}>
         <div ref={measureContainerRef} className="w-full">
-          {/* Page 1 template (header + content area cap measure) */}
+          {/* Page 1 template */}
           <div className="h-[1080px] w-full overflow-hidden border bg-white">
             <div className="flex h-full flex-col">
               <div className="shrink-0 px-6 pt-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="relative h-16 w-16" />
-                  <div className="h-16 w-full" />
-                  <div className="relative h-14 w-38" />
-                </div>
+                <div className="h-16 w-full" />
                 <div className="mt-2 h-px w-full" />
               </div>
-
               <div className="shrink-0 px-6 pt-3">
-                <div className="h-12 w-full" />
-                <div className="mt-2 h-16 w-full" />
+                <div className="h-24 w-full" />
                 <div className="mt-3 h-px w-full" />
               </div>
 
-              {/* content cap reference */}
-              <div className="min-h-0 flex-1 px-6 pt-4">
+              {/* ✅ include SAME padding as visible content: pt-4 pb-4 */}
+              <div className="min-h-0 flex-1 px-6 pt-4 pb-4">
                 <div ref={measureFirstCapRef} className="h-full w-full" />
               </div>
             </div>
@@ -554,13 +544,14 @@ export function PrescriptionPreview({
           {/* Blank page template */}
           <div className="mt-8 h-[1080px] w-full overflow-hidden border bg-white">
             <div className="flex h-full flex-col">
-              <div className="min-h-0 flex-1 px-6 pt-6">
+              {/* ✅ include SAME padding as visible content: pt-6 pb-4 */}
+              <div className="min-h-0 flex-1 px-6 pt-6 pb-4">
                 <div ref={measureNextCapRef} className="h-full w-full" />
               </div>
             </div>
           </div>
 
-          {/* Render blocks for measuring heights (using full chain ids) */}
+          {/* Blocks for measuring heights */}
           <div className="mt-8 px-6 pt-4">{renderHistoryBlocks(chainVisitIds)}</div>
         </div>
       </div>
@@ -573,184 +564,189 @@ export function PrescriptionPreview({
   const isFirstPage = page === 1;
 
   return (
-    <div ref={wrapRef} className="w-full">
+    <div className="w-full">
       {measureTemplate}
 
-      <div
-        className="relative w-full"
-        style={{
-          height: Math.ceil(BASE_H * scale),
-        }}
-      >
+      <div ref={wrapRef} className="w-full">
         <div
-          className="origin-top-left"
+          className="relative w-full"
           style={{
-            width: BASE_W,
-            height: BASE_H,
-            transform: `scale(${scale})`,
+            height: Math.ceil(BASE_H * scale),
           }}
         >
-          <div className="relative h-full w-full overflow-hidden rounded-xl border bg-white shadow-sm">
-            {/* ✅ Traditional pagination (history only, multi page only) */}
-            {historyEnabled ? (
-              <PaginationBar page={page} total={totalPages} onChange={setPage} />
-            ) : null}
-
-            {/* Page 1 has header, Page 2+ blank */}
-            {isFirstPage ? (
-              <div className="flex h-full flex-col">
-                <div className="shrink-0 px-6 pt-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div className="relative h-16 w-16">
-                      <Image
-                        src="/rx-logo-r.png"
-                        alt="Rx Logo"
-                        fill
-                        className="object-contain"
-                        priority
-                        unoptimized
-                      />
-                    </div>
-
-                    <div className="mt-1 flex w-full flex-col items-center justify-center text-center">
-                      <div className="text-[10px] font-semibold tracking-[0.30em] text-emerald-600">
-                        CONTACT
-                      </div>
-                      <div className="text-[12px] font-semibold text-gray-900">
-                        {CONTACT_NUMBER}
+          <div
+            className="origin-top-left"
+            style={{
+              width: BASE_W,
+              height: BASE_H,
+              transform: `scale(${scale})`,
+            }}
+          >
+            <div className="h-full w-full overflow-hidden rounded-xl border bg-white shadow-sm">
+              {isFirstPage ? (
+                <div className="flex h-full flex-col">
+                  <div className="shrink-0 px-6 pt-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="relative h-16 w-16">
+                        <Image
+                          src="/rx-logo-r.png"
+                          alt="Rx Logo"
+                          fill
+                          className="object-contain"
+                          priority
+                          unoptimized
+                        />
                       </div>
 
-                      <div className="mt-1 max-w-130 text-[9px] font-medium leading-4  text-gray-700">
-                        {ADDRESS_ONE_LINE}
-                      </div>
-                      <div className="max-w-130 text-[9px] font-medium leading-4 text-red-400 uppercase">
-                        {CLINIC_HOURS}
-                      </div>
-                    </div>
-
-                    <div className="relative h-14 w-38">
-                      <Image
-                        src="/dashboard-logo.png"
-                        alt="Sarangi Dentistry"
-                        fill
-                        className="object-contain"
-                        priority
-                        unoptimized
-                      />
-                    </div>
-                  </div>
-
-                  <div className="mt-2 h-px w-full bg-emerald-600/60" />
-                </div>
-
-                <div className="shrink-0 px-6 pt-3">
-                  <div className="flex items-start justify-between gap-6">
-                    <div className="min-w-0 flex flex-col">
-                      <div className="text-[0.8rem] font-bold text-gray-900">
-                        Dr. Soumendra Sarangi
-                      </div>
-                      <div className="mt-0 text-[0.7rem] font-light text-gray-700">
-                        B.D.S. Regd. - 68
-                      </div>
-                    </div>
-
-                    <div className="min-w-0 flex flex-col items-end text-right">
-                      <div className="text-[0.8rem] font-bold text-gray-900">
-                        Dr. Vaishnovee Sarangi
-                      </div>
-                      <div className="mt-0 text-[0.7rem] font-light text-gray-700">
-                        B.D.S. Redg. - 3057
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-2 flex w-full justify-between gap-6">
-                    <div className="space-y-0.5 text-[0.8rem] text-gray-800">
-                      <div className="flex gap-3">
-                        <div className="w-20 text-gray-600">Patient Name</div>
-                        <div className="text-gray-600">:</div>
-                        <div className="font-semibold text-gray-900">{patientName ?? '—'}</div>
-                      </div>
-
-                      <div className="flex gap-3">
-                        <div className="w-20 text-gray-600">Contact No.</div>
-                        <div className="text-gray-600">:</div>
-                        <div className="font-semibold text-gray-900">{patientPhone ?? '—'}</div>
-                      </div>
-
-                      <div className="flex gap-3">
-                        <div className="w-20 text-gray-600">Age/Sex</div>
-                        <div className="text-gray-600">:</div>
-                        <div className="font-semibold text-gray-900">{ageSex}</div>
-                      </div>
-                    </div>
-
-                    <div className="w-[320px] justify-start space-y-0 text-[0.8rem]">
-                      <div className="flex gap-3">
-                        <div className="w-20 text-gray-600">Regd. Date</div>
-                        <div className="text-gray-600">:</div>
-                        <div className="font-semibold text-gray-900">{visitISO}</div>
-                      </div>
-
-                      <div className="flex gap-3">
-                        <div className="w-20 text-gray-600">SD. ID</div>
-                        <div className="text-gray-600">:</div>
-                        <div className="font-semibold text-gray-900">{sdId ?? '—'}</div>
-                      </div>
-
-                      <div className="flex gap-3">
-                        <div className="w-20 text-gray-600">OPD. No</div>
-                        <div className="text-gray-600">:</div>
-                        <div className="font-semibold text-gray-900">{headerOpdNo}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mt-3 h-px w-full bg-gray-900/30" />
-                </div>
-
-                <div className="min-h-0 flex-1 px-6 pt-4">
-                  {!historyEnabled ? (
-                    <>
-                      {showCurrentToothDetails ? (
-                        <div className="mb-3">
-                          <ToothDetailsBlock toothDetails={currentToothDetails} />
-                          <div className="mt-3 h-px w-full bg-gray-200" />
+                      <div className="mt-1 flex w-full flex-col items-center justify-center text-center">
+                        <div className="text-[10px] font-semibold tracking-[0.30em] text-emerald-600">
+                          CONTACT
                         </div>
-                      ) : null}
+                        <div className="text-[12px] font-semibold text-gray-900">
+                          {CONTACT_NUMBER}
+                        </div>
 
-                      {lines.length === 0 ? (
-                        <div className="text-[13px] text-gray-500">No medicines added yet.</div>
-                      ) : (
-                        <ol className="text-sm leading-6 text-gray-900">
-                          {lines.map((l, idx) => (
-                            <li key={idx} className="flex gap-1">
-                              <div className="w-4 shrink-0 text-right font-medium">{idx + 1}.</div>
-                              <div className="font-medium">{buildLineText(l)}</div>
-                            </li>
-                          ))}
-                        </ol>
-                      )}
-                    </>
-                  ) : (
-                    renderHistoryBlocks(visiblePageIds)
-                  )}
+                        <div className="mt-1 max-w-130 text-[9px] font-medium leading-4 text-gray-700">
+                          {ADDRESS_ONE_LINE}
+                        </div>
+                        <div className="max-w-130 text-[9px] font-medium leading-4 text-red-400 uppercase">
+                          {CLINIC_HOURS}
+                        </div>
+                      </div>
+
+                      <div className="relative h-14 w-38">
+                        <Image
+                          src="/dashboard-logo.png"
+                          alt="Sarangi Dentistry"
+                          fill
+                          className="object-contain"
+                          priority
+                          unoptimized
+                        />
+                      </div>
+                    </div>
+
+                    <div className="mt-2 h-px w-full bg-emerald-600/60" />
+                  </div>
+
+                  <div className="shrink-0 px-6 pt-3">
+                    <div className="flex items-start justify-between gap-6">
+                      <div className="min-w-0 flex flex-col">
+                        <div className="text-[0.8rem] font-bold text-gray-900">
+                          Dr. Soumendra Sarangi
+                        </div>
+                        <div className="mt-0 text-[0.7rem] font-light text-gray-700">
+                          B.D.S. Regd. - 68
+                        </div>
+                      </div>
+
+                      <div className="min-w-0 flex flex-col items-end text-right">
+                        <div className="text-[0.8rem] font-bold text-gray-900">
+                          Dr. Vaishnovee Sarangi
+                        </div>
+                        <div className="mt-0 text-[0.7rem] font-light text-gray-700">
+                          B.D.S. Redg. - 3057
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-2 flex w-full justify-between gap-6">
+                      <div className="space-y-0.5 text-[0.8rem] text-gray-800">
+                        <div className="flex gap-3">
+                          <div className="w-20 text-gray-600">Patient Name</div>
+                          <div className="text-gray-600">:</div>
+                          <div className="font-semibold text-gray-900">{patientName ?? '—'}</div>
+                        </div>
+
+                        <div className="flex gap-3">
+                          <div className="w-20 text-gray-600">Contact No.</div>
+                          <div className="text-gray-600">:</div>
+                          <div className="font-semibold text-gray-900">{patientPhone ?? '—'}</div>
+                        </div>
+
+                        <div className="flex gap-3">
+                          <div className="w-20 text-gray-600">Age/Sex</div>
+                          <div className="text-gray-600">:</div>
+                          <div className="font-semibold text-gray-900">{ageSex}</div>
+                        </div>
+                      </div>
+
+                      <div className="w-[320px] justify-start space-y-0 text-[0.8rem]">
+                        <div className="flex gap-3">
+                          <div className="w-20 text-gray-600">Regd. Date</div>
+                          <div className="text-gray-600">:</div>
+                          <div className="font-semibold text-gray-900">{visitISO}</div>
+                        </div>
+
+                        <div className="flex gap-3">
+                          <div className="w-20 text-gray-600">SD. ID</div>
+                          <div className="text-gray-600">:</div>
+                          <div className="font-semibold text-gray-900">{sdId ?? '—'}</div>
+                        </div>
+
+                        <div className="flex gap-3">
+                          <div className="w-20 text-gray-600">OPD. No</div>
+                          <div className="text-gray-600">:</div>
+                          <div className="font-semibold text-gray-900">{headerOpdNo}</div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 h-px w-full bg-gray-900/30" />
+                  </div>
+
+                  {/* ✅ IMPORTANT: pt-4 pb-4 so last block doesn’t clip */}
+                  <div className="min-h-0 flex-1 px-6 pt-4 pb-4">
+                    {!historyEnabled ? (
+                      <>
+                        {showCurrentToothDetails ? (
+                          <div className="mb-3">
+                            <ToothDetailsBlock toothDetails={currentToothDetails} />
+                            <div className="mt-3 h-px w-full bg-gray-200" />
+                          </div>
+                        ) : null}
+
+                        {lines.length === 0 ? (
+                          <div className="text-[13px] text-gray-500">No medicines added yet.</div>
+                        ) : (
+                          <ol className="text-sm leading-6 text-gray-900">
+                            {lines.map((l, idx) => (
+                              <li key={idx} className="flex gap-1">
+                                <div className="w-4 shrink-0 text-right font-medium">
+                                  {idx + 1}.
+                                </div>
+                                <div className="font-medium">{buildLineText(l)}</div>
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+                      </>
+                    ) : (
+                      renderHistoryBlocks(visiblePageIds)
+                    )}
+                  </div>
+
+                  {shouldShowNotesOnThisPage ? renderNotes() : null}
                 </div>
+              ) : (
+                // Blank page (no header)
+                <div className="flex h-full flex-col">
+                  {/* ✅ IMPORTANT: pt-6 pb-4 so last block doesn’t clip */}
+                  <div className="min-h-0 flex-1 px-6 pt-6 pb-4">
+                    {historyEnabled ? renderHistoryBlocks(visiblePageIds) : null}
+                  </div>
 
-                {shouldShowNotesOnThisPage ? renderNotes() : null}
-              </div>
-            ) : (
-              // Blank pages (no header)
-              <div className="flex h-full flex-col">
-                <div className="min-h-0 flex-1 px-6 pt-6">
-                  {historyEnabled ? renderHistoryBlocks(visiblePageIds) : null}
+                  {shouldShowNotesOnThisPage ? renderNotes() : null}
                 </div>
-
-                {shouldShowNotesOnThisPage ? renderNotes() : null}
-              </div>
-            )}
+              )}
+            </div>
           </div>
         </div>
+
+        {/* ✅ Pagination OUTSIDE the prescription area (below preview) */}
+        {historyEnabled ? (
+          <PaginationBar page={page} total={totalPages} onChange={setPage} />
+        ) : null}
       </div>
     </div>
   );
