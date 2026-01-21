@@ -53,7 +53,8 @@ jobs:
       # ✅ IMPORTANT: allow scripts so sharp can install correctly
       - run: npm ci
 
-      - run: |
+      - name: Clean preinstalled Pulumi binaries (avoid PATH conflicts)
+        run: |
           set -euxo pipefail
           which pulumi || true
           which pulumi-language-nodejs || true
@@ -62,15 +63,18 @@ jobs:
           sudo rm -f /usr/local/bin/pulumi-language-python || true
           sudo rm -f /usr/local/bin/pulumi-language-go || true
           sudo rm -f /usr/local/bin/pulumi-language-dotnet || true
+          sudo rm -f /usr/local/bin/pulumi-resource-pulumi-nodejs || true
           which pulumi || true
           which pulumi-language-nodejs || true
 
-      - run: |
+      - name: Preflight checks
+        run: |
           set -euxo pipefail
           npm run build --workspace=@dcm/config
           npm run build --workspace=@dcm/types
           test -f packages/types/dist/index.js
           test -f packages/config/dist/env.js
+
           test -n "${SST_PASSPHRASE}"
           test -n "${QZ_PRIVATE_KEY_SECRET_ID}"
 
@@ -87,13 +91,6 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::512491905643:role/github-actions-sarangi-dcm-deploy
           aws-region: ${{ env.AWS_REGION }}
-
-      # ✅ NEW: Bootstrap SST BEFORE trying to set secrets
-      - name: SST Bootstrap (required before setting secrets)
-        run: |
-          set -euxo pipefail
-          npx sst version
-          npx sst bootstrap --stage "$SST_STAGE"
 
       - name: Patch Pulumi error rendering (prevents RangeError masking)
         run: |
@@ -147,6 +144,50 @@ jobs:
           }
           NODE
 
+      # ✅ Bootstrap only if missing (since `sst bootstrap` is not available in your CLI)
+      - name: Check SST bootstrap exists
+        id: sst_bootstrap
+        run: |
+          set -euxo pipefail
+
+          STATE_BUCKET=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, 'sst-state-')].Name | [0]" --output text || true)
+          ASSET_BUCKET=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, 'sst-asset-')].Name | [0]" --output text || true)
+
+          echo "state_bucket=$STATE_BUCKET" >> $GITHUB_OUTPUT
+          echo "asset_bucket=$ASSET_BUCKET" >> $GITHUB_OUTPUT
+
+          if echo "$STATE_BUCKET" | grep -q '^sst-state-'; then
+            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "SST bootstrap looks present: $STATE_BUCKET / $ASSET_BUCKET"
+          else
+            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "::warning::SST bootstrap not found (no sst-state-* bucket). Will run a one-time deploy attempt to recreate bootstrap."
+          fi
+
+      - name: Bootstrap SST (deploy attempt only if missing)
+        if: steps.sst_bootstrap.outputs.exists == 'false'
+        continue-on-error: true
+        run: |
+          set -euxo pipefail
+          # This may fail later due to your CloudFront/cert issue,
+          # but often creates the sst-state-/sst-asset- buckets early.
+          npx sst deploy --stage "$SST_STAGE" || true
+
+      - name: Verify SST bootstrap now exists
+        run: |
+          set -euxo pipefail
+
+          STATE_BUCKET=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, 'sst-state-')].Name | [0]" --output text || true)
+          ASSET_BUCKET=$(aws s3api list-buckets --query "Buckets[?starts_with(Name, 'sst-asset-')].Name | [0]" --output text || true)
+
+          echo "Detected state bucket: $STATE_BUCKET"
+          echo "Detected asset bucket: $ASSET_BUCKET"
+
+          if ! echo "$STATE_BUCKET" | grep -q '^sst-state-'; then
+            echo "::error::SST bootstrap is still missing (no sst-state-* bucket). Cannot set SST secrets."
+            exit 1
+          fi
+
       # ✅ Seed SST secrets from GitHub before deploying
       - name: Seed SST secrets (JWT) for prod stage
         run: |
@@ -165,5 +206,7 @@ jobs:
           set -euxo pipefail
           echo "===== .sst/log/sst.log (tail) ====="
           test -f .sst/log/sst.log && tail -n 400 .sst/log/sst.log || true
+          echo "===== .sst/log/pulumi.log (tail) ====="
+          test -f .sst/log/pulumi.log && tail -n 400 .sst/log/pulumi.log || true
           echo "===== .sst/log (ls) ====="
           ls -la .sst/log || true
