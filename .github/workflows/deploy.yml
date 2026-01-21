@@ -20,9 +20,17 @@ jobs:
       SST_STAGE: prod
       SST_PASSPHRASE: ${{ secrets.SST_PASSPHRASE }}
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
+
+      # Optional (can be empty)
       NEXT_PUBLIC_WS_BASE_URL: ${{ secrets.NEXT_PUBLIC_WS_BASE_URL }}
+
+      # Not needed (your infra/web.ts hardcodes /api); keep unset to avoid secret dependency
+      # NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL }}
+
+      # Custom domain
       APP_DOMAIN: trial.dcm.tcplgroups.com
       APP_CERT_ARN: ${{ secrets.APP_CERT_ARN }}
+
       NODE_OPTIONS: --max-old-space-size=8192
       SST_TELEMETRY_DISABLED: '1'
       TURBO_TELEMETRY_DISABLED: '1'
@@ -41,7 +49,8 @@ jobs:
       # ✅ IMPORTANT: allow scripts so sharp can install correctly
       - run: npm ci
 
-      - run: |
+      - name: Remove preinstalled pulumi binaries (avoid path collisions)
+        run: |
           set -euxo pipefail
           which pulumi || true
           which pulumi-language-nodejs || true
@@ -53,18 +62,22 @@ jobs:
           which pulumi || true
           which pulumi-language-nodejs || true
 
-      - run: |
+      - name: Preflight checks
+        run: |
           set -euxo pipefail
           npm run build --workspace=@dcm/config
           npm run build --workspace=@dcm/types
           test -f packages/types/dist/index.js
           test -f packages/config/dist/env.js
+
           test -n "${SST_PASSPHRASE}"
           test -n "${QZ_PRIVATE_KEY_SECRET_ID}"
 
-          # ✅ Bootstrap-friendly: WS URL may not exist before first deploy
+          test -n "${APP_DOMAIN}"
+          test -n "${APP_CERT_ARN}"
+
           if [ -z "${NEXT_PUBLIC_WS_BASE_URL}" ]; then
-            echo "::warning::NEXT_PUBLIC_WS_BASE_URL is not set. Realtime UI will not connect until after first prod deploy. Set it and redeploy."
+            echo "::warning::NEXT_PUBLIC_WS_BASE_URL is not set. Realtime UI will not connect until you set it (GitHub Secret or env)."
           fi
 
       - uses: aws-actions/configure-aws-credentials@v4
@@ -72,7 +85,7 @@ jobs:
           role-to-assume: arn:aws:iam::512491905643:role/github-actions-sarangi-dcm-deploy
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Patch Pulumi error rendering (prevents RangeError masking)
+      - name: Patch Pulumi error rendering (avoid RangeError masking)
         run: |
           set -euxo pipefail
           npx sst version >/dev/null
@@ -81,13 +94,14 @@ jobs:
           const fs = require("fs");
 
           const targets = [
-            ".sst/platform/node_modules/@pulumi/cmd/run/error.js",
             ".sst/platform/node_modules/@pulumi/cmd/run/error.ts",
-            ".sst/platform/node_modules/@pulumi/pulumi/cmd/run/error.js",
+            ".sst/platform/node_modules/@pulumi/cmd/run/error.js",
             ".sst/platform/node_modules/@pulumi/pulumi/cmd/run/error.ts",
+            ".sst/platform/node_modules/@pulumi/pulumi/cmd/run/error.js",
           ];
 
-          const needle = "return util.inspect(err, { colors: true });";
+          // Replace the first `return util.inspect(err, { ... });` with a safe wrapper.
+          const re = /return\s+util\.inspect\(\s*err\s*,\s*\{[^}]*\}\s*\)\s*;/m;
 
           const replacement = `
           try {
@@ -102,26 +116,25 @@ jobs:
             const msg = typeof err?.message === "string" ? err.message : undefined;
             const stack = typeof err?.stack === "string" ? err.stack : undefined;
             return trunc(msg) || trunc(stack) || ("Pulumi error (inspection failed): " + String(inspectError?.message || inspectError));
-          }`.trim();
+          }
+          `.trim();
 
           let patched = 0;
 
           for (const file of targets) {
             if (!fs.existsSync(file)) continue;
             const s = fs.readFileSync(file, "utf8");
-            if (s.includes("inspection failed")) continue;
+            if (s.includes("inspection failed")) continue; // already patched
 
-            if (s.includes(needle)) {
-              fs.writeFileSync(file, s.replace(needle, replacement), "utf8");
+            if (re.test(s)) {
+              fs.writeFileSync(file, s.replace(re, replacement), "utf8");
               console.log("[pulumi-error-patch] patched:", file);
               patched++;
             }
           }
 
           console.log("[pulumi-error-patch] total patched:", patched);
-          if (patched === 0) {
-            console.log("[pulumi-error-patch] WARNING: nothing patched.");
-          }
+          if (patched === 0) console.log("[pulumi-error-patch] WARNING: nothing patched.");
           NODE
 
       - name: Deploy
@@ -129,11 +142,24 @@ jobs:
           set -euxo pipefail
           npx sst deploy --stage "$SST_STAGE"
 
-      - name: Dump SST logs on failure
+      - name: Dump SST/Pulumi logs on failure
         if: failure()
         run: |
           set -euxo pipefail
+
           echo "===== .sst/log/sst.log (tail) ====="
           test -f .sst/log/sst.log && tail -n 400 .sst/log/sst.log || true
+
+          echo "===== .sst/log/pulumi.log (tail) ====="
+          test -f .sst/log/pulumi.log && tail -n 400 .sst/log/pulumi.log || true
+
+          echo "===== eventlog.json (tail) ====="
+          EVENTLOG="$(ls -1 .sst/pulumi/*/eventlog.json 2>/dev/null | head -n 1 || true)"
+          echo "eventlog path: ${EVENTLOG}"
+          test -n "${EVENTLOG}" && tail -n 200 "${EVENTLOG}" || true
+
+          echo "===== grep errors in pulumi.log ====="
+          test -f .sst/log/pulumi.log && (grep -nE "error:|ERROR|diag|failed|Exception" .sst/log/pulumi.log | tail -n 160) || true
+
           echo "===== .sst/log (ls) ====="
           ls -la .sst/log || true
