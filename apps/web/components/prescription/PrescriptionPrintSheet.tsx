@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import Image from 'next/image';
 import type { RxLineType, Visit, ToothDetail } from '@dcm/types';
@@ -18,6 +18,7 @@ type Props = {
   patientSex?: PatientSex;
 
   sdId?: string;
+
   opdNo?: string;
 
   doctorName?: string;
@@ -30,11 +31,11 @@ type Props = {
   chainVisitIds?: string[];
   visitMetaMap?: Map<string, Visit>;
 
-  // ✅ This prop now acts as "initial value" for the toggle.
-  // If omitted, default is TRUE (history on) when chain props exist.
+  /** ✅ controls history ON/OFF for printing */
   printWithHistory?: boolean;
 
   receptionNotes?: string;
+
   toothDetails?: ToothDetail[];
 };
 
@@ -113,8 +114,8 @@ function getVisitOpdNo(v?: Visit): string | undefined {
   if (!v) return undefined;
 
   const raw = getFirstMetaValue(v, ['opdNo', 'opdNumber', 'opdId', 'opd', 'opd_no', 'opd_no_str']);
-
   if (raw == null) return undefined;
+
   const s = String(raw).trim();
   return s || undefined;
 }
@@ -140,7 +141,6 @@ function VisitRxBlock(props: {
     currentToothDetails,
   } = props;
 
-  // ✅ Only fetch RX for non-current blocks
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: isCurrent || !visitId });
 
   const lines = isCurrent ? currentLines : (rxQuery.data?.rx?.lines ?? []);
@@ -151,8 +151,9 @@ function VisitRxBlock(props: {
 
   const hasToothDetails = (toothDetails?.length ?? 0) > 0;
 
-  if (!lines.length && !reason && !visitDate && !hasToothDetails)
+  if (!lines.length && !reason && !visitDate && !hasToothDetails) {
     return <div className="h-2 rx-block rx-block-prev" />;
+  }
 
   return (
     <div className={`rx-block ${isCurrent ? 'rx-block-current' : 'rx-block-prev'}`}>
@@ -215,65 +216,41 @@ export function PrescriptionPrintSheet(props: Props) {
     visitMetaMap: visitMetaMapProp,
 
     toothDetails: toothDetailsProp,
-    printWithHistory,
+
+    printWithHistory = true,
   } = props;
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
-
-  const hasChainProps =
-    !!currentVisitIdProp &&
-    !!chainVisitIdsProp &&
-    chainVisitIdsProp.length > 0 &&
-    !!visitMetaMapProp;
-
-  // ✅ History toggle for THIS component
-  // - If printWithHistory provided, it wins as initial.
-  // - Else default = true when chain props exist (to match "show all by default" elsewhere).
-  const [historyOn, setHistoryOn] = useState<boolean>(() => {
-    if (typeof printWithHistory === 'boolean') return printWithHistory;
-    return hasChainProps;
-  });
-
-  // Keep in sync if parent changes printWithHistory dynamically
-  useEffect(() => {
-    if (typeof printWithHistory === 'boolean') setHistoryOn(printWithHistory);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [printWithHistory]);
-
-  // ✅ Apply body helper class for current-only print styling
-  useEffect(() => {
-    if (!mounted) return;
-    const cls = 'print-rx-current-only';
-    if (!historyOn) document.body.classList.add(cls);
-    else document.body.classList.remove(cls);
-    return () => {
-      document.body.classList.remove(cls);
-    };
-  }, [historyOn, mounted]);
 
   const hasNotes = !!receptionNotes?.trim();
   const ageSex = formatAgeSex(patientAge, patientSex);
 
   const currentVisitId = useMemo(() => currentVisitIdProp ?? 'CURRENT', [currentVisitIdProp]);
 
-  // ✅ historyEnabled is now controlled by toggle AND requires chain props
-  const historyEnabled = historyOn && hasChainProps;
-
-  const chainVisitIds = useMemo(() => {
-    if (historyEnabled && chainVisitIdsProp && chainVisitIdsProp.length) return chainVisitIdsProp;
+  const chainIdsAll = useMemo(() => {
+    if (chainVisitIdsProp && chainVisitIdsProp.length) return chainVisitIdsProp;
     return [currentVisitId];
-  }, [historyEnabled, chainVisitIdsProp, currentVisitId]);
+  }, [chainVisitIdsProp, currentVisitId]);
 
   const visitMetaMap = useMemo(
     () => visitMetaMapProp ?? new Map<string, Visit>(),
     [visitMetaMapProp],
   );
 
+  const historyEnabled =
+    !!currentVisitIdProp &&
+    !!chainVisitIdsProp &&
+    chainVisitIdsProp.length > 0 &&
+    !!visitMetaMapProp;
+
+  // ✅ Effective print mode
+  const effectiveHistory = historyEnabled && printWithHistory;
+
   const anchorVisitId = useMemo(() => {
     if (!historyEnabled) return undefined;
-    return chainVisitIds[0];
-  }, [historyEnabled, chainVisitIds]);
+    return chainIdsAll[0];
+  }, [historyEnabled, chainIdsAll]);
 
   const headerOpdNo = useMemo(() => {
     if (historyEnabled && anchorVisitId) {
@@ -292,49 +269,313 @@ export function PrescriptionPrintSheet(props: Props) {
   const CLINIC_HOURS =
     'Clinic hours: 10 : 00 AM - 01 : 30 PM & 06 : 00 PM - 08:00 PM, Sunday Closed';
 
+  // ----------------------------
+  // ✅ PRINT PAGINATION (A4 pages)
+  // - splits blocks so no block is cut
+  // - header only on first page
+  // - notes only on last page (history ON only)
+  // - when history OFF: print ONLY the page containing current visit,
+  //   and hide everything except current block + preserve spacing.
+  // ----------------------------
+  const measureRootRef = useRef<HTMLDivElement | null>(null);
+  const capFirstRef = useRef<HTMLDivElement | null>(null);
+  const capNextRef = useRef<HTMLDivElement | null>(null);
+  const notesRef = useRef<HTMLDivElement | null>(null);
+
+  const [capFirst, setCapFirst] = useState<number>(0);
+  const [capNext, setCapNext] = useState<number>(0);
+  const [notesH, setNotesH] = useState<number>(0);
+  const [blockHeights, setBlockHeights] = useState<number[]>([]);
+  const [pages, setPages] = useState<string[][]>([chainIdsAll]);
+
+  const measureKey = useMemo(() => {
+    return [
+      effectiveHistory ? 'H' : 'C',
+      chainIdsAll.join(','),
+      String(lines.length),
+      String(currentToothDetails.length),
+      String(receptionNotes?.length ?? 0),
+    ].join('|');
+  }, [
+    effectiveHistory,
+    chainIdsAll,
+    lines.length,
+    currentToothDetails.length,
+    receptionNotes,
+    currentToothDetails,
+  ]);
+
+  useEffect(() => {
+    if (!effectiveHistory) {
+      // Still need pages computed so we can find which page contains current (for current-only print).
+      // But if we have no history, pages are just [chainIdsAll]
+      // For historyEnabled but printWithHistory=false we still compute pages.
+    }
+  }, [effectiveHistory]);
+
+  const shouldMeasure = historyEnabled && chainIdsAll.length > 1;
+
+  useEffect(() => {
+    if (!mounted) return;
+    if (!shouldMeasure) {
+      setPages([chainIdsAll]);
+      return;
+    }
+
+    const root = measureRootRef.current;
+    if (!root) return;
+
+    const doMeasure = () => {
+      const cf = capFirstRef.current?.getBoundingClientRect().height ?? 0;
+      const cn = capNextRef.current?.getBoundingClientRect().height ?? 0;
+      const nh = notesRef.current?.getBoundingClientRect().height ?? 0;
+
+      if (Number.isFinite(cf) && cf > 0) setCapFirst(Math.floor(cf));
+      if (Number.isFinite(cn) && cn > 0) setCapNext(Math.floor(cn));
+      setNotesH(Number.isFinite(nh) && nh > 0 ? Math.ceil(nh) : 0);
+
+      const kids = Array.from(root.querySelectorAll('[data-print-block="1"]')) as HTMLElement[];
+      const heights = kids.map((k) => {
+        const rectH = Math.ceil(k.getBoundingClientRect().height);
+        const cs = window.getComputedStyle(k);
+        const mt = Number.parseFloat(cs.marginTop || '0') || 0;
+        const mb = Number.parseFloat(cs.marginBottom || '0') || 0;
+        return Math.ceil(rectH + mt + mb);
+      });
+
+      setBlockHeights(heights);
+    };
+
+    doMeasure();
+    requestAnimationFrame(() => doMeasure());
+    if ((document as any).fonts?.ready) {
+      (document as any).fonts.ready.then(() => requestAnimationFrame(() => doMeasure()));
+    }
+
+    const ro = new ResizeObserver(() => doMeasure());
+    ro.observe(root);
+    return () => ro.disconnect();
+  }, [mounted, shouldMeasure, measureKey, chainIdsAll]);
+
+  useEffect(() => {
+    if (!historyEnabled || !shouldMeasure) {
+      setPages([chainIdsAll]);
+      return;
+    }
+    if (!blockHeights.length || blockHeights.length !== chainIdsAll.length) {
+      setPages([chainIdsAll]);
+      return;
+    }
+    if (!capFirst || !capNext) {
+      setPages([chainIdsAll]);
+      return;
+    }
+
+    const SAFETY = 10;
+
+    const heightById = (id: string) => {
+      const idx = chainIdsAll.indexOf(id);
+      return idx >= 0 ? (blockHeights[idx] ?? 0) : 0;
+    };
+
+    const usedHeight = (ids: string[]) => ids.reduce((s, id) => s + heightById(id), 0);
+
+    // greedy split
+    let result: string[][] = [];
+    {
+      let cur: string[] = [];
+      let used = 0;
+      let cap = capFirst;
+
+      for (let i = 0; i < chainIdsAll.length; i++) {
+        const id = chainIdsAll[i];
+        const h = blockHeights[i] ?? 0;
+
+        if (cur.length > 0 && used + h > cap - SAFETY) {
+          result.push(cur);
+          cur = [];
+          used = 0;
+          cap = capNext;
+        }
+
+        cur.push(id);
+        used += h;
+      }
+      if (cur.length) result.push(cur);
+      if (!result.length) result = [chainIdsAll];
+    }
+
+    // backfill gaps
+    for (let pass = 0; pass < 3; pass++) {
+      for (let p = 0; p < result.length - 1; p++) {
+        const cap = p === 0 ? capFirst : capNext;
+
+        while (result[p + 1].length > 0) {
+          const nextId = result[p + 1][0];
+          const h = heightById(nextId);
+          const used = usedHeight(result[p]);
+
+          if (used + h <= cap - SAFETY) {
+            result[p].push(nextId);
+            result[p + 1].shift();
+          } else break;
+        }
+      }
+      result = result.filter((x) => x.length > 0);
+      if (!result.length) result = [chainIdsAll];
+    }
+
+    // ensure notes fit on last page (only when printing history)
+    if (hasNotes && notesH > 0 && effectiveHistory && result.length > 0) {
+      const lastIdx = result.length - 1;
+      const lastCap = (lastIdx === 0 ? capFirst : capNext) - notesH;
+      const used = usedHeight(result[lastIdx]);
+
+      if (used > lastCap - SAFETY && result[lastIdx].length > 1) {
+        const moved = result[lastIdx].pop();
+        if (moved) result.push([moved]);
+      }
+    }
+
+    setPages(result);
+  }, [
+    historyEnabled,
+    shouldMeasure,
+    chainIdsAll,
+    blockHeights,
+    capFirst,
+    capNext,
+    hasNotes,
+    notesH,
+    effectiveHistory,
+  ]);
+
+  const pageIndexContainingCurrent = useMemo(() => {
+    const idx = pages.findIndex((p) => p.includes(currentVisitId));
+    return idx >= 0 ? idx : 0;
+  }, [pages, currentVisitId]);
+
+  // ✅ When history OFF (current-only print): print only this page
+  const pagesToRender = useMemo(() => {
+    if (!historyEnabled) return [chainIdsAll];
+    if (effectiveHistory) return pages;
+    return [pages[pageIndexContainingCurrent] ?? chainIdsAll];
+  }, [historyEnabled, effectiveHistory, pages, pageIndexContainingCurrent, chainIdsAll]);
+
+  const currentOnly = historyEnabled && !effectiveHistory;
+
+  const headerHiddenStyle: React.CSSProperties | undefined = currentOnly
+    ? { visibility: 'hidden' }
+    : undefined;
+
   if (!mounted) return null;
+
+  const renderBlocks = (ids: string[]) => {
+    return (
+      <div className="space-y-4">
+        {ids.map((id) => {
+          const v = visitMetaMap.get(id);
+
+          const isAnchor = anchorVisitId != null && id === anchorVisitId;
+          const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
+
+          const isCur = id === currentVisitId;
+
+          return (
+            <div
+              key={id}
+              data-print-block="1"
+              style={
+                currentOnly && !isCur
+                  ? ({ visibility: 'hidden' } as React.CSSProperties)
+                  : undefined
+              }
+            >
+              <VisitRxBlock
+                visitId={id === 'CURRENT' ? '' : id}
+                isCurrent={isCur}
+                currentLines={lines}
+                visit={v}
+                showOpdInline={!isAnchor}
+                opdInlineText={opdInline}
+                currentToothDetails={currentToothDetails}
+              />
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderNotes = () => {
+    if (!hasNotes) return null;
+    if (!effectiveHistory) return null; // ✅ no notes in current-only print
+    return (
+      <div className="rx-print-notes shrink-0 pb-2">
+        <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+          <div className="text-[11px] font-semibold text-gray-700">Reception Notes</div>
+          <div className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-gray-900">
+            {receptionNotes}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // Hidden measurement template (same styling as print pages)
+  const measureTemplate = shouldMeasure ? (
+    <div
+      aria-hidden="true"
+      className="pointer-events-none fixed left-0 top-0"
+      style={{ width: 0, height: 0, overflow: 'hidden', opacity: 0 }}
+    >
+      <div style={{ width: '210mm' }}>
+        <div ref={measureRootRef}>
+          <div className="rx-a4 text-black">
+            <div className="flex h-full flex-col">
+              <div className="rx-print-header shrink-0 px-10">
+                <div className="h-20 w-full" />
+              </div>
+
+              <div className="rx-print-sep-top mt-2 h-px w-full" />
+              <div className="rx-print-doctor shrink-0 px-4 pt-3">
+                <div className="h-10 w-full" />
+              </div>
+              <div className="rx-print-patient shrink-0 px-4 pt-2">
+                <div className="h-16 w-full" />
+              </div>
+              <div className="rx-print-sep-mid mt-3 h-px w-full" />
+
+              <div className="min-h-0 flex-1 pt-4 px-4">
+                <div ref={capFirstRef} className="h-full w-full" />
+              </div>
+
+              <div className="shrink-0 px-4 pb-2">
+                <div ref={notesRef} className="w-full">
+                  {hasNotes ? renderNotes() : null}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="rx-a4 mt-6 text-black">
+            <div className="flex h-full flex-col">
+              <div className="min-h-0 flex-1 pt-6 px-4">
+                <div ref={capNextRef} className="h-full w-full" />
+              </div>
+            </div>
+          </div>
+
+          <div className="px-4 pt-4">{renderBlocks(chainIdsAll)}</div>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   return createPortal(
     <div className="rx-print-root">
       <style>{`
         .rx-print-root { display: none; }
-
-        /* screen-only controls */
-        .rx-print-controls { display: none; }
-
-        @media screen {
-          body.print-rx .rx-print-controls {
-            display: flex;
-            position: fixed;
-            right: 12px;
-            bottom: 12px;
-            z-index: 999999;
-            gap: 8px;
-            align-items: center;
-            padding: 10px 12px;
-            border: 1px solid rgba(0,0,0,0.10);
-            border-radius: 999px;
-            background: white;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.10);
-            font-size: 12px;
-            color: #111827;
-          }
-
-          .rx-print-controls button {
-            height: 30px;
-            padding: 0 12px;
-            border-radius: 999px;
-            border: 1px solid rgba(0,0,0,0.12);
-            background: #111827;
-            color: white;
-            font-weight: 600;
-          }
-
-          .rx-print-controls button.rx-off {
-            background: #f3f4f6;
-            color: #111827;
-          }
-        }
 
         @media print {
           body.print-rx > *:not(.rx-print-root) { display: none !important; }
@@ -350,235 +591,201 @@ export function PrescriptionPrintSheet(props: Props) {
             print-color-adjust: exact;
           }
 
-          /* ✅ Allow natural pagination; don't force fixed height */
+          /* A4 sheet with your same padding */
           .rx-a4 {
             width: 210mm;
-            min-height: 297mm;
-            height: auto;
+            height: 297mm;
             margin: 0 auto;
             padding: 8mm;
             box-sizing: border-box;
             background: white;
           }
 
-          /* ✅ Keep each visit block together (avoid splitting across pages) */
-          .rx-visit-group {
-            break-inside: avoid;
-            page-break-inside: avoid;
-          }
-
+          /* ✅ ensure a visit block never splits */
           .rx-block {
             break-inside: avoid;
             page-break-inside: avoid;
           }
 
-          /* existing "current-only" hide logic */
-          body.print-rx.print-rx-current-only .rx-print-header,
-          body.print-rx.print-rx-current-only .rx-print-doctor,
-          body.print-rx.print-rx-current-only .rx-print-patient,
-          body.print-rx.print-rx-current-only .rx-print-sep-top,
-          body.print-rx.print-rx-current-only .rx-print-sep-mid {
-            visibility: hidden !important;
-          }
-
-          body.print-rx.print-rx-current-only .rx-print-notes {
-            display: none !important;
-          }
-
-          body.print-rx.print-rx-current-only .rx-block-prev {
-            visibility: hidden !important;
+          /* Extra safety: separators shouldn't stick alone */
+          .rx-block-sep {
+            break-after: avoid;
+            page-break-after: avoid;
           }
         }
       `}</style>
 
-      {/* ✅ Toggle lives INSIDE this component, but never prints */}
-      {hasChainProps ? (
-        <div className="rx-print-controls" aria-hidden="true">
-          <span className="select-none">
-            Print history: <b>{historyEnabled ? 'ON' : 'OFF'}</b>
-          </span>
-          <button
-            type="button"
-            className={historyEnabled ? '' : 'rx-off'}
-            onClick={() => setHistoryOn((v) => !v)}
-            title={historyEnabled ? 'Switch to current only' : 'Include visit history'}
-          >
-            {historyEnabled ? 'Current only' : 'Include history'}
-          </button>
-        </div>
-      ) : null}
+      {measureTemplate}
 
-      <div className="rx-a4 text-black">
-        <div className="flex h-full flex-col">
-          <div className="rx-print-header shrink-0 px-10">
-            <div className="flex items-start justify-between gap-4">
-              <div className="relative h-20 w-20">
-                <Image
-                  src="/rx-logo-r.png"
-                  alt="Rx Logo"
-                  fill
-                  className="object-contain"
-                  priority
-                  unoptimized
-                />
-              </div>
+      {/* Render pages */}
+      {pagesToRender.map((ids, idx) => {
+        const isFirst = idx === 0;
+        const isLast = idx === pagesToRender.length - 1;
 
-              <div className="mt-2 flex w-full flex-col items-center justify-center text-center">
-                <div className="text-[12px] font-semibold tracking-[0.25em] text-emerald-600">
-                  CONTACT
-                </div>
-                <div className="mt-1 text-[14px] font-semibold text-gray-900">{CONTACT_NUMBER}</div>
+        return (
+          <div key={idx} className="rx-a4 text-black">
+            <div className="flex h-full flex-col">
+              {/* Header only on first page; hidden when currentOnly but space preserved */}
+              {isFirst ? (
+                <>
+                  <div className="rx-print-header shrink-0 px-10" style={headerHiddenStyle}>
+                    <div className="flex items-start justify-between gap-4">
+                      <div className="relative h-20 w-20">
+                        <Image
+                          src="/rx-logo-r.png"
+                          alt="Rx Logo"
+                          fill
+                          className="object-contain"
+                          priority
+                          unoptimized
+                        />
+                      </div>
 
-                <div className="mt-1 max-w-[120mm] text-[9px] font-medium leading-4 text-gray-800">
-                  {ADDRESS_ONE_LINE}
-                </div>
-                <div className="max-w-[120mm] text-[9px] font-medium leading-4 text-red-400 uppercase">
-                  {CLINIC_HOURS}
-                </div>
-              </div>
+                      <div className="mt-2 flex w-full flex-col items-center justify-center text-center">
+                        <div className="text-[12px] font-semibold tracking-[0.25em] text-emerald-600">
+                          CONTACT
+                        </div>
+                        <div className="mt-1 text-[14px] font-semibold text-gray-900">
+                          {CONTACT_NUMBER}
+                        </div>
 
-              <div className="relative h-18 w-42">
-                <Image
-                  src="/dashboard-logo.png"
-                  alt="Sarangi Dentistry"
-                  fill
-                  className="object-contain"
-                  priority
-                  unoptimized
-                />
-              </div>
-            </div>
-          </div>
+                        <div className="mt-1 max-w-[120mm] text-[9px] font-medium leading-4 text-gray-800">
+                          {ADDRESS_ONE_LINE}
+                        </div>
+                        <div className="max-w-[120mm] text-[9px] font-medium leading-4 text-red-400 uppercase">
+                          {CLINIC_HOURS}
+                        </div>
+                      </div>
 
-          <div className="rx-print-sep-top mt-2 h-px w-full bg-emerald-600/60" />
-
-          <div className="rx-print-doctor shrink-0 px-4 pt-3">
-            <div className="flex items-start justify-between gap-6">
-              <div className="flex flex-col">
-                <div className="text-[12px] font-bold text-gray-900">Dr. Soumendra Sarangi</div>
-                <div className="mt-0.5 text-[11px] font-light text-gray-700">B.D.S. Regd. - 68</div>
-              </div>
-
-              <div className="flex flex-col items-end text-right">
-                <div className="text-[12px] font-bold text-gray-900">Dr. Vaishnovee Sarangi</div>
-                <div className="mt-0.5 text-[11px] font-light text-gray-700">
-                  B.D.S. Redg. - 3057
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="rx-print-patient shrink-0 px-4 pt-2">
-            <div className="mt-1 flex w-full justify-between gap-6">
-              <div className="space-y-1 text-[11px] text-gray-800">
-                <div className="flex gap-3">
-                  <div className="w-28 text-gray-600">Patient Name</div>
-                  <div className="text-gray-600">:</div>
-                  <div className="font-semibold text-gray-900">{patientName ?? '—'}</div>
-                </div>
-
-                <div className="flex gap-3">
-                  <div className="w-28 text-gray-600">Contact No.</div>
-                  <div className="text-gray-600">:</div>
-                  <div className="font-semibold text-gray-900">{patientPhone ?? '—'}</div>
-                </div>
-
-                <div className="flex gap-3">
-                  <div className="w-28 text-gray-600">Age/Sex</div>
-                  <div className="text-gray-600">:</div>
-                  <div className="font-semibold text-gray-900">{ageSex}</div>
-                </div>
-              </div>
-
-              <div className="space-y-1 text-[11px] text-gray-800">
-                <div className="flex gap-3">
-                  <div className="w-28 text-gray-600">Regd. Date</div>
-                  <div className="text-gray-600">:</div>
-                  <div className="font-semibold text-gray-900">
-                    {visitDateLabel?.replace('Visit:', '').trim() || '—'}
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <div className="w-28 text-gray-600">SD. ID</div>
-                  <div className="text-gray-600">:</div>
-                  <div className="font-semibold text-gray-900">{sdId ?? '—'}</div>
-                </div>
-
-                <div className="flex gap-3">
-                  <div className="w-28 text-gray-600">OPD. No</div>
-                  <div className="text-gray-600">:</div>
-                  <div className="font-semibold text-gray-900">{headerOpdNo}</div>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div className="rx-print-sep-mid mt-3 h-px w-full bg-gray-900/30" />
-
-          <div className="rx-print-medicines min-h-0 flex-1 pt-4">
-            {!historyEnabled ? (
-              <div className="px-4 rx-visit-group">
-                {showCurrentToothDetails ? (
-                  <div className="mb-3">
-                    <ToothDetailsBlock toothDetails={currentToothDetails} />
-                    <div className="mt-3 h-px w-full bg-gray-200" />
-                  </div>
-                ) : null}
-
-                {lines.length ? (
-                  <ol className="space-y-1 text-[13px] leading-5 text-gray-900">
-                    {lines.map((l, idx) => (
-                      <li key={idx} className="flex gap-2">
-                        <div className="w-5 shrink-0 text-right font-medium">{idx + 1}.</div>
-                        <div className="font-medium">{buildLineText(l)}</div>
-                      </li>
-                    ))}
-                  </ol>
-                ) : (
-                  <div className="text-[12px] text-gray-500">No medicines recorded.</div>
-                )}
-
-                <div className="mt-3 h-px w-full bg-gray-200" />
-              </div>
-            ) : (
-              <div className="space-y-4">
-                {chainVisitIds.map((id) => {
-                  const v = visitMetaMap.get(id);
-
-                  const isAnchor = anchorVisitId != null && id === anchorVisitId;
-                  const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
-
-                  return (
-                    <div key={id} className="rx-visit-group">
-                      <VisitRxBlock
-                        visitId={id === 'CURRENT' ? '' : id}
-                        isCurrent={id === currentVisitId}
-                        currentLines={lines}
-                        visit={v}
-                        showOpdInline={!isAnchor}
-                        opdInlineText={opdInline}
-                        currentToothDetails={currentToothDetails}
-                      />
+                      <div className="relative h-18 w-42">
+                        <Image
+                          src="/dashboard-logo.png"
+                          alt="Sarangi Dentistry"
+                          fill
+                          className="object-contain"
+                          priority
+                          unoptimized
+                        />
+                      </div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+                  </div>
 
-          {hasNotes ? (
-            <div className="rx-print-notes shrink-0 pb-2 rx-visit-group">
-              <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
-                <div className="text-[11px] font-semibold text-gray-700">Reception Notes</div>
-                <div className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-gray-900">
-                  {receptionNotes}
-                </div>
+                  <div
+                    className="rx-print-sep-top mt-2 h-px w-full bg-emerald-600/60"
+                    style={headerHiddenStyle}
+                  />
+
+                  <div className="rx-print-doctor shrink-0 px-4 pt-3" style={headerHiddenStyle}>
+                    <div className="flex items-start justify-between gap-6">
+                      <div className="flex flex-col">
+                        <div className="text-[12px] font-bold text-gray-900">
+                          Dr. Soumendra Sarangi
+                        </div>
+                        <div className="mt-0.5 text-[11px] font-light text-gray-700">
+                          B.D.S. Regd. - 68
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col items-end text-right">
+                        <div className="text-[12px] font-bold text-gray-900">
+                          Dr. Vaishnovee Sarangi
+                        </div>
+                        <div className="mt-0.5 text-[11px] font-light text-gray-700">
+                          B.D.S. Redg. - 3057
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="rx-print-patient shrink-0 px-4 pt-2" style={headerHiddenStyle}>
+                    <div className="mt-1 flex w-full justify-between gap-6">
+                      <div className="space-y-1 text-[11px] text-gray-800">
+                        <div className="flex gap-3">
+                          <div className="w-28 text-gray-600">Patient Name</div>
+                          <div className="text-gray-600">:</div>
+                          <div className="font-semibold text-gray-900">{patientName ?? '—'}</div>
+                        </div>
+
+                        <div className="flex gap-3">
+                          <div className="w-28 text-gray-600">Contact No.</div>
+                          <div className="text-gray-600">:</div>
+                          <div className="font-semibold text-gray-900">{patientPhone ?? '—'}</div>
+                        </div>
+
+                        <div className="flex gap-3">
+                          <div className="w-28 text-gray-600">Age/Sex</div>
+                          <div className="text-gray-600">:</div>
+                          <div className="font-semibold text-gray-900">{ageSex}</div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-1 text-[11px] text-gray-800">
+                        <div className="flex gap-3">
+                          <div className="w-28 text-gray-600">Regd. Date</div>
+                          <div className="text-gray-600">:</div>
+                          <div className="font-semibold text-gray-900">
+                            {visitDateLabel?.replace('Visit:', '').trim() || '—'}
+                          </div>
+                        </div>
+
+                        <div className="flex gap-3">
+                          <div className="w-28 text-gray-600">SD. ID</div>
+                          <div className="text-gray-600">:</div>
+                          <div className="font-semibold text-gray-900">{sdId ?? '—'}</div>
+                        </div>
+
+                        <div className="flex gap-3">
+                          <div className="w-28 text-gray-600">OPD. No</div>
+                          <div className="text-gray-600">:</div>
+                          <div className="font-semibold text-gray-900">{headerOpdNo}</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    className="rx-print-sep-mid mt-3 h-px w-full bg-gray-900/30"
+                    style={headerHiddenStyle}
+                  />
+                </>
+              ) : null}
+
+              <div className="rx-print-medicines min-h-0 flex-1 pt-4 px-4">
+                {!historyEnabled ? (
+                  <>
+                    {showCurrentToothDetails ? (
+                      <div className="mb-3">
+                        <ToothDetailsBlock toothDetails={currentToothDetails} />
+                        <div className="mt-3 h-px w-full bg-gray-200" />
+                      </div>
+                    ) : null}
+
+                    {lines.length ? (
+                      <ol className="space-y-1 text-[13px] leading-5 text-gray-900">
+                        {lines.map((l, i) => (
+                          <li key={i} className="flex gap-2">
+                            <div className="w-5 shrink-0 text-right font-medium">{i + 1}.</div>
+                            <div className="font-medium">{buildLineText(l)}</div>
+                          </li>
+                        ))}
+                      </ol>
+                    ) : (
+                      <div className="text-[12px] text-gray-500">No medicines recorded.</div>
+                    )}
+
+                    <div className="mt-3 h-px w-full bg-gray-200" />
+                  </>
+                ) : (
+                  renderBlocks(ids)
+                )}
               </div>
+
+              {/* Notes only on last page when history printing */}
+              {isLast ? renderNotes() : null}
             </div>
-          ) : null}
-        </div>
-      </div>
+          </div>
+        );
+      })}
     </div>,
     document.body,
   );
