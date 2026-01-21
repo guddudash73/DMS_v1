@@ -8,8 +8,6 @@ import { toast } from 'react-toastify';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Switch } from '@/components/ui/switch';
-import { Label } from '@/components/ui/label';
 
 import {
   useGetVisitByIdQuery,
@@ -23,7 +21,28 @@ import {
 import { useAuth } from '@/src/hooks/useAuth';
 import { ArrowRight, Stethoscope } from 'lucide-react';
 
-import type { Visit } from '@dcm/types';
+import type { ToothDetail, Visit } from '@dcm/types';
+import { clinicDateISO } from '@/src/lib/clinicTime';
+
+// Lazy-load DONE view (heavy: Rx preview + X-rays + history + calendar)
+const DoctorVisitDoneView = dynamic(
+  () => import('./DoctorVisitDoneView').then((m) => m.DoctorVisitDoneView),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <Card className="lg:col-span-6 rounded-2xl border bg-white p-4">
+          <div className="h-5 w-40 animate-pulse rounded bg-gray-100" />
+          <div className="mt-4 h-80 animate-pulse rounded-xl bg-gray-50" />
+        </Card>
+        <Card className="lg:col-span-6 rounded-2xl border bg-white p-4">
+          <div className="h-5 w-24 animate-pulse rounded bg-gray-100" />
+          <div className="mt-4 h-80 animate-pulse rounded-xl bg-gray-50" />
+        </Card>
+      </div>
+    ),
+  },
+);
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
@@ -62,6 +81,11 @@ function getProp(obj: unknown, key: string): unknown {
 
 function getPropString(obj: unknown, key: string): string | undefined {
   return getString(getProp(obj, key));
+}
+
+function getPropNumber(obj: unknown, key: string): number | undefined {
+  const v = getProp(obj, key);
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }
 
 function getErrorMessage(err: unknown): string {
@@ -132,26 +156,6 @@ function stageBadgeClass(status?: Visit['status']) {
   return 'bg-gray-100 text-gray-700 border-gray-200';
 }
 
-// Lazy-load DONE view (heavy: Rx preview + X-rays + history + calendar)
-const DoctorVisitDoneView = dynamic(
-  () => import('./DoctorVisitDoneView').then((m) => m.DoctorVisitDoneView),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <Card className="lg:col-span-6 rounded-2xl border bg-white p-4">
-          <div className="h-5 w-40 animate-pulse rounded bg-gray-100" />
-          <div className="mt-4 h-80 animate-pulse rounded-xl bg-gray-50" />
-        </Card>
-        <Card className="lg:col-span-6 rounded-2xl border bg-white p-4">
-          <div className="h-5 w-24 animate-pulse rounded bg-gray-100" />
-          <div className="mt-4 h-80 animate-pulse rounded-xl bg-gray-50" />
-        </Card>
-      </div>
-    ),
-  },
-);
-
 export function DoctorVisitPageClient() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -212,14 +216,6 @@ export function DoctorVisitPageClient() {
   const sessionMuted = isOffline === true;
   const sessionMutedReason =
     'This is an offline visit. Session editing is disabled in Doctor view.';
-
-  // ✅ Toggle: compact DONE view (don’t mount heavy DONE view unless needed)
-  const [doneCompact, setDoneCompact] = React.useState<boolean>(false);
-
-  // Keep toggle stable: reset when visitId changes
-  React.useEffect(() => {
-    setDoneCompact(false);
-  }, [visitId]);
 
   const onStartRevision = async () => {
     if (!visitId) return;
@@ -283,6 +279,7 @@ export function DoctorVisitPageClient() {
     );
   }
 
+  // tiny, fast header; heavy DONE view is lazily loaded below
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
@@ -309,21 +306,6 @@ export function DoctorVisitPageClient() {
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {/* ✅ DONE compact toggle */}
-          {isDone ? (
-            <div className="mr-1 flex items-center gap-2 rounded-xl border bg-white px-3 py-2">
-              <Switch
-                id="done-compact"
-                checked={doneCompact}
-                onCheckedChange={setDoneCompact}
-                disabled={loading || hasError}
-              />
-              <Label htmlFor="done-compact" className="text-xs text-gray-700">
-                Compact view
-              </Label>
-            </div>
-          ) : null}
-
           {isDone ? (
             <Button
               type="button"
@@ -407,103 +389,18 @@ export function DoctorVisitPageClient() {
           </Card>
         </div>
       ) : isDone ? (
-        doneCompact ? (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-            <Card className="lg:col-span-5 rounded-2xl border bg-white p-6">
-              <div className="flex items-center gap-2">
-                <Stethoscope className="h-4 w-4 text-gray-700" />
-                <div className="text-sm font-semibold text-gray-900">Visit Overview</div>
-              </div>
-
-              <div className="mt-4 grid gap-3 text-sm text-gray-800">
-                <div className="flex justify-between gap-3">
-                  <div className="text-gray-600">Patient</div>
-                  <div className="font-semibold text-gray-900">
-                    {String(getProp(patient, 'name') ?? '—')}
-                  </div>
-                </div>
-
-                <div className="flex justify-between gap-3">
-                  <div className="text-gray-600">Phone</div>
-                  <div className="font-semibold text-gray-900">
-                    {String(getProp(patient, 'phone') ?? '—')}
-                  </div>
-                </div>
-
-                <div className="flex justify-between gap-3">
-                  <div className="text-gray-600">Age/Sex</div>
-                  <div className="font-semibold text-gray-900">
-                    {patientAge ? String(patientAge) : '—'}/{patientSex ?? '—'}
-                  </div>
-                </div>
-
-                <div className="flex justify-between gap-3">
-                  <div className="text-gray-600">SD-ID</div>
-                  <div className="font-semibold text-gray-900">
-                    {String(getProp(patient, 'sdId') ?? '—')}
-                  </div>
-                </div>
-
-                <div className="flex justify-between gap-3">
-                  <div className="text-gray-600">OPD No</div>
-                  <div className="font-semibold text-gray-900">{opdNo ?? '—'}</div>
-                </div>
-
-                <div className="flex justify-between gap-3">
-                  <div className="text-gray-600">Visit Date</div>
-                  <div className="font-semibold text-gray-900">{visitDate ?? '—'}</div>
-                </div>
-
-                <div className="flex justify-between gap-3">
-                  <div className="text-gray-600">Reason</div>
-                  <div className="font-semibold text-gray-900">
-                    {String(getProp(visit, 'reason') ?? '—')}
-                  </div>
-                </div>
-              </div>
-            </Card>
-
-            <Card className="lg:col-span-7 rounded-2xl border bg-white p-6">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold text-gray-900">Done</div>
-                  <div className="mt-1 text-xs text-gray-500">
-                    Turn off <b>Compact view</b> to load the full summary (Prescription, X-rays,
-                    History).
-                  </div>
-                </div>
-
-                <Badge
-                  variant="outline"
-                  className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(status)}`}
-                >
-                  {stageLabel(status)}
-                </Badge>
-              </div>
-
-              <div className="mt-4 rounded-2xl border p-4">
-                <div className="text-xs font-semibold text-gray-700">Available actions</div>
-                <ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-gray-600">
-                  <li>Start Revision to edit Rx</li>
-                  <li>View full Prescription + X-rays in full view</li>
-                </ul>
-              </div>
-            </Card>
-          </div>
-        ) : (
-          <DoctorVisitDoneView
-            visitId={visitId}
-            patientId={patientId}
-            patient={patient}
-            visit={visit as Visit}
-            doctorName={doctorLabel}
-            doctorRegdLabel={doctorRegdLabel}
-            visitDate={visitDate}
-            visitDateLabel={visitDateLabel}
-            opdNo={opdNo}
-            rxLatest={rxLatest}
-          />
-        )
+        <DoctorVisitDoneView
+          visitId={visitId}
+          patientId={patientId}
+          patient={patient}
+          visit={visit as Visit}
+          doctorName={doctorLabel}
+          doctorRegdLabel={doctorRegdLabel}
+          visitDate={visitDate}
+          visitDateLabel={visitDateLabel}
+          opdNo={opdNo}
+          rxLatest={rxLatest}
+        />
       ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
           <Card className="lg:col-span-5 rounded-2xl border bg-white p-6">
