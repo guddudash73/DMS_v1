@@ -18,7 +18,6 @@ type Props = {
   patientSex?: PatientSex;
 
   sdId?: string;
-
   opdNo?: string;
 
   doctorName?: string;
@@ -30,10 +29,12 @@ type Props = {
   currentVisitId?: string;
   chainVisitIds?: string[];
   visitMetaMap?: Map<string, Visit>;
+
+  // ✅ This prop now acts as "initial value" for the toggle.
+  // If omitted, default is TRUE (history on) when chain props exist.
   printWithHistory?: boolean;
 
   receptionNotes?: string;
-
   toothDetails?: ToothDetail[];
 };
 
@@ -139,6 +140,7 @@ function VisitRxBlock(props: {
     currentToothDetails,
   } = props;
 
+  // ✅ Only fetch RX for non-current blocks
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: isCurrent || !visitId });
 
   const lines = isCurrent ? currentLines : (rxQuery.data?.rx?.lines ?? []);
@@ -213,31 +215,60 @@ export function PrescriptionPrintSheet(props: Props) {
     visitMetaMap: visitMetaMapProp,
 
     toothDetails: toothDetailsProp,
+    printWithHistory,
   } = props;
 
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  const hasChainProps =
+    !!currentVisitIdProp &&
+    !!chainVisitIdsProp &&
+    chainVisitIdsProp.length > 0 &&
+    !!visitMetaMapProp;
+
+  // ✅ History toggle for THIS component
+  // - If printWithHistory provided, it wins as initial.
+  // - Else default = true when chain props exist (to match "show all by default" elsewhere).
+  const [historyOn, setHistoryOn] = useState<boolean>(() => {
+    if (typeof printWithHistory === 'boolean') return printWithHistory;
+    return hasChainProps;
+  });
+
+  // Keep in sync if parent changes printWithHistory dynamically
+  useEffect(() => {
+    if (typeof printWithHistory === 'boolean') setHistoryOn(printWithHistory);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [printWithHistory]);
+
+  // ✅ Apply body helper class for current-only print styling
+  useEffect(() => {
+    if (!mounted) return;
+    const cls = 'print-rx-current-only';
+    if (!historyOn) document.body.classList.add(cls);
+    else document.body.classList.remove(cls);
+    return () => {
+      document.body.classList.remove(cls);
+    };
+  }, [historyOn, mounted]);
 
   const hasNotes = !!receptionNotes?.trim();
   const ageSex = formatAgeSex(patientAge, patientSex);
 
   const currentVisitId = useMemo(() => currentVisitIdProp ?? 'CURRENT', [currentVisitIdProp]);
 
+  // ✅ historyEnabled is now controlled by toggle AND requires chain props
+  const historyEnabled = historyOn && hasChainProps;
+
   const chainVisitIds = useMemo(() => {
-    if (chainVisitIdsProp && chainVisitIdsProp.length) return chainVisitIdsProp;
+    if (historyEnabled && chainVisitIdsProp && chainVisitIdsProp.length) return chainVisitIdsProp;
     return [currentVisitId];
-  }, [chainVisitIdsProp, currentVisitId]);
+  }, [historyEnabled, chainVisitIdsProp, currentVisitId]);
 
   const visitMetaMap = useMemo(
     () => visitMetaMapProp ?? new Map<string, Visit>(),
     [visitMetaMapProp],
   );
-
-  const historyEnabled =
-    !!currentVisitIdProp &&
-    !!chainVisitIdsProp &&
-    chainVisitIdsProp.length > 0 &&
-    !!visitMetaMapProp;
 
   const anchorVisitId = useMemo(() => {
     if (!historyEnabled) return undefined;
@@ -268,6 +299,43 @@ export function PrescriptionPrintSheet(props: Props) {
       <style>{`
         .rx-print-root { display: none; }
 
+        /* screen-only controls */
+        .rx-print-controls { display: none; }
+
+        @media screen {
+          body.print-rx .rx-print-controls {
+            display: flex;
+            position: fixed;
+            right: 12px;
+            bottom: 12px;
+            z-index: 999999;
+            gap: 8px;
+            align-items: center;
+            padding: 10px 12px;
+            border: 1px solid rgba(0,0,0,0.10);
+            border-radius: 999px;
+            background: white;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.10);
+            font-size: 12px;
+            color: #111827;
+          }
+
+          .rx-print-controls button {
+            height: 30px;
+            padding: 0 12px;
+            border-radius: 999px;
+            border: 1px solid rgba(0,0,0,0.12);
+            background: #111827;
+            color: white;
+            font-weight: 600;
+          }
+
+          .rx-print-controls button.rx-off {
+            background: #f3f4f6;
+            color: #111827;
+          }
+        }
+
         @media print {
           body.print-rx > *:not(.rx-print-root) { display: none !important; }
           body.print-rx .rx-print-root { display: block !important; }
@@ -282,15 +350,29 @@ export function PrescriptionPrintSheet(props: Props) {
             print-color-adjust: exact;
           }
 
+          /* ✅ Allow natural pagination; don't force fixed height */
           .rx-a4 {
             width: 210mm;
-            height: 297mm;
+            min-height: 297mm;
+            height: auto;
             margin: 0 auto;
             padding: 8mm;
             box-sizing: border-box;
             background: white;
           }
 
+          /* ✅ Keep each visit block together (avoid splitting across pages) */
+          .rx-visit-group {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+
+          .rx-block {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+
+          /* existing "current-only" hide logic */
           body.print-rx.print-rx-current-only .rx-print-header,
           body.print-rx.print-rx-current-only .rx-print-doctor,
           body.print-rx.print-rx-current-only .rx-print-patient,
@@ -308,6 +390,23 @@ export function PrescriptionPrintSheet(props: Props) {
           }
         }
       `}</style>
+
+      {/* ✅ Toggle lives INSIDE this component, but never prints */}
+      {hasChainProps ? (
+        <div className="rx-print-controls" aria-hidden="true">
+          <span className="select-none">
+            Print history: <b>{historyEnabled ? 'ON' : 'OFF'}</b>
+          </span>
+          <button
+            type="button"
+            className={historyEnabled ? '' : 'rx-off'}
+            onClick={() => setHistoryOn((v) => !v)}
+            title={historyEnabled ? 'Switch to current only' : 'Include visit history'}
+          >
+            {historyEnabled ? 'Current only' : 'Include history'}
+          </button>
+        </div>
+      ) : null}
 
       <div className="rx-a4 text-black">
         <div className="flex h-full flex-col">
@@ -419,7 +518,7 @@ export function PrescriptionPrintSheet(props: Props) {
 
           <div className="rx-print-medicines min-h-0 flex-1 pt-4">
             {!historyEnabled ? (
-              <div className="px-4">
+              <div className="px-4 rx-visit-group">
                 {showCurrentToothDetails ? (
                   <div className="mb-3">
                     <ToothDetailsBlock toothDetails={currentToothDetails} />
@@ -451,16 +550,17 @@ export function PrescriptionPrintSheet(props: Props) {
                   const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
 
                   return (
-                    <VisitRxBlock
-                      key={id}
-                      visitId={id === 'CURRENT' ? '' : id}
-                      isCurrent={id === currentVisitId}
-                      currentLines={lines}
-                      visit={v}
-                      showOpdInline={!isAnchor}
-                      opdInlineText={opdInline}
-                      currentToothDetails={currentToothDetails}
-                    />
+                    <div key={id} className="rx-visit-group">
+                      <VisitRxBlock
+                        visitId={id === 'CURRENT' ? '' : id}
+                        isCurrent={id === currentVisitId}
+                        currentLines={lines}
+                        visit={v}
+                        showOpdInline={!isAnchor}
+                        opdInlineText={opdInline}
+                        currentToothDetails={currentToothDetails}
+                      />
+                    </div>
                   );
                 })}
               </div>
@@ -468,7 +568,7 @@ export function PrescriptionPrintSheet(props: Props) {
           </div>
 
           {hasNotes ? (
-            <div className="rx-print-notes shrink-0 pb-2">
+            <div className="rx-print-notes shrink-0 pb-2 rx-visit-group">
               <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
                 <div className="text-[11px] font-semibold text-gray-700">Reception Notes</div>
                 <div className="mt-1 whitespace-pre-wrap text-[12px] leading-5 text-gray-900">
