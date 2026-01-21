@@ -6,724 +6,735 @@ import { toast } from 'react-toastify';
 
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 
-import { Calendar } from '@/components/ui/calendar';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-
-import { XrayPrintSheet } from '@/components/xray/XrayPrintSheet';
-import { BillPrintSheet } from '@/components/billing/BillPrintSheet';
+import type { BillingCheckoutInput } from '@dcm/types';
 
 import {
   useGetVisitByIdQuery,
   useGetPatientByIdQuery,
-  useGetVisitRxQuery,
-  useListVisitXraysQuery,
   useGetVisitBillQuery,
+  useUpdateVisitBillMutation,
+  useCheckoutVisitMutation,
+  useUpdateVisitStatusMutation,
 } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
-import type { Billing } from '@dcm/types';
 
-type PatientSex = 'M' | 'F' | 'O' | 'U';
-type FollowUpContact = 'CALL' | 'SMS' | 'WHATSAPP' | 'OTHER';
+type LineDraft = { description: string; unitAmount: number };
+
+const money = (n: unknown) => {
+  const v = typeof n === 'number' ? n : Number(n);
+  return Number.isFinite(v) ? v : 0;
+};
+
 type UnknownRecord = Record<string, unknown>;
+const isRecord = (v: unknown): v is UnknownRecord => typeof v === 'object' && v !== null;
 
-type PrintAction = 'RX' | 'XRAY' | 'BILL' | null;
+const getStr = (obj: unknown, key: string): string | undefined => {
+  if (!isRecord(obj)) return undefined;
+  const v = obj[key];
+  return typeof v === 'string' ? v : undefined;
+};
 
-function IconCheck(props: React.SVGProps<SVGSVGElement>) {
+const getBool = (obj: unknown, key: string): boolean | undefined => {
+  if (!isRecord(obj)) return undefined;
+  const v = obj[key];
+  return typeof v === 'boolean' ? v : undefined;
+};
+
+const getNum = (obj: unknown, key: string): number | undefined => {
+  if (!isRecord(obj)) return undefined;
+  const v = obj[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+};
+
+const getErrorMessage = (err: unknown): string | undefined => {
+  if (err instanceof Error) return err.message;
+  if (isRecord(err) && typeof err.message === 'string') return err.message;
+  return undefined;
+};
+
+type ApiError = { status?: number; data?: unknown };
+
+function IconPlus(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
+function IconPen(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path d="M12 20h9" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
       <path
-        d="M20 6 9 17l-5-5"
+        d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5Z"
         stroke="currentColor"
         strokeWidth="2"
-        strokeLinecap="round"
         strokeLinejoin="round"
       />
     </svg>
   );
 }
-
-function LoadingDots({ label }: { label: string }) {
-  const [dots, setDots] = React.useState('');
-  React.useEffect(() => {
-    const id = window.setInterval(() => {
-      setDots((d) => (d.length >= 3 ? '' : `${d}.`));
-    }, 300);
-    return () => window.clearInterval(id);
-  }, []);
+function IconX(props: React.SVGProps<SVGSVGElement>) {
   return (
-    <span className="inline-flex items-center">
-      {label}
-      <span className="w-4 text-left">{dots}</span>
-    </span>
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      <path d="M18 6 6 18M6 6l12 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
   );
 }
 
-function isRecord(v: unknown): v is UnknownRecord {
-  return typeof v === 'object' && v !== null;
-}
+type BillItemLike = { description?: unknown; unitAmount?: unknown };
+type BillLike = {
+  items?: unknown;
+  discountAmount?: unknown;
+  taxAmount?: unknown;
+  receivedOnline?: unknown;
+  receivedOffline?: unknown;
+};
 
-function getString(v: unknown): string | undefined {
-  return typeof v === 'string' && v.trim() ? v : undefined;
-}
+const getBillItems = (bill: unknown): BillItemLike[] => {
+  if (!isRecord(bill)) return [];
+  const b = bill as BillLike;
+  if (!Array.isArray(b.items)) return [];
+  return b.items as BillItemLike[];
+};
 
-function getNumber(v: unknown): number | undefined {
-  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
-}
-
-function getBool(v: unknown): boolean | undefined {
-  return typeof v === 'boolean' ? v : undefined;
-}
-
-function getStrFromRecord(rec: UnknownRecord, key: string): string | undefined {
-  return getString(rec[key]);
-}
-
-function getNumFromRecord(rec: UnknownRecord, key: string): number | undefined {
-  return getNumber(rec[key]);
-}
-
-function getBoolFromRecordOpt(rec: UnknownRecord, key: string): boolean | undefined {
-  return getBool(rec[key]);
-}
-
-function toLocalISODate(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-function safeParseDobToDate(dob: unknown): Date | null {
-  if (!dob) return null;
-
-  if (typeof dob === 'number' && Number.isFinite(dob)) {
-    const d = new Date(dob);
-    return Number.isFinite(d.getTime()) ? d : null;
-  }
-
-  if (typeof dob === 'string') {
-    const s = dob.trim();
-    if (!s) return null;
-
-    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
-    if (m) {
-      const y = Number(m[1]);
-      const mo = Number(m[2]) - 1;
-      const da = Number(m[3]);
-      const d = new Date(y, mo, da);
-      return Number.isFinite(d.getTime()) ? d : null;
-    }
-
-    const d = new Date(s);
-    return Number.isFinite(d.getTime()) ? d : null;
-  }
-
-  if (dob instanceof Date) {
-    return Number.isFinite(dob.getTime()) ? dob : null;
-  }
-
-  return null;
-}
-
-function calculateAge(dob: Date, at: Date): number {
-  let age = at.getFullYear() - dob.getFullYear();
-  const m = at.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && at.getDate() < dob.getDate())) age -= 1;
-  return age < 0 ? 0 : age;
-}
-
-function normalizeSex(raw: unknown): PatientSex | undefined {
-  if (!raw) return undefined;
-  const s = String(raw).trim().toUpperCase();
-
-  if (s === 'M' || s === 'MALE') return 'M';
-  if (s === 'F' || s === 'FEMALE') return 'F';
-  if (s === 'O' || s === 'OTHER') return 'O';
-  if (s === 'U' || s === 'UNKNOWN') return 'U';
-
-  if (s === 'M' || s === 'F' || s === 'O' || s === 'U') return s as PatientSex;
-
-  return undefined;
-}
-
-function parseFollowUpContact(v: string): FollowUpContact {
-  if (v === 'CALL' || v === 'SMS' || v === 'WHATSAPP' || v === 'OTHER') return v;
-  return 'CALL';
-}
-
-function isoToDate(iso: string): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  if (!m) return null;
-  const y = Number(m[1]);
-  const mo = Number(m[2]) - 1;
-  const da = Number(m[3]);
-  const d = new Date(y, mo, da);
-  return Number.isFinite(d.getTime()) ? d : null;
-}
-
-export default function VisitCheckoutPrintingPage() {
+export default function VisitCheckoutBillingPage() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
   const auth = useAuth();
-
-  const visitId = String(params?.visitId ?? '');
   const role = auth.status === 'authenticated' ? auth.role : undefined;
   const isAdmin = role === 'ADMIN';
 
+  const visitId = String(params?.visitId ?? '');
+
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
   const visit: unknown = visitQuery.data;
-  const visitRec: UnknownRecord = isRecord(visit) ? visit : {};
 
-  const patientId = getStrFromRecord(visitRec, 'patientId');
+  // ✅ bill existence signal from visit meta (no 404 spam)
+  const billExists =
+    getBool(visit, 'checkedOut') === true ||
+    getNum(visit, 'billingAmount') !== undefined ||
+    getNum(visit, 'billingAmount') === 0;
+
+  const isOfflineVisit = getBool(visit, 'isOffline') === true;
+
+  // ✅ fetch bill only when it exists + admin (admin edits)
+  const shouldFetchBill = !!visitId && !!visit && billExists && isAdmin;
+
+  const patientId = getStr(visit, 'patientId');
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
-  const rxQuery = useGetVisitRxQuery({ visitId }, { skip: !visitId });
-  const rx = rxQuery.data?.rx ?? null;
-
-  const xraysQuery = useListVisitXraysQuery({ visitId }, { skip: !visitId });
-  const xrayIds = (xraysQuery.data?.items ?? []).map((x) => x.xrayId);
-
-  const billExists =
-    !!visit &&
-    (getBoolFromRecordOpt(visitRec, 'checkedOut') === true ||
-      getNumFromRecord(visitRec, 'billingAmount') !== undefined);
-
-  const shouldFetchBill = !!visitId && !!visit && billExists;
   const billQuery = useGetVisitBillQuery({ visitId }, { skip: !shouldFetchBill });
+  const bill: unknown = billQuery.data ?? null;
 
-  const billData: unknown = billQuery.data ?? null;
-  const billingForPrint: Billing | null =
-    isRecord(billData) && getStrFromRecord(billData, 'billNo') ? (billData as Billing) : null;
+  const billNotFound = !billExists;
 
-  const [xrayPrintOpen, setXrayPrintOpen] = React.useState(false);
-  const [billPrintOpen, setBillPrintOpen] = React.useState(false);
-  const [doneSuccess, setDoneSuccess] = React.useState(false);
+  React.useEffect(() => {
+    if (!visitId) return;
+    if (!visit) return;
+    if (!isAdmin && billExists) {
+      router.replace(`/visits/${visitId}/checkout/printing`);
+    }
+  }, [visitId, visit, isAdmin, billExists, router]);
+
+  const isZeroBilled = getBool(visit, 'zeroBilled') === true;
+  const [billingEnabledForZero, setBillingEnabledForZero] = React.useState(false);
+
+  const [updateVisitBill, updateBillState] = useUpdateVisitBillMutation();
+
+  React.useEffect(() => {
+    setBillingEnabledForZero(false);
+  }, [visitId]);
+
+  const status = getStr(visit, 'status');
+  const canCheckout = !!visitId && !!visit && (status === 'DONE' || isOfflineVisit);
+
+  const [checkoutVisit, checkoutState] = useCheckoutVisitMutation();
+  const [updateVisitStatus, updateVisitStatusState] = useUpdateVisitStatusMutation();
+
+  const [lines, setLines] = React.useState<LineDraft[]>([]);
+  const [discountAmount, setDiscountAmount] = React.useState(0);
+  const [taxAmount, setTaxAmount] = React.useState(0);
+
+  const [serviceDraft, setServiceDraft] = React.useState('');
+  const [amountDraft, setAmountDraft] = React.useState('');
+
+  const [editIndex, setEditIndex] = React.useState<number | null>(null);
+  const [editService, setEditService] = React.useState('');
+  const [editAmount, setEditAmount] = React.useState('');
+
+  const [receivedOnline, setReceivedOnline] = React.useState(false);
+  const [receivedOffline, setReceivedOffline] = React.useState(false);
+
+  const hydratedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!bill) return;
+    if (hydratedRef.current) return;
+    hydratedRef.current = true;
+
+    const items = getBillItems(bill);
+
+    setLines(
+      items.map((it) => ({
+        description: typeof it.description === 'string' ? it.description : '',
+        unitAmount: money(it.unitAmount),
+      })),
+    );
+
+    setDiscountAmount(money(isRecord(bill) ? (bill as BillLike).discountAmount : 0));
+    setTaxAmount(money(isRecord(bill) ? (bill as BillLike).taxAmount : 0));
+
+    const ro = isRecord(bill) ? (bill as BillLike).receivedOnline : undefined;
+    const rf = isRecord(bill) ? (bill as BillLike).receivedOffline : undefined;
+
+    setReceivedOnline(ro === true);
+    setReceivedOffline(rf === true);
+  }, [bill]);
+
+  const billingMuted = isZeroBilled && !billingEnabledForZero;
+
+  const computed = React.useMemo(() => {
+    if (billingMuted) {
+      return { subtotal: 0, discount: 0, tax: 0, total: 0, safeLines: [] as LineDraft[] };
+    }
+
+    const safeLines = lines
+      .map((l) => ({
+        description: (l.description ?? '').trim(),
+        unitAmount: Math.max(0, money(l.unitAmount)),
+      }))
+      .filter((l) => l.description.length > 0);
+
+    const subtotal = safeLines.reduce((sum, l) => sum + l.unitAmount, 0);
+    const discount = Math.max(0, money(discountAmount));
+    const tax = Math.max(0, money(taxAmount));
+    const total = Math.max(0, subtotal - Math.min(discount, subtotal) + tax);
+
+    return { subtotal, discount, tax, total, safeLines };
+  }, [lines, discountAmount, taxAmount, billingMuted]);
 
   const patientName = patientQuery.data?.name;
   const patientPhone = patientQuery.data?.phone;
 
-  const patientRec: UnknownRecord = isRecord(patientQuery.data)
-    ? (patientQuery.data as UnknownRecord)
-    : {};
+  const legacyDoctorId =
+    getStr(visit, 'doctorId') ?? getStr(visit, 'providerId') ?? getStr(visit, 'assignedDoctorId');
 
-  const patientSdId =
-    getStrFromRecord(patientRec, 'sdId') ?? getStrFromRecord(visitRec, 'sdId') ?? undefined;
+  const doctorLabel = legacyDoctorId ? `Doctor (${legacyDoctorId})` : 'Doctor';
+  const visitDateLabel = getStr(visit, 'visitDate') ?? '—';
 
-  const opdNo =
-    getStrFromRecord(visitRec, 'opdNo') ??
-    getStrFromRecord(visitRec, 'opdId') ??
-    getStrFromRecord(visitRec, 'opdNumber') ??
-    undefined;
-
-  const patientDobRaw =
-    patientRec.dob ?? patientRec.dateOfBirth ?? patientRec.birthDate ?? patientRec.dobIso ?? null;
-
-  const patientSexRaw = patientRec.sex ?? patientRec.gender ?? patientRec.patientSex ?? null;
-
-  const patientDob = safeParseDobToDate(patientDobRaw);
-
-  const visitCreatedAtMs = getNumFromRecord(visitRec, 'createdAt') ?? Date.now();
-  const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
-  const patientSex = normalizeSex(patientSexRaw);
-
-  const visitCreatedDateLabel = visitCreatedAtMs
-    ? `Visit: ${toLocalISODate(new Date(visitCreatedAtMs))}`
-    : undefined;
-
-  const visitDateLabel = getStrFromRecord(visitRec, 'visitDate')
-    ? `Visit: ${String(visitRec.visitDate)}`
-    : undefined;
-
-  const statusLabel = getStrFromRecord(visitRec, 'status') ?? '—';
-  const checkedOut = getBoolFromRecordOpt(visitRec, 'checkedOut') === true;
-
-  const rxAvailable = !!rx;
-  const xraysAvailable = xrayIds.length > 0;
-  const billAvailable = billExists && !!billingForPrint;
-
-  const isRxFetching = rxQuery.isLoading || rxQuery.isFetching;
-  const isXraysFetching = xraysQuery.isLoading || xraysQuery.isFetching;
-  const isBillFetching = billQuery.isLoading || billQuery.isFetching;
-
-  const anyTopLoading =
-    visitQuery.isLoading ||
-    visitQuery.isFetching ||
-    patientQuery.isLoading ||
-    patientQuery.isFetching;
-
-  const onDone = () => {
-    setDoneSuccess(true);
-    window.setTimeout(() => {
-      router.replace('/');
-    }, 850);
-  };
-
-  const [followUpEnabled, setFollowUpEnabled] = React.useState(false);
-
-  const [followUpDate, setFollowUpDate] = React.useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() + 7);
-    return toLocalISODate(d);
-  });
-  const [followUpCalendarOpen, setFollowUpCalendarOpen] = React.useState(false);
-
-  const followUpDateObj = React.useMemo(
-    () => isoToDate(followUpDate) ?? new Date(),
-    [followUpDate],
-  );
-
-  const [followUpContact, setFollowUpContact] = React.useState<FollowUpContact>('CALL');
-  const [followUpReason, setFollowUpReason] = React.useState('');
-
-  const goToFollowups = (mode: 'add' | 'list') => {
-    if (!visitId) return;
-
-    const qs = new URLSearchParams();
-    qs.set('visitId', visitId);
-    qs.set('mode', mode);
-
-    if (followUpEnabled) qs.set('enabled', '1');
-    if (followUpDate) qs.set('date', followUpDate);
-    if (followUpContact) qs.set('contact', followUpContact);
-    if (followUpReason.trim()) qs.set('reason', followUpReason.trim());
-
-    router.push(`/reminders?${qs.toString()}`);
-  };
-
-  const ageSexLabel = patientAge !== undefined ? `${patientAge} / ${patientSex ?? '—'}` : '—';
-
-  // -------- button-level loading + deferred action --------
-  const [pendingAction, setPendingAction] = React.useState<PrintAction>(null);
-
-  const startAction = (action: Exclude<PrintAction, null>) => {
-    // guard: avoid double click races
-    if (pendingAction) return;
-    setPendingAction(action);
-  };
-
-  const clearAction = () => setPendingAction(null);
+  const serviceRef = React.useRef<HTMLInputElement | null>(null);
+  const amountRef = React.useRef<HTMLInputElement | null>(null);
+  const addBtnRef = React.useRef<HTMLButtonElement | null>(null);
+  const editServiceRef = React.useRef<HTMLInputElement | null>(null);
+  const editAmountRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
-    if (!pendingAction) return;
+    requestAnimationFrame(() => serviceRef.current?.focus());
+  }, []);
 
-    if (pendingAction === 'RX') {
-      if (isRxFetching) return;
+  const addLineFromDraft = () => {
+    if (billingMuted) return;
 
-      if (!rxAvailable) {
-        clearAction();
-        toast.info('No prescription available for this visit.');
-        return;
-      }
+    const desc = serviceDraft.trim();
+    const amt = Math.max(0, money(amountDraft));
 
-      // navigation will replace UI immediately
-      router.push(`/visits/${visitId}/checkout/printing/prescription`);
+    if (!desc) {
+      toast.info('Enter a service name.');
+      serviceRef.current?.focus();
       return;
     }
 
-    if (pendingAction === 'XRAY') {
-      if (isXraysFetching) return;
+    setLines((prev) => [...prev, { description: desc, unitAmount: amt }]);
+    setServiceDraft('');
+    setAmountDraft('');
+    requestAnimationFrame(() => serviceRef.current?.focus());
+  };
 
-      if (!xraysAvailable) {
-        clearAction();
-        toast.info('No X-rays uploaded for this visit.');
-        return;
-      }
+  const startEdit = (idx: number) => {
+    if (billingMuted) return;
+    const row = lines[idx];
+    setEditIndex(idx);
+    setEditService(row?.description ?? '');
+    setEditAmount(String(row?.unitAmount ?? 0));
+    requestAnimationFrame(() => editServiceRef.current?.focus());
+  };
 
-      setXrayPrintOpen(true);
-      window.setTimeout(() => clearAction(), 0);
+  const commitEdit = () => {
+    if (editIndex === null) return;
+
+    const desc = editService.trim();
+    const amt = Math.max(0, money(editAmount));
+
+    if (!desc) {
+      toast.info('Service name cannot be empty.');
+      editServiceRef.current?.focus();
       return;
     }
 
-    if (pendingAction === 'BILL') {
-      if (isBillFetching) return;
+    setLines((prev) =>
+      prev.map((x, i) => (i === editIndex ? { description: desc, unitAmount: amt } : x)),
+    );
+    setEditIndex(null);
+    setEditService('');
+    setEditAmount('');
+    requestAnimationFrame(() => serviceRef.current?.focus());
+  };
 
-      if (!billAvailable) {
-        clearAction();
-        toast.info('No bill found for this visit.');
+  const cancelEdit = () => {
+    setEditIndex(null);
+    setEditService('');
+    setEditAmount('');
+    requestAnimationFrame(() => serviceRef.current?.focus());
+  };
+
+  const removeLine = (idx: number) => {
+    if (billingMuted) return;
+    setLines((prev) => prev.filter((_, i) => i !== idx));
+    requestAnimationFrame(() => serviceRef.current?.focus());
+  };
+
+  const onEnableBilling = () => {
+    setBillingEnabledForZero(true);
+    toast.info('Billing enabled for this zero-billed visit.');
+    requestAnimationFrame(() => serviceRef.current?.focus());
+  };
+
+  const onSave = async () => {
+    if (!visit) return;
+
+    const currentStatus = getStr(visit, 'status');
+
+    if (isOfflineVisit && currentStatus !== 'DONE') {
+      try {
+        await updateVisitStatus({ visitId, status: 'DONE' }).unwrap();
+        await visitQuery.refetch();
+      } catch (err: unknown) {
+        const e = err as ApiError;
+
+        const msg =
+          getStr(e.data, 'message') || getErrorMessage(err) || 'Failed to mark visit DONE.';
+
+        toast.error(msg);
         return;
       }
-
-      setBillPrintOpen(true);
-      window.setTimeout(() => clearAction(), 0);
     }
-  }, [
-    pendingAction,
-    isRxFetching,
-    isXraysFetching,
-    isBillFetching,
-    rxAvailable,
-    xraysAvailable,
-    billAvailable,
-    router,
-    visitId,
-  ]);
 
-  // ✅ correct disable rules (muted when not available)
-  const rxDisabled = !visitId || (!rxAvailable && !isRxFetching);
-  const xrayDisabled = !visitId || (!xraysAvailable && !isXraysFetching);
-  const billDisabled = !visitId || (billExists ? !billAvailable && !isBillFetching : true);
+    if (!isOfflineVisit && currentStatus !== 'DONE') {
+      toast.error('Checkout is only allowed when visit is DONE.');
+      return;
+    }
 
-  // while one is pending, lock other actions
-  const actionLocked = pendingAction !== null;
+    const payload: BillingCheckoutInput = billingMuted
+      ? {
+          items: [{ description: 'Zero billed', quantity: 1, unitAmount: 0 }],
+          discountAmount: 0,
+          taxAmount: 0,
+          allowZeroBilled: true,
+          receivedOnline,
+          receivedOffline,
+        }
+      : {
+          items: computed.safeLines.length
+            ? computed.safeLines.map((l) => ({
+                description: l.description,
+                quantity: 1,
+                unitAmount: l.unitAmount,
+              }))
+            : [
+                {
+                  description: isOfflineVisit ? 'Offline Rx' : 'Consultation',
+                  quantity: 1,
+                  unitAmount: 0,
+                },
+              ],
+          discountAmount: computed.discount,
+          taxAmount: computed.tax,
+          ...(isZeroBilled ? { allowZeroBilled: true } : {}),
+          receivedOnline,
+          receivedOffline,
+        };
+
+    try {
+      if (billExists) {
+        await updateVisitBill({ visitId, input: payload }).unwrap(); // ✅ PATCH
+        toast.success('Bill updated.');
+      } else {
+        await checkoutVisit({ visitId, input: payload }).unwrap(); // ✅ POST
+        toast.success('Checkout saved.');
+      }
+
+      router.replace(`/visits/${visitId}/checkout/printing`);
+    } catch (err: unknown) {
+      const e = err as ApiError;
+      const code = getStr(e.data, 'error');
+      const msg = getStr(e.data, 'message') || getErrorMessage(err) || 'Checkout failed.';
+
+      if (code === 'VISIT_NOT_DONE') toast.error('Visit must be DONE before checkout.');
+      else if (code === 'DUPLICATE_CHECKOUT') toast.error('This visit is already checked out.');
+      else toast.error(msg);
+    }
+  };
+
+  if (bill && !isAdmin) return <div className="p-6 text-sm text-gray-600">Redirecting…</div>;
+
+  const saveDisabled =
+    !canCheckout ||
+    checkoutState.isLoading ||
+    updateBillState.isLoading ||
+    updateVisitStatusState.isLoading;
 
   return (
     <section className="p-4 2xl:p-8">
-      <style jsx global>{`
-        @keyframes pulseRing {
-          0% {
-            transform: scale(0.75);
-            opacity: 0.9;
-          }
-          100% {
-            transform: scale(1.35);
-            opacity: 0;
-          }
-        }
-      `}</style>
-
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <div className="text-lg font-semibold text-gray-900">Documents</div>
-          <div className="text-xs text-gray-500">{statusLabel}</div>
+          <div className="text-lg font-semibold text-gray-900">
+            {bill ? 'Edit Bill' : 'Billing'}
+          </div>
+          <div className="text-xs text-gray-500">
+            Tag: {getStr(visit, 'tag') ?? '—'} · Zero billed: {isZeroBilled ? 'Yes' : 'No'} ·
+            Status: {getStr(visit, 'status') ?? '—'}
+            {isOfflineVisit ? ' · Offline: Yes' : ''}
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          {isAdmin ? (
-            <>
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-xl cursor-pointer"
-                onClick={() => router.back()}
-              >
-                Back
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                className="rounded-xl cursor-pointer"
-                onClick={() => router.push(`/visits/${visitId}/checkout/billing`)}
-              >
-                Billing
-              </Button>
-            </>
-          ) : null}
+        <div className="flex items-center justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            className="rounded-xl cursor-pointer"
+            onClick={() => router.back()}
+          >
+            Back
+          </Button>
 
           <Button
             type="button"
             variant="default"
             className="rounded-xl bg-black text-white hover:bg-black/90 cursor-pointer"
-            onClick={onDone}
-            disabled={doneSuccess || actionLocked}
+            onClick={() => void onSave()}
+            disabled={saveDisabled}
           >
-            {doneSuccess ? (
-              <span className="inline-flex items-center gap-2">
-                <span className="relative inline-flex h-5 w-5 items-center justify-center">
-                  <span className="absolute inset-0 rounded-full ring-2 ring-emerald-300 animate-[pulseRing_800ms_ease-out]" />
-                  <IconCheck className="h-5 w-5 text-emerald-300" />
-                </span>
-                Done
-              </span>
-            ) : (
-              'Done'
-            )}
+            {checkoutState.isLoading ||
+            updateBillState.isLoading ||
+            updateVisitStatusState.isLoading
+              ? 'Saving…'
+              : bill
+                ? 'Save changes'
+                : 'Save'}
           </Button>
         </div>
       </div>
 
+      {isZeroBilled ? (
+        <Card className="mb-4 rounded-2xl border bg-white p-4">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="text-sm text-gray-700">
+              <div className="font-semibold text-gray-900">Zero-billed (Z) visit</div>
+              <div className="mt-1 text-xs text-gray-600">
+                Billing is <span className="font-semibold">disabled by default</span>. Click “Save”
+                to continue with a ₹0 bill. If you want to add charges, click “Enable billing”.
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                className="rounded-xl"
+                onClick={onEnableBilling}
+                disabled={billingEnabledForZero}
+              >
+                {billingEnabledForZero ? 'Billing enabled' : 'Enable billing'}
+              </Button>
+            </div>
+          </div>
+        </Card>
+      ) : null}
+
       <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-3">
         <Card className="rounded-2xl border bg-white p-4">
           <div className="text-xs text-gray-500">Patient</div>
-          <div className="mt-1 text-base font-semibold text-gray-900">
-            {anyTopLoading && !patientName ? 'Loading…' : (patientName ?? '—')}
-          </div>
-          <div className="mt-1 text-sm text-gray-600">
-            {anyTopLoading && !patientPhone ? '—' : (patientPhone ?? '—')}
-          </div>
+          <div className="mt-1 text-base font-semibold text-gray-900">{patientName ?? '—'}</div>
+          <div className="mt-1 text-sm text-gray-600">{patientPhone ?? '—'}</div>
         </Card>
 
         <Card className="rounded-2xl border bg-white p-4">
-          <div className="text-xs text-gray-500">Visit summary</div>
-
-          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
-            <div className="text-gray-500">Visit date</div>
-            <div className="text-right font-medium text-gray-900">
-              {visitDateLabel?.replace('Visit:', '').trim() ||
-                visitCreatedDateLabel?.replace('Visit:', '').trim() ||
-                '—'}
-            </div>
-
-            <div className="text-gray-500">SD ID</div>
-            <div className="text-right font-medium text-gray-900">{patientSdId ?? '—'}</div>
-
-            <div className="text-gray-500">OPD No</div>
-            <div className="text-right font-medium text-gray-900">{opdNo ?? '—'}</div>
-
-            <div className="text-gray-500">Age / Sex</div>
-            <div className="text-right font-medium text-gray-900">
-              {patientAge !== undefined ? `${patientAge} / ${patientSex ?? '—'}` : '—'}
-            </div>
-
-            <div className="text-gray-500">Checked out</div>
-            <div className="text-right font-medium text-gray-900">{checkedOut ? 'Yes' : 'No'}</div>
-          </div>
+          <div className="text-xs text-gray-500">Doctor</div>
+          <div className="mt-1 text-base font-semibold text-gray-900">{doctorLabel}</div>
+          <div className="mt-1 text-sm text-gray-600">{visitDateLabel}</div>
         </Card>
 
         <Card className="rounded-2xl border bg-white p-4">
-          <div className="text-xs text-gray-500">Print readiness</div>
-          <div className="mt-2 space-y-1 text-xs">
-            <div className="flex items-center justify-between">
-              <span className="text-gray-700">Prescription</span>
-              <span
-                className={
-                  rxAvailable
-                    ? 'text-emerald-700 font-semibold'
-                    : isRxFetching
-                      ? 'text-gray-700'
-                      : 'text-gray-400'
-                }
-              >
-                {rxAvailable ? 'Ready' : isRxFetching ? 'Loading…' : 'Not Available'}
+          <div className="text-xs text-gray-500">Bill status</div>
+          <div className="mt-2">
+            {bill ? (
+              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700">
+                Checked out
               </span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <span className="text-gray-700">X-rays</span>
-              <span
-                className={
-                  xraysAvailable
-                    ? 'text-emerald-700 font-semibold'
-                    : isXraysFetching
-                      ? 'text-gray-700'
-                      : 'text-gray-400'
-                }
-              >
-                {xraysAvailable ? 'Ready' : isXraysFetching ? 'Loading…' : 'Not Available'}
+            ) : billNotFound ? (
+              <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
+                Not checked out
               </span>
-            </div>
-
-            <div className="flex items-center justify-between">
-              <span className="text-gray-700">Bill</span>
-              <span
-                className={
-                  billAvailable
-                    ? 'text-emerald-700 font-semibold'
-                    : billExists && isBillFetching
-                      ? 'text-gray-700'
-                      : 'text-gray-400'
-                }
-              >
-                {billAvailable
-                  ? 'Ready'
-                  : billExists && isBillFetching
-                    ? 'Loading…'
-                    : 'Not Available'}
+            ) : billQuery.isLoading ? (
+              <span className="rounded-full border px-2 py-1 text-xs font-semibold text-gray-700">
+                Loading…
               </span>
-            </div>
+            ) : null}
           </div>
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <Card className="lg:col-span-7 rounded-2xl border bg-white p-6">
-          <div>
-            <div className="text-lg font-semibold text-gray-900">Print</div>
-            <div className="text-xs text-gray-500">Documents are ready to print.</div>
-          </div>
-
-          <div className="mt-6 flex flex-col items-center justify-center gap-3 py-8">
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
-              onClick={() => startAction('RX')}
-              disabled={rxDisabled || actionLocked}
-              title={
-                rxDisabled ? (isRxFetching ? 'Preparing…' : 'No prescription available') : 'Print'
-              }
-            >
-              {pendingAction === 'RX' ? <LoadingDots label="Printing" /> : 'Print Prescription'}
-            </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
-              onClick={() => startAction('XRAY')}
-              disabled={xrayDisabled || actionLocked}
-              title={
-                xrayDisabled ? (isXraysFetching ? 'Preparing…' : 'No X-rays uploaded') : 'Print'
-              }
-            >
-              {pendingAction === 'XRAY' ? <LoadingDots label="Printing" /> : 'Print X-rays'}
-            </Button>
-
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
-              onClick={() => startAction('BILL')}
-              disabled={billDisabled || actionLocked}
-              title={
-                billDisabled
-                  ? billExists && isBillFetching
-                    ? 'Preparing…'
-                    : 'No bill found'
-                  : 'Print'
-              }
-            >
-              {pendingAction === 'BILL' ? <LoadingDots label="Printing" /> : 'Print Bill'}
-            </Button>
-          </div>
-        </Card>
-
-        <Card className="lg:col-span-5 rounded-2xl border bg-white p-6">
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <div className="text-lg font-semibold text-gray-900">Follow-up</div>
-              <div className="text-xs text-gray-500">Add follow-up for this visit.</div>
+      <Card className="rounded-2xl border bg-white p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div className="w-full">
+            <div className="text-xs text-gray-500">Total</div>
+            <div className="mt-1 text-3xl font-extrabold text-gray-900">
+              {computed.total.toFixed(2)}
+            </div>
+            <div className="mt-1 text-xs text-gray-500">
+              Subtotal {computed.subtotal.toFixed(2)} · Discount {computed.discount.toFixed(2)} ·
+              Tax {computed.tax.toFixed(2)}
             </div>
 
-            <Button
-              type="button"
-              variant="outline"
-              className="rounded-xl cursor-pointer"
-              onClick={() => setFollowUpEnabled((v) => !v)}
-              disabled={actionLocked}
-            >
-              {followUpEnabled ? 'Disable' : 'Enable'}
-            </Button>
+            {/* ✅ NEW: payment received flags */}
+            <div className="mt-4 flex flex-wrap items-center gap-4">
+              <label className="flex items-center gap-2 text-sm text-gray-800">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 cursor-pointer"
+                  checked={receivedOnline}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setReceivedOnline(next);
+                    if (next) setReceivedOffline(false);
+                  }}
+                />
+                Received online
+              </label>
+
+              <label className="flex items-center gap-2 text-sm text-gray-800">
+                <input
+                  type="checkbox"
+                  className="h-4 w-4 cursor-pointer"
+                  checked={receivedOffline}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setReceivedOffline(next);
+                    if (next) setReceivedOnline(false);
+                  }}
+                />
+                Received offline
+              </label>
+
+              {receivedOnline && receivedOffline ? (
+                <span className="text-xs text-red-600">Choose only one</span>
+              ) : null}
+            </div>
           </div>
 
-          <div className="mt-4 space-y-3">
-            {followUpEnabled ? (
-              <div className="rounded-2xl border bg-gray-50 p-4">
-                <div className="space-y-3">
-                  <div>
-                    <div className="text-xs font-semibold text-gray-700">Follow-up date</div>
+          <div className="flex items-center gap-2 w-full justify-end">
+            <div className="rounded-xl border bg-white px-3 py-2">
+              <div className="text-[11px] text-gray-500">Discount</div>
+              <Input
+                className="mt-1 h-9 rounded-xl"
+                inputMode="decimal"
+                value={String(discountAmount)}
+                onChange={(e) => setDiscountAmount(Number(e.target.value || 0))}
+                disabled={billingMuted}
+              />
+            </div>
 
-                    <Popover open={followUpCalendarOpen} onOpenChange={setFollowUpCalendarOpen}>
-                      <PopoverTrigger asChild>
+            <div className="rounded-xl border bg-white px-3 py-2">
+              <div className="text-[11px] text-gray-500">Tax</div>
+              <Input
+                className="mt-1 h-9 rounded-xl"
+                inputMode="decimal"
+                value={String(taxAmount)}
+                onChange={(e) => setTaxAmount(Number(e.target.value || 0))}
+                disabled={billingMuted}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div
+          className={[
+            'mt-2 rounded-2xl border bg-gray-50 p-4',
+            billingMuted ? 'opacity-50 pointer-events-none select-none' : '',
+          ].join(' ')}
+        >
+          <div className="flex gap-3 items-end">
+            <div className="w-full">
+              <Label className="text-xs text-gray-600">Service</Label>
+              <Input
+                ref={serviceRef}
+                className="mt-1 h-11 rounded-xl bg-white"
+                value={serviceDraft}
+                onChange={(e) => setServiceDraft(e.target.value)}
+                placeholder="e.g. Consultation / Filling / Extraction"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    amountRef.current?.focus();
+                  }
+                }}
+              />
+            </div>
+
+            <div className="w-full">
+              <Label className="text-xs text-gray-600">Amount</Label>
+              <Input
+                ref={amountRef}
+                className="mt-1 h-11 rounded-xl bg-white"
+                inputMode="decimal"
+                value={amountDraft}
+                onChange={(e) => setAmountDraft(e.target.value)}
+                placeholder="0"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addBtnRef.current?.focus();
+                  }
+                }}
+              />
+            </div>
+
+            <div className="flex">
+              <Button
+                ref={addBtnRef}
+                type="button"
+                variant="default"
+                className="w-11 rounded-xl bg-black p-0 text-white hover:bg-black/90 cursor-pointer"
+                onClick={addLineFromDraft}
+                title="Add"
+              >
+                <IconPlus className="h-5 w-5" />
+              </Button>
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-2 space-y-2">
+          {lines.length === 0 ? (
+            <div className="rounded-2xl border border-dashed bg-gray-50 p-6 text-sm text-gray-600">
+              No services added yet. Add a service and amount above.
+            </div>
+          ) : (
+            lines.map((l, idx) => {
+              const isEditing = editIndex === idx;
+
+              return (
+                <div key={`${idx}-${l.description}`} className="rounded-2xl border bg-white p-4">
+                  {isEditing ? (
+                    <div className="grid grid-cols-13 items-end gap-3">
+                      <div className="col-span-12 md:col-span-7">
+                        <Label className="text-xs text-gray-600">Service</Label>
+                        <Input
+                          ref={editServiceRef}
+                          className="mt-1 h-10 rounded-xl"
+                          value={editService}
+                          onChange={(e) => setEditService(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              editAmountRef.current?.focus();
+                            }
+                            if (e.key === 'Escape') cancelEdit();
+                          }}
+                          disabled={billingMuted}
+                        />
+                      </div>
+
+                      <div className="col-span-10 md:col-span-4">
+                        <Label className="text-xs text-gray-600">Amount</Label>
+                        <Input
+                          ref={editAmountRef}
+                          className="mt-1 h-10 rounded-xl"
+                          inputMode="decimal"
+                          value={editAmount}
+                          onChange={(e) => setEditAmount(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              commitEdit();
+                            }
+                            if (e.key === 'Escape') cancelEdit();
+                          }}
+                          disabled={billingMuted}
+                        />
+                      </div>
+
+                      <div className="col-span-2 md:col-span-1 flex justify-start gap-2">
+                        <Button
+                          type="button"
+                          variant="default"
+                          className="h-10 rounded-xl bg-black text-white hover:bg-black/90"
+                          onClick={commitEdit}
+                          disabled={billingMuted}
+                        >
+                          Save
+                        </Button>
                         <Button
                           type="button"
                           variant="outline"
-                          className="mt-1 h-10 w-full justify-start rounded-xl bg-white px-3 text-sm font-normal cursor-pointer"
-                          disabled={actionLocked}
+                          className="h-10 rounded-xl"
+                          onClick={cancelEdit}
                         >
-                          {followUpDate ? followUpDate : 'Select a date'}
+                          Cancel
                         </Button>
-                      </PopoverTrigger>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-semibold text-gray-900">
+                          {l.description || '—'}
+                        </div>
+                        <div className="text-xs text-gray-500">Amount</div>
+                      </div>
 
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={followUpDateObj}
-                          onSelect={(d) => {
-                            if (!d) return;
-                            setFollowUpDate(toLocalISODate(d));
-                            setFollowUpCalendarOpen(false);
-                          }}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
+                      <div className="flex items-center gap-3">
+                        <div className="tabular-nums text-base font-bold text-gray-900">
+                          {money(l.unitAmount).toFixed(2)}
+                        </div>
 
-                  <div>
-                    <div className="text-xs font-semibold text-gray-700">Contact method</div>
-                    <select
-                      className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm cursor-pointer"
-                      value={followUpContact}
-                      onChange={(e) => setFollowUpContact(parseFollowUpContact(e.target.value))}
-                      disabled={actionLocked}
-                    >
-                      <option value="CALL" className="cursor-pointer">
-                        CALL
-                      </option>
-                      <option value="SMS" className="cursor-pointer">
-                        SMS
-                      </option>
-                      <option value="WHATSAPP" className="cursor-pointer">
-                        WHATSAPP
-                      </option>
-                      <option value="OTHER" className="cursor-pointer">
-                        OTHER
-                      </option>
-                    </select>
-                  </div>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+                            onClick={() => startEdit(idx)}
+                            disabled={billingMuted}
+                            title="Edit"
+                          >
+                            <IconPen className="h-4 w-4" />
+                          </button>
 
-                  <div>
-                    <div className="text-xs font-semibold text-gray-700">Reason / notes</div>
-                    <Textarea
-                      className="mt-1 min-h-22.5 rounded-xl bg-white"
-                      placeholder="e.g., stitch removal / review pain / follow-up check"
-                      value={followUpReason}
-                      onChange={(e) => setFollowUpReason(e.target.value)}
-                      disabled={actionLocked}
-                    />
-                  </div>
-
-                  <div className="flex flex-col gap-2">
-                    <Button
-                      type="button"
-                      className="w-full rounded-2xl bg-black py-5 text-white hover:bg-black/90 cursor-pointer"
-                      disabled={actionLocked}
-                      onClick={() => {
-                        if (!/^\d{4}-\d{2}-\d{2}$/.test(followUpDate)) {
-                          toast.error('Follow-up date must be YYYY-MM-DD.');
-                          return;
-                        }
-                        goToFollowups('add');
-                      }}
-                    >
-                      Add Follow-up
-                    </Button>
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full rounded-2xl py-5 cursor-pointer"
-                      disabled={actionLocked}
-                      onClick={() => goToFollowups('list')}
-                    >
-                      View Follow-ups
-                    </Button>
-                  </div>
+                          <button
+                            type="button"
+                            className="inline-flex h-9 w-9 items-center justify-center rounded-xl border bg-white text-gray-700 hover:bg-gray-50 disabled:opacity-50 cursor-pointer"
+                            onClick={() => removeLine(idx)}
+                            disabled={billingMuted}
+                            title="Delete"
+                          >
+                            <IconX className="h-4 w-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-dashed p-4 text-sm text-gray-600">
-                Follow-up is disabled.
-              </div>
-            )}
-          </div>
-        </Card>
-      </div>
+              );
+            })
+          )}
+        </div>
 
-      {/* Only mount print sheets when user prints (prevents extra print dialogs) */}
-      {xrayPrintOpen && (
-        <XrayPrintSheet
-          open={xrayPrintOpen}
-          xrayIds={xrayIds}
-          onAfterPrint={() => setXrayPrintOpen(false)}
-        />
-      )}
-
-      {billPrintOpen && (
-        <BillPrintSheet
-          open={billPrintOpen}
-          billing={billingForPrint}
-          patientName={patientName}
-          patientPhone={patientPhone}
-          ageSexLabel={ageSexLabel}
-          opdNo={opdNo}
-          sdId={patientSdId}
-          visitDateLabel={visitDateLabel}
-          onAfterPrint={() => setBillPrintOpen(false)}
-        />
-      )}
+        <div className="mt-4 rounded-2xl border border-dashed bg-gray-50 p-4 text-sm text-gray-600">
+          Tip: Enter → Amount, Enter → Add, Enter → Next service.
+        </div>
+      </Card>
     </section>
   );
 }

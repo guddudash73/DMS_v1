@@ -28,6 +28,8 @@ type PatientSex = 'M' | 'F' | 'O' | 'U';
 type FollowUpContact = 'CALL' | 'SMS' | 'WHATSAPP' | 'OTHER';
 type UnknownRecord = Record<string, unknown>;
 
+type PrintAction = 'RX' | 'XRAY' | 'BILL' | null;
+
 function IconCheck(props: React.SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
@@ -42,16 +44,19 @@ function IconCheck(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-function LoadingOverlay({ show, label }: { show: boolean; label?: string }) {
-  if (!show) return null;
+function LoadingDots({ label }: { label: string }) {
+  const [dots, setDots] = React.useState('');
+  React.useEffect(() => {
+    const id = window.setInterval(() => {
+      setDots((d) => (d.length >= 3 ? '' : `${d}.`));
+    }, 300);
+    return () => window.clearInterval(id);
+  }, []);
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white/70 backdrop-blur-sm">
-      <div className="flex flex-col items-center gap-3 rounded-2xl border bg-white px-6 py-5 shadow-sm">
-        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900" />
-        <div className="text-sm font-medium text-gray-900">{label ?? 'Loading…'}</div>
-        <div className="text-xs text-gray-500">Please wait</div>
-      </div>
-    </div>
+    <span className="inline-flex items-center">
+      {label}
+      <span className="w-4 text-left">{dots}</span>
+    </span>
   );
 }
 
@@ -158,8 +163,6 @@ function isoToDate(iso: string): Date | null {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
-type PrintAction = 'RX' | 'XRAY' | 'BILL' | null;
-
 export default function VisitCheckoutPrintingPage() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -176,7 +179,6 @@ export default function VisitCheckoutPrintingPage() {
   const patientId = getStrFromRecord(visitRec, 'patientId');
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
-  // We still fetch these (existing behavior), but we won't mount print sheets unless user opens them.
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: !visitId });
   const rx = rxQuery.data?.rx ?? null;
 
@@ -190,8 +192,8 @@ export default function VisitCheckoutPrintingPage() {
 
   const shouldFetchBill = !!visitId && !!visit && billExists;
   const billQuery = useGetVisitBillQuery({ visitId }, { skip: !shouldFetchBill });
-  const billData: unknown = billQuery.data ?? null;
 
+  const billData: unknown = billQuery.data ?? null;
   const billingForPrint: Billing | null =
     isRecord(billData) && getStrFromRecord(billData, 'billNo') ? (billData as Billing) : null;
 
@@ -292,45 +294,43 @@ export default function VisitCheckoutPrintingPage() {
 
   const ageSexLabel = patientAge !== undefined ? `${patientAge} / ${patientSex ?? '—'}` : '—';
 
-  // -------- Loading overlay + deferred action --------
+  // -------- button-level loading + deferred action --------
   const [pendingAction, setPendingAction] = React.useState<PrintAction>(null);
-  const [overlayLabel, setOverlayLabel] = React.useState<string>('Loading…');
-
-  const overlayOpen = pendingAction !== null;
 
   const startAction = (action: Exclude<PrintAction, null>) => {
+    // guard: avoid double click races
+    if (pendingAction) return;
     setPendingAction(action);
-    if (action === 'RX') setOverlayLabel('Preparing prescription…');
-    if (action === 'XRAY') setOverlayLabel('Preparing X-rays…');
-    if (action === 'BILL') setOverlayLabel('Preparing bill…');
   };
 
-  const clearAction = () => {
-    setPendingAction(null);
-    setOverlayLabel('Loading…');
-  };
+  const clearAction = () => setPendingAction(null);
 
   React.useEffect(() => {
     if (!pendingAction) return;
 
     if (pendingAction === 'RX') {
       if (isRxFetching) return;
+
       if (!rxAvailable) {
         clearAction();
         toast.info('No prescription available for this visit.');
         return;
       }
+
+      // navigation will replace UI immediately
       router.push(`/visits/${visitId}/checkout/printing/prescription`);
       return;
     }
 
     if (pendingAction === 'XRAY') {
       if (isXraysFetching) return;
+
       if (!xraysAvailable) {
         clearAction();
         toast.info('No X-rays uploaded for this visit.');
         return;
       }
+
       setXrayPrintOpen(true);
       window.setTimeout(() => clearAction(), 0);
       return;
@@ -338,11 +338,13 @@ export default function VisitCheckoutPrintingPage() {
 
     if (pendingAction === 'BILL') {
       if (isBillFetching) return;
+
       if (!billAvailable) {
         clearAction();
         toast.info('No bill found for this visit.');
         return;
       }
+
       setBillPrintOpen(true);
       window.setTimeout(() => clearAction(), 0);
     }
@@ -358,15 +360,16 @@ export default function VisitCheckoutPrintingPage() {
     visitId,
   ]);
 
-  // ✅ Correctly disable buttons when "Not Available"
+  // ✅ correct disable rules (muted when not available)
   const rxDisabled = !visitId || (!rxAvailable && !isRxFetching);
-  const xrayDisabled = !visitId || (!xraysAvailable && !isXraysFetching); // <-- FIXED
+  const xrayDisabled = !visitId || (!xraysAvailable && !isXraysFetching);
   const billDisabled = !visitId || (billExists ? !billAvailable && !isBillFetching : true);
+
+  // while one is pending, lock other actions
+  const actionLocked = pendingAction !== null;
 
   return (
     <section className="p-4 2xl:p-8">
-      <LoadingOverlay show={overlayOpen} label={overlayLabel} />
-
       <style jsx global>{`
         @keyframes pulseRing {
           0% {
@@ -413,7 +416,7 @@ export default function VisitCheckoutPrintingPage() {
             variant="default"
             className="rounded-xl bg-black text-white hover:bg-black/90 cursor-pointer"
             onClick={onDone}
-            disabled={doneSuccess}
+            disabled={doneSuccess || actionLocked}
           >
             {doneSuccess ? (
               <span className="inline-flex items-center gap-2">
@@ -459,7 +462,9 @@ export default function VisitCheckoutPrintingPage() {
             <div className="text-right font-medium text-gray-900">{opdNo ?? '—'}</div>
 
             <div className="text-gray-500">Age / Sex</div>
-            <div className="text-right font-medium text-gray-900">{ageSexLabel}</div>
+            <div className="text-right font-medium text-gray-900">
+              {patientAge !== undefined ? `${patientAge} / ${patientSex ?? '—'}` : '—'}
+            </div>
 
             <div className="text-gray-500">Checked out</div>
             <div className="text-right font-medium text-gray-900">{checkedOut ? 'Yes' : 'No'}</div>
@@ -534,16 +539,12 @@ export default function VisitCheckoutPrintingPage() {
               variant="outline"
               className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
               onClick={() => startAction('RX')}
-              disabled={rxDisabled}
+              disabled={rxDisabled || actionLocked}
               title={
-                rxDisabled
-                  ? isRxFetching
-                    ? 'Preparing…'
-                    : 'No prescription available'
-                  : 'Open print preview'
+                rxDisabled ? (isRxFetching ? 'Preparing…' : 'No prescription available') : 'Print'
               }
             >
-              {pendingAction === 'RX' || isRxFetching ? 'Preparing…' : 'Print Prescription'}
+              {pendingAction === 'RX' ? <LoadingDots label="Printing" /> : 'Print Prescription'}
             </Button>
 
             <Button
@@ -551,16 +552,12 @@ export default function VisitCheckoutPrintingPage() {
               variant="outline"
               className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
               onClick={() => startAction('XRAY')}
-              disabled={xrayDisabled}
+              disabled={xrayDisabled || actionLocked}
               title={
-                xrayDisabled
-                  ? isXraysFetching
-                    ? 'Preparing…'
-                    : 'No X-rays uploaded'
-                  : 'Print X-rays'
+                xrayDisabled ? (isXraysFetching ? 'Preparing…' : 'No X-rays uploaded') : 'Print'
               }
             >
-              {pendingAction === 'XRAY' || isXraysFetching ? 'Preparing…' : 'Print X-rays'}
+              {pendingAction === 'XRAY' ? <LoadingDots label="Printing" /> : 'Print X-rays'}
             </Button>
 
             <Button
@@ -568,16 +565,16 @@ export default function VisitCheckoutPrintingPage() {
               variant="outline"
               className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
               onClick={() => startAction('BILL')}
-              disabled={billDisabled}
+              disabled={billDisabled || actionLocked}
               title={
                 billDisabled
                   ? billExists && isBillFetching
                     ? 'Preparing…'
                     : 'No bill found'
-                  : 'Print bill'
+                  : 'Print'
               }
             >
-              {pendingAction === 'BILL' || isBillFetching ? 'Preparing…' : 'Print Bill'}
+              {pendingAction === 'BILL' ? <LoadingDots label="Printing" /> : 'Print Bill'}
             </Button>
           </div>
         </Card>
@@ -594,6 +591,7 @@ export default function VisitCheckoutPrintingPage() {
               variant="outline"
               className="rounded-xl cursor-pointer"
               onClick={() => setFollowUpEnabled((v) => !v)}
+              disabled={actionLocked}
             >
               {followUpEnabled ? 'Disable' : 'Enable'}
             </Button>
@@ -612,6 +610,7 @@ export default function VisitCheckoutPrintingPage() {
                           type="button"
                           variant="outline"
                           className="mt-1 h-10 w-full justify-start rounded-xl bg-white px-3 text-sm font-normal cursor-pointer"
+                          disabled={actionLocked}
                         >
                           {followUpDate ? followUpDate : 'Select a date'}
                         </Button>
@@ -638,6 +637,7 @@ export default function VisitCheckoutPrintingPage() {
                       className="mt-1 h-10 w-full rounded-xl border border-gray-200 bg-white px-3 text-sm cursor-pointer"
                       value={followUpContact}
                       onChange={(e) => setFollowUpContact(parseFollowUpContact(e.target.value))}
+                      disabled={actionLocked}
                     >
                       <option value="CALL" className="cursor-pointer">
                         CALL
@@ -661,6 +661,7 @@ export default function VisitCheckoutPrintingPage() {
                       placeholder="e.g., stitch removal / review pain / follow-up check"
                       value={followUpReason}
                       onChange={(e) => setFollowUpReason(e.target.value)}
+                      disabled={actionLocked}
                     />
                   </div>
 
@@ -668,6 +669,7 @@ export default function VisitCheckoutPrintingPage() {
                     <Button
                       type="button"
                       className="w-full rounded-2xl bg-black py-5 text-white hover:bg-black/90 cursor-pointer"
+                      disabled={actionLocked}
                       onClick={() => {
                         if (!/^\d{4}-\d{2}-\d{2}$/.test(followUpDate)) {
                           toast.error('Follow-up date must be YYYY-MM-DD.');
@@ -683,6 +685,7 @@ export default function VisitCheckoutPrintingPage() {
                       type="button"
                       variant="outline"
                       className="w-full rounded-2xl py-5 cursor-pointer"
+                      disabled={actionLocked}
                       onClick={() => goToFollowups('list')}
                     >
                       View Follow-ups
@@ -691,7 +694,7 @@ export default function VisitCheckoutPrintingPage() {
                 </div>
               </div>
             ) : (
-              <div className="rounded-2xl border border-dashed p-4 text-sm texttext-gray-600">
+              <div className="rounded-2xl border border-dashed p-4 text-sm text-gray-600">
                 Follow-up is disabled.
               </div>
             )}
@@ -699,9 +702,7 @@ export default function VisitCheckoutPrintingPage() {
         </Card>
       </div>
 
-      {/* ✅ IMPORTANT FIX:
-          Do NOT mount print sheets unless user is printing.
-          This prevents "extra window.print()" / extra print dialogs. */}
+      {/* Only mount print sheets when user prints (prevents extra print dialogs) */}
       {xrayPrintOpen && (
         <XrayPrintSheet
           open={xrayPrintOpen}
