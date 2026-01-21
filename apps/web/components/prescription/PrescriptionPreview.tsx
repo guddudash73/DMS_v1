@@ -607,7 +607,17 @@ export function PrescriptionPreview({
   const isFirstPage = page === 1;
 
   const measureTemplate = shouldMeasure ? (
-    <div className="pointer-events-none absolute left-[-99999px] top-0 opacity-0">
+    <div
+      aria-hidden="true"
+      className="pointer-events-none fixed left-0 top-0"
+      style={{
+        width: 0,
+        height: 0,
+        overflow: 'hidden',
+        opacity: 0,
+      }}
+    >
+      {/* keep your existing measurement DOM exactly the same inside */}
       <div style={{ width: BASE_W }}>
         <div ref={measureContainerRef} className="w-full">
           <div className="h-[1080px] w-full overflow-hidden border bg-white">
