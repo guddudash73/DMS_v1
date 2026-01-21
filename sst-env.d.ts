@@ -5,6 +5,39 @@
 
 declare module "sst" {
   export interface Resource {
+    "AppRouter": {
+      "type": "sst.aws.Router"
+      "url": string
+    }
+    "ConnectionsTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
+    "JWT_ACCESS_SECRET": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "JWT_REFRESH_SECRET": {
+      "type": "sst.sst.Secret"
+      "value": string
+    }
+    "MainTable": {
+      "name": string
+      "type": "sst.aws.Dynamo"
+    }
+    "RealtimeWs": {
+      "managementEndpoint": string
+      "type": "sst.aws.ApiGatewayWebSocket"
+      "url": string
+    }
+    "Web": {
+      "type": "sst.aws.Nextjs"
+      "url": string
+    }
+    "XrayBucket": {
+      "name": string
+      "type": "sst.aws.Bucket"
+    }
   }
 }
 /// <reference path="sst-env.d.ts" />
