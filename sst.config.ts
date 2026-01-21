@@ -16,13 +16,7 @@ export default $config({
     // 2) storage + router + api + web
     await import('./infra/storage');
 
-    const router = new sst.aws.Router('AppRouter', {
-      domain: {
-        name: process.env.APP_DOMAIN!, // trail.dcm.tcplgroups.com
-        cert: process.env.APP_CERT_ARN!, // ACM cert ARN (must be us-east-1)
-        dns: false, // since Route53 is not hosting DNS
-      },
-    });
+    const router = new sst.aws.Router('AppRouter');
 
     const { createApi } = await import('./infra/api');
     createApi(router);
