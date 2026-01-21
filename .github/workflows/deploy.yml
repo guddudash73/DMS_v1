@@ -25,7 +25,7 @@ jobs:
       NEXT_PUBLIC_WS_BASE_URL: ${{ secrets.NEXT_PUBLIC_WS_BASE_URL }}
 
       # Domain / cert (make sure cert covers trial.dcm.tcplgroups.com)
-      APP_DOMAIN: trial.dcm.tcplgroups.com
+      APP_DOMAIN: trial.tcplgroups.com
       APP_CERT_ARN: ${{ secrets.APP_CERT_ARN }}
 
       NODE_OPTIONS: --max-old-space-size=8192

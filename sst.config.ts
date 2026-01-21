@@ -18,7 +18,7 @@ export default $config({
 
     const router = new sst.aws.Router('AppRouter', {
       domain: {
-        name: process.env.APP_DOMAIN!, // trail.dcm.tcplgroups.com
+        name: process.env.APP_DOMAIN!, // trial.tcplgroups.com
         cert: process.env.APP_CERT_ARN!, // ACM cert ARN (must be us-east-1)
         dns: false, // since Route53 is not hosting DNS
       },
