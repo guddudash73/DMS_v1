@@ -75,6 +75,22 @@ type DoctorLite = {
 
 type UnknownRecord = Record<string, unknown>;
 
+function LoadingDots({ label }: { label: string }) {
+  const [dots, setDots] = React.useState('');
+  React.useEffect(() => {
+    const id = window.setInterval(() => {
+      setDots((d) => (d.length >= 3 ? '' : `${d}.`));
+    }, 300);
+    return () => window.clearInterval(id);
+  }, []);
+  return (
+    <span className="inline-flex items-center">
+      {label}
+      <span className="w-4 text-left">{dots}</span>
+    </span>
+  );
+}
+
 function isRecord(v: unknown): v is UnknownRecord {
   return typeof v === 'object' && v !== null;
 }
@@ -188,6 +204,8 @@ function anchorIdFromVisit(v: Visit): string | undefined {
     undefined
   );
 }
+
+type NavAction = 'PRIMARY' | 'EDIT_BILL' | null;
 
 export default function ClinicVisitInfoPageClient() {
   const params = useParams<{ visitId: string }>();
@@ -422,6 +440,9 @@ export default function ClinicVisitInfoPageClient() {
   const [updateVisitStatus, updateVisitStatusState] = useUpdateVisitStatusMutation();
   const [offlineCheckoutBusy, setOfflineCheckoutBusy] = React.useState(false);
 
+  // ✅ NEW: button-level loading for primary + edit bill
+  const [navAction, setNavAction] = React.useState<NavAction>(null);
+
   const doOfflineCheckout = async () => {
     if (!visitId || !visit) return;
 
@@ -436,6 +457,8 @@ export default function ClinicVisitInfoPageClient() {
       router.push(`/visits/${visitId}/checkout/billing`);
     } catch (err: unknown) {
       toast.error(getErrorMessage(err) ?? 'Failed to mark visit DONE.');
+      // important: allow user to click again after error
+      setNavAction(null);
     } finally {
       setOfflineCheckoutBusy(false);
     }
@@ -445,7 +468,10 @@ export default function ClinicVisitInfoPageClient() {
     !visit ||
     offlineCheckoutBusy ||
     updateVisitStatusState.isLoading ||
-    (!isCheckedOut && !visitDone && !isOfflineVisit);
+    (!isCheckedOut && !visitDone && !isOfflineVisit) ||
+    navAction !== null;
+
+  const editBillDisabled = navAction !== null;
 
   // ✅ Build chain only when toggle is ON; otherwise keep it light (current visit only)
   const rxChain = React.useMemo(() => {
@@ -529,6 +555,18 @@ export default function ClinicVisitInfoPageClient() {
 
   const historyLoading = showHistory && (visitsQuery.isLoading || visitsQuery.isFetching);
 
+  const primaryButtonLabelNode = React.useMemo(() => {
+    // Offline flow: keep explicit "Preparing..." with dots
+    if (offlineCheckoutBusy || updateVisitStatusState.isLoading) {
+      return <LoadingDots label="Preparing" />;
+    }
+    // Normal route navigation
+    if (navAction === 'PRIMARY') {
+      return <LoadingDots label="Opening" />;
+    }
+    return primaryLabel;
+  }, [offlineCheckoutBusy, updateVisitStatusState.isLoading, navAction, primaryLabel]);
+
   return (
     <section className="p-4 2xl:p-8">
       <div className="mb-4 flex items-center justify-between gap-3">
@@ -543,9 +581,14 @@ export default function ClinicVisitInfoPageClient() {
               type="button"
               variant="outline"
               className="rounded-xl cursor-pointer"
-              onClick={() => router.push(`/visits/${visitId}/checkout/billing`)}
+              onClick={() => {
+                if (navAction) return;
+                setNavAction('EDIT_BILL');
+                router.push(`/visits/${visitId}/checkout/billing`);
+              }}
+              disabled={editBillDisabled}
             >
-              Edit bill
+              {navAction === 'EDIT_BILL' ? <LoadingDots label="Opening" /> : 'Edit bill'}
             </Button>
           ) : null}
 
@@ -566,18 +609,23 @@ export default function ClinicVisitInfoPageClient() {
                       : 'Checkout'
             }
             onClick={() => {
+              if (navAction) return;
+              setNavAction('PRIMARY');
+
               if (isCheckedOut) {
                 router.push(primaryHref);
                 return;
               }
+
               if (isOfflineVisit) {
                 void doOfflineCheckout();
                 return;
               }
+
               router.push(primaryHref);
             }}
           >
-            {offlineCheckoutBusy ? 'Preparing…' : primaryLabel}
+            {primaryButtonLabelNode}
           </Button>
         </div>
       </div>
@@ -591,8 +639,6 @@ export default function ClinicVisitInfoPageClient() {
                 {rxLoading ? 'Loading…' : rxReady ? 'Ready' : 'No prescription'}
               </div>
             </div>
-
-            {/* ✅ Toggle lives ONLY here */}
 
             {showHistory ? (
               <div className="mb-3 px-3 text-[11px] text-gray-600">
@@ -674,7 +720,6 @@ export default function ClinicVisitInfoPageClient() {
               }
               receptionNotes={notes}
               toothDetails={toothDetails}
-              // ✅ Only pass chain props when toggle is ON
               currentVisitId={showHistory ? rxChain.currentVisitId : undefined}
               chainVisitIds={showHistory ? rxChain.visitIds : undefined}
               visitMetaMap={showHistory ? rxChain.meta : undefined}
@@ -725,7 +770,7 @@ export default function ClinicVisitInfoPageClient() {
                       : 'Save notes'
                 }
               >
-                {updateNotesState.isLoading ? 'Saving…' : 'Save'}
+                {updateNotesState.isLoading ? <LoadingDots label="Saving" /> : 'Save'}
               </Button>
             </div>
 
