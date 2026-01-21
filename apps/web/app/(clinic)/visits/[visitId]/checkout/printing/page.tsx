@@ -11,7 +11,6 @@ import { Textarea } from '@/components/ui/textarea';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 
-import { PrescriptionPrintSheet } from '@/components/prescription/PrescriptionPrintSheet';
 import { XrayPrintSheet } from '@/components/xray/XrayPrintSheet';
 import { BillPrintSheet } from '@/components/billing/BillPrintSheet';
 
@@ -40,6 +39,19 @@ function IconCheck(props: React.SVGProps<SVGSVGElement>) {
         strokeLinejoin="round"
       />
     </svg>
+  );
+}
+
+function LoadingOverlay({ show, label }: { show: boolean; label?: string }) {
+  if (!show) return null;
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-white/70 backdrop-blur-sm">
+      <div className="flex flex-col items-center gap-3 rounded-2xl border bg-white px-6 py-5 shadow-sm">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-gray-900" />
+        <div className="text-sm font-medium text-gray-900">{label ?? 'Loading…'}</div>
+        <div className="text-xs text-gray-500">Please wait</div>
+      </div>
+    </div>
   );
 }
 
@@ -146,6 +158,8 @@ function isoToDate(iso: string): Date | null {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
+type PrintAction = 'RX' | 'XRAY' | 'BILL' | null;
+
 export default function VisitCheckoutPrintingPage() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -157,12 +171,12 @@ export default function VisitCheckoutPrintingPage() {
 
   const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
   const visit: unknown = visitQuery.data;
-
   const visitRec: UnknownRecord = isRecord(visit) ? visit : {};
 
   const patientId = getStrFromRecord(visitRec, 'patientId');
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
+  // We still fetch these (existing behavior), but we won't mount print sheets unless user opens them.
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: !visitId });
   const rx = rxQuery.data?.rx ?? null;
 
@@ -176,7 +190,6 @@ export default function VisitCheckoutPrintingPage() {
 
   const shouldFetchBill = !!visitId && !!visit && billExists;
   const billQuery = useGetVisitBillQuery({ visitId }, { skip: !shouldFetchBill });
-
   const billData: unknown = billQuery.data ?? null;
 
   const billingForPrint: Billing | null =
@@ -221,17 +234,29 @@ export default function VisitCheckoutPrintingPage() {
     ? `Visit: ${String(visitRec.visitDate)}`
     : undefined;
 
+  const statusLabel = getStrFromRecord(visitRec, 'status') ?? '—';
+  const checkedOut = getBoolFromRecordOpt(visitRec, 'checkedOut') === true;
+
+  const rxAvailable = !!rx;
+  const xraysAvailable = xrayIds.length > 0;
+  const billAvailable = billExists && !!billingForPrint;
+
+  const isRxFetching = rxQuery.isLoading || rxQuery.isFetching;
+  const isXraysFetching = xraysQuery.isLoading || xraysQuery.isFetching;
+  const isBillFetching = billQuery.isLoading || billQuery.isFetching;
+
+  const anyTopLoading =
+    visitQuery.isLoading ||
+    visitQuery.isFetching ||
+    patientQuery.isLoading ||
+    patientQuery.isFetching;
+
   const onDone = () => {
     setDoneSuccess(true);
     window.setTimeout(() => {
       router.replace('/');
     }, 850);
   };
-
-  const rxAvailable = !!rx;
-  const xraysAvailable = xrayIds.length > 0;
-
-  const billAvailable = billExists && !!billingForPrint;
 
   const [followUpEnabled, setFollowUpEnabled] = React.useState(false);
 
@@ -265,13 +290,83 @@ export default function VisitCheckoutPrintingPage() {
     router.push(`/reminders?${qs.toString()}`);
   };
 
-  type RxSheetProps = React.ComponentProps<typeof PrescriptionPrintSheet>;
-  const RxSheet = PrescriptionPrintSheet as React.ComponentType<RxSheetProps>;
-
   const ageSexLabel = patientAge !== undefined ? `${patientAge} / ${patientSex ?? '—'}` : '—';
+
+  // -------- Loading overlay + deferred action --------
+  const [pendingAction, setPendingAction] = React.useState<PrintAction>(null);
+  const [overlayLabel, setOverlayLabel] = React.useState<string>('Loading…');
+
+  const overlayOpen = pendingAction !== null;
+
+  const startAction = (action: Exclude<PrintAction, null>) => {
+    setPendingAction(action);
+    if (action === 'RX') setOverlayLabel('Preparing prescription…');
+    if (action === 'XRAY') setOverlayLabel('Preparing X-rays…');
+    if (action === 'BILL') setOverlayLabel('Preparing bill…');
+  };
+
+  const clearAction = () => {
+    setPendingAction(null);
+    setOverlayLabel('Loading…');
+  };
+
+  React.useEffect(() => {
+    if (!pendingAction) return;
+
+    if (pendingAction === 'RX') {
+      if (isRxFetching) return;
+      if (!rxAvailable) {
+        clearAction();
+        toast.info('No prescription available for this visit.');
+        return;
+      }
+      router.push(`/visits/${visitId}/checkout/printing/prescription`);
+      return;
+    }
+
+    if (pendingAction === 'XRAY') {
+      if (isXraysFetching) return;
+      if (!xraysAvailable) {
+        clearAction();
+        toast.info('No X-rays uploaded for this visit.');
+        return;
+      }
+      setXrayPrintOpen(true);
+      window.setTimeout(() => clearAction(), 0);
+      return;
+    }
+
+    if (pendingAction === 'BILL') {
+      if (isBillFetching) return;
+      if (!billAvailable) {
+        clearAction();
+        toast.info('No bill found for this visit.');
+        return;
+      }
+      setBillPrintOpen(true);
+      window.setTimeout(() => clearAction(), 0);
+    }
+  }, [
+    pendingAction,
+    isRxFetching,
+    isXraysFetching,
+    isBillFetching,
+    rxAvailable,
+    xraysAvailable,
+    billAvailable,
+    router,
+    visitId,
+  ]);
+
+  // ✅ Correctly disable buttons when "Not Available"
+  const rxDisabled = !visitId || (!rxAvailable && !isRxFetching);
+  const xrayDisabled = !visitId || (!xraysAvailable && !isXraysFetching); // <-- FIXED
+  const billDisabled = !visitId || (billExists ? !billAvailable && !isBillFetching : true);
 
   return (
     <section className="p-4 2xl:p-8">
+      <LoadingOverlay show={overlayOpen} label={overlayLabel} />
+
       <style jsx global>{`
         @keyframes pulseRing {
           0% {
@@ -288,7 +383,7 @@ export default function VisitCheckoutPrintingPage() {
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="text-lg font-semibold text-gray-900">Documents</div>
-          <div className="text-xs text-gray-500">{getStrFromRecord(visitRec, 'status') ?? '—'}</div>
+          <div className="text-xs text-gray-500">{statusLabel}</div>
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
@@ -338,15 +433,36 @@ export default function VisitCheckoutPrintingPage() {
       <div className="mb-3 grid grid-cols-1 gap-3 md:grid-cols-3">
         <Card className="rounded-2xl border bg-white p-4">
           <div className="text-xs text-gray-500">Patient</div>
-          <div className="mt-1 text-base font-semibold text-gray-900">{patientName ?? '—'}</div>
-          <div className="mt-1 text-sm text-gray-600">{patientPhone ?? '—'}</div>
+          <div className="mt-1 text-base font-semibold text-gray-900">
+            {anyTopLoading && !patientName ? 'Loading…' : (patientName ?? '—')}
+          </div>
+          <div className="mt-1 text-sm text-gray-600">
+            {anyTopLoading && !patientPhone ? '—' : (patientPhone ?? '—')}
+          </div>
         </Card>
 
         <Card className="rounded-2xl border bg-white p-4">
-          <div className="text-xs text-gray-500">Doctor</div>
-          <div className="mt-1 text-base font-semibold text-gray-900">—</div>
-          <div className="mt-1 text-sm text-gray-600">
-            {visitDateLabel?.replace('Visit:', '').trim() || '—'}
+          <div className="text-xs text-gray-500">Visit summary</div>
+
+          <div className="mt-2 grid grid-cols-2 gap-x-3 gap-y-2 text-xs">
+            <div className="text-gray-500">Visit date</div>
+            <div className="text-right font-medium text-gray-900">
+              {visitDateLabel?.replace('Visit:', '').trim() ||
+                visitCreatedDateLabel?.replace('Visit:', '').trim() ||
+                '—'}
+            </div>
+
+            <div className="text-gray-500">SD ID</div>
+            <div className="text-right font-medium text-gray-900">{patientSdId ?? '—'}</div>
+
+            <div className="text-gray-500">OPD No</div>
+            <div className="text-right font-medium text-gray-900">{opdNo ?? '—'}</div>
+
+            <div className="text-gray-500">Age / Sex</div>
+            <div className="text-right font-medium text-gray-900">{ageSexLabel}</div>
+
+            <div className="text-gray-500">Checked out</div>
+            <div className="text-right font-medium text-gray-900">{checkedOut ? 'Yes' : 'No'}</div>
           </div>
         </Card>
 
@@ -355,30 +471,48 @@ export default function VisitCheckoutPrintingPage() {
           <div className="mt-2 space-y-1 text-xs">
             <div className="flex items-center justify-between">
               <span className="text-gray-700">Prescription</span>
-              <span className={rxAvailable ? 'text-emerald-700 font-semibold' : 'text-gray-400'}>
-                {rxAvailable ? 'Ready' : 'Not Available'}
+              <span
+                className={
+                  rxAvailable
+                    ? 'text-emerald-700 font-semibold'
+                    : isRxFetching
+                      ? 'text-gray-700'
+                      : 'text-gray-400'
+                }
+              >
+                {rxAvailable ? 'Ready' : isRxFetching ? 'Loading…' : 'Not Available'}
               </span>
             </div>
+
             <div className="flex items-center justify-between">
               <span className="text-gray-700">X-rays</span>
-              <span className={xraysAvailable ? 'text-emerald-700 font-semibold' : 'text-gray-400'}>
-                {xraysAvailable ? 'Ready' : 'Not Available'}
+              <span
+                className={
+                  xraysAvailable
+                    ? 'text-emerald-700 font-semibold'
+                    : isXraysFetching
+                      ? 'text-gray-700'
+                      : 'text-gray-400'
+                }
+              >
+                {xraysAvailable ? 'Ready' : isXraysFetching ? 'Loading…' : 'Not Available'}
               </span>
             </div>
+
             <div className="flex items-center justify-between">
               <span className="text-gray-700">Bill</span>
               <span
                 className={
                   billAvailable
                     ? 'text-emerald-700 font-semibold'
-                    : billExists && billQuery.isLoading
+                    : billExists && isBillFetching
                       ? 'text-gray-700'
                       : 'text-gray-400'
                 }
               >
                 {billAvailable
                   ? 'Ready'
-                  : billExists && billQuery.isLoading
+                  : billExists && isBillFetching
                     ? 'Loading…'
                     : 'Not Available'}
               </span>
@@ -399,45 +533,51 @@ export default function VisitCheckoutPrintingPage() {
               type="button"
               variant="outline"
               className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
-              onClick={() => router.push(`/visits/${visitId}/checkout/printing/prescription`)}
-              disabled={!rxAvailable}
-              title={!rxAvailable ? 'No prescription available' : 'Open print preview'}
+              onClick={() => startAction('RX')}
+              disabled={rxDisabled}
+              title={
+                rxDisabled
+                  ? isRxFetching
+                    ? 'Preparing…'
+                    : 'No prescription available'
+                  : 'Open print preview'
+              }
             >
-              Print Prescription
+              {pendingAction === 'RX' || isRxFetching ? 'Preparing…' : 'Print Prescription'}
             </Button>
 
             <Button
               type="button"
               variant="outline"
               className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
-              onClick={() => {
-                if (!xraysAvailable) {
-                  toast.info('No X-rays uploaded for this visit.');
-                  return;
-                }
-                setXrayPrintOpen(true);
-              }}
-              disabled={!xraysAvailable}
-              title={!xraysAvailable ? 'No X-rays uploaded' : 'Print X-rays'}
+              onClick={() => startAction('XRAY')}
+              disabled={xrayDisabled}
+              title={
+                xrayDisabled
+                  ? isXraysFetching
+                    ? 'Preparing…'
+                    : 'No X-rays uploaded'
+                  : 'Print X-rays'
+              }
             >
-              Print X-rays
+              {pendingAction === 'XRAY' || isXraysFetching ? 'Preparing…' : 'Print X-rays'}
             </Button>
 
             <Button
               type="button"
               variant="outline"
               className="w-full max-w-sm rounded-2xl py-6 text-base cursor-pointer"
-              onClick={() => {
-                if (!billAvailable) {
-                  toast.info('No bill found for this visit.');
-                  return;
-                }
-                setBillPrintOpen(true);
-              }}
-              disabled={!billAvailable}
-              title={!billAvailable ? 'No bill found' : 'Print bill'}
+              onClick={() => startAction('BILL')}
+              disabled={billDisabled}
+              title={
+                billDisabled
+                  ? billExists && isBillFetching
+                    ? 'Preparing…'
+                    : 'No bill found'
+                  : 'Print bill'
+              }
             >
-              Print Bill
+              {pendingAction === 'BILL' || isBillFetching ? 'Preparing…' : 'Print Bill'}
             </Button>
           </div>
         </Card>
@@ -551,7 +691,7 @@ export default function VisitCheckoutPrintingPage() {
                 </div>
               </div>
             ) : (
-              <div className="rounded-2xl border border-dashed p-4 text-sm text-gray-600">
+              <div className="rounded-2xl border border-dashed p-4 text-sm texttext-gray-600">
                 Follow-up is disabled.
               </div>
             )}
@@ -559,37 +699,30 @@ export default function VisitCheckoutPrintingPage() {
         </Card>
       </div>
 
-      <RxSheet
-        patientName={patientName}
-        patientPhone={patientPhone}
-        patientAge={patientAge}
-        patientSex={patientSex}
-        sdId={patientSdId}
-        opdNo={opdNo}
-        doctorName={undefined}
-        doctorRegdLabel={undefined}
-        visitDateLabel={visitCreatedDateLabel}
-        lines={rx?.lines ?? []}
-        receptionNotes={rx?.receptionNotes ?? ''}
-      />
+      {/* ✅ IMPORTANT FIX:
+          Do NOT mount print sheets unless user is printing.
+          This prevents "extra window.print()" / extra print dialogs. */}
+      {xrayPrintOpen && (
+        <XrayPrintSheet
+          open={xrayPrintOpen}
+          xrayIds={xrayIds}
+          onAfterPrint={() => setXrayPrintOpen(false)}
+        />
+      )}
 
-      <XrayPrintSheet
-        open={xrayPrintOpen}
-        xrayIds={xrayIds}
-        onAfterPrint={() => setXrayPrintOpen(false)}
-      />
-
-      <BillPrintSheet
-        open={billPrintOpen}
-        billing={billingForPrint}
-        patientName={patientName}
-        patientPhone={patientPhone}
-        ageSexLabel={ageSexLabel}
-        opdNo={opdNo}
-        sdId={patientSdId}
-        visitDateLabel={visitDateLabel}
-        onAfterPrint={() => setBillPrintOpen(false)}
-      />
+      {billPrintOpen && (
+        <BillPrintSheet
+          open={billPrintOpen}
+          billing={billingForPrint}
+          patientName={patientName}
+          patientPhone={patientPhone}
+          ageSexLabel={ageSexLabel}
+          opdNo={opdNo}
+          sdId={patientSdId}
+          visitDateLabel={visitDateLabel}
+          onAfterPrint={() => setBillPrintOpen(false)}
+        />
+      )}
     </section>
   );
 }
