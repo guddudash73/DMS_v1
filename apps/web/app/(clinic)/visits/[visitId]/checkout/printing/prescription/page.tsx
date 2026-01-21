@@ -218,7 +218,6 @@ export default function PrescriptionPrintPreviewPage() {
 
     const anchor = meta.get(anchorId);
     const chain: Visit[] = [];
-
     if (anchor) chain.push(anchor);
 
     const followups: Visit[] = [];
@@ -287,19 +286,6 @@ export default function PrescriptionPrintPreviewPage() {
 
   return (
     <section className="p-4 2xl:p-8">
-      <style>{`
-        /* Keep layout space, but hide header+doctor+patient when preview is in "current only" mode */
-        .rx-preview-shell.rx-preview-current-only .flex.h-full.flex-col > div:nth-child(1),
-        .rx-preview-shell.rx-preview-current-only .flex.h-full.flex-col > div:nth-child(2) {
-          visibility: hidden !important;
-        }
-
-        /* Hide previous visit blocks but preserve their height (so current block position stays intact) */
-        .rx-preview-shell.rx-preview-current-only .rx-prev-block-prev {
-          visibility: hidden !important;
-        }
-      `}</style>
-
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="text-lg font-semibold text-gray-900">Prescription Print Preview</div>
@@ -340,12 +326,7 @@ export default function PrescriptionPrintPreviewPage() {
       <Card className="rounded-2xl border bg-white p-4">
         <div className="text-sm font-semibold text-gray-900">Preview</div>
 
-        <div
-          className={[
-            'rx-preview-shell mt-3 min-w-0 overflow-x-hidden',
-            previewCurrentOnly ? 'rx-preview-current-only' : '',
-          ].join(' ')}
-        >
+        <div className="rx-preview-shell mt-3 min-w-0 overflow-x-hidden">
           <PrescriptionPreview
             patientName={patientName}
             patientPhone={patientPhone}
@@ -357,11 +338,16 @@ export default function PrescriptionPrintPreviewPage() {
             doctorRegdLabel={resolvedDoctorRegdLabel}
             visitDateLabel={visitCreatedDateLabel}
             lines={rx?.lines ?? []}
-            currentVisitId={printChain.currentVisitId}
-            chainVisitIds={printChain.visitIds}
-            visitMetaMap={printChain.meta}
             toothDetails={currentToothDetails}
             receptionNotes={previewCurrentOnly ? undefined : (rx?.receptionNotes ?? '')}
+            displayMode={previewCurrentOnly ? 'currentOnly' : 'default'}
+            {...(!previewCurrentOnly
+              ? {
+                  currentVisitId: printChain.currentVisitId,
+                  chainVisitIds: printChain.visitIds,
+                  visitMetaMap: printChain.meta,
+                }
+              : {})}
           />
         </div>
       </Card>

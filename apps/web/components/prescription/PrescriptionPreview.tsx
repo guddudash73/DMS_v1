@@ -9,6 +9,8 @@ import { ToothDetailsBlock } from './ToothDetailsBlock';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
+type DisplayMode = 'default' | 'currentOnly';
+
 type Props = {
   patientName?: string;
   patientPhone?: string;
@@ -27,6 +29,12 @@ type Props = {
   visitMetaMap?: Map<string, Visit>;
 
   toothDetails?: ToothDetail[];
+
+  /**
+   * default: normal rendering (history-enabled if chain props provided)
+   * currentOnly: render ONLY current visit medicines (keeps printable alignment)
+   */
+  displayMode?: DisplayMode;
 };
 
 const FREQ_LABEL: Record<RxLineType['frequency'], string> = {
@@ -257,7 +265,11 @@ export function PrescriptionPreview({
   visitMetaMap: visitMetaMapProp,
 
   toothDetails: toothDetailsProp,
+
+  displayMode = 'default',
 }: Props) {
+  const currentOnly = displayMode === 'currentOnly';
+
   const hasNotes = !!receptionNotes?.trim();
   const ageSex = formatAgeSex(patientAge, patientSex);
 
@@ -289,6 +301,7 @@ export function PrescriptionPreview({
   );
 
   const historyEnabled =
+    !currentOnly &&
     !!currentVisitIdProp &&
     !!chainVisitIdsProp &&
     chainVisitIdsProp.length > 0 &&
@@ -334,11 +347,10 @@ export function PrescriptionPreview({
   }, []);
 
   const currentToothDetails = useMemo(() => toothDetailsProp ?? [], [toothDetailsProp]);
-  const showCurrentToothDetails = !historyEnabled && currentToothDetails.length > 0;
 
-  // ---------------------------------------
-  // ✅ PAGINATION + PERFECT FIT
-  // ---------------------------------------
+  // -----------------------------
+  // PAGINATION (history only)
+  // -----------------------------
   const measureContainerRef = useRef<HTMLDivElement | null>(null);
   const measureFirstCapRef = useRef<HTMLDivElement | null>(null);
   const measureNextCapRef = useRef<HTMLDivElement | null>(null);
@@ -395,22 +407,17 @@ export function PrescriptionPreview({
 
       const heights = kids.map((k) => {
         const rectH = Math.ceil(k.getBoundingClientRect().height);
-
-        // ✅ include margins (space-y-4 creates margin-top)
         const cs = window.getComputedStyle(k);
         const mt = Number.parseFloat(cs.marginTop || '0') || 0;
         const mb = Number.parseFloat(cs.marginBottom || '0') || 0;
-
         return Math.ceil(rectH + mt + mb);
       });
 
       setBlockHeights(heights);
     };
 
-    // run twice: once now, once after layout + fonts settle
     measure();
     requestAnimationFrame(() => measure());
-    // (font load can slightly change heights)
     if ((document as any).fonts?.ready) {
       (document as any).fonts.ready.then(() => requestAnimationFrame(() => measure()));
     }
@@ -430,22 +437,17 @@ export function PrescriptionPreview({
       return;
     }
 
-    // Smaller safety (we already measure margins; keep tiny buffer for rounding)
-    const SAFETY = 10;
+    // tighter packing (still prevents clipping)
+    const SAFETY = 2;
 
-    const capsForPage = (pageIndex: number, totalPagesGuess?: number) => {
-      // pageIndex is 0-based
-      const base = pageIndex === 0 ? capFirst : capNext;
-
-      // only the LAST page includes reception notes block (if present)
-      if (hasNotes && totalPagesGuess != null && pageIndex === totalPagesGuess - 1) {
-        // notes are OUTSIDE the flex-1 content area; flex will shrink, so reduce usable height
-        return Math.max(0, base - notesH);
-      }
-      return base;
+    const getHeightById = (id: string) => {
+      const idx = chainVisitIds.indexOf(id);
+      return idx >= 0 ? (blockHeights[idx] ?? 0) : 0;
     };
 
-    // First pass: greedy split (without knowing last page yet)
+    const computeUsed = (pageIds: string[]) => pageIds.reduce((s, id) => s + getHeightById(id), 0);
+
+    // First greedy split
     let result: string[][] = [];
     {
       let cur: string[] = [];
@@ -470,62 +472,32 @@ export function PrescriptionPreview({
       if (!result.length) result = [chainVisitIds];
     }
 
-    // Second pass: adjust for notes on last page (if any)
+    // If last page has notes, reduce last capacity a bit (notes live below)
     if (hasNotes && notesH > 0 && result.length > 0) {
       const lastIdx = result.length - 1;
-      const lastCap = capsForPage(lastIdx, result.length);
+      const capLast = Math.max(0, capNext - notesH);
 
-      const getIdx = (id: string) => chainVisitIds.indexOf(id);
-      const lastUsed = result[lastIdx].reduce((sum, id) => {
-        const i = getIdx(id);
-        return sum + (blockHeights[i] ?? 0);
-      }, 0);
-
-      // If last page overflows due to notes height, push items to a new page
-      if (lastUsed > lastCap - SAFETY && result[lastIdx].length > 1) {
-        const overflow: string[] = [];
-        let used = 0;
-        for (const id of result[lastIdx]) {
-          const i = getIdx(id);
-          const h = blockHeights[i] ?? 0;
-
-          // pack into new last page (with notes)
-          if (overflow.length > 0 && used + h > lastCap - SAFETY) break;
-          overflow.push(id);
-          used += h;
+      const lastUsed = computeUsed(result[lastIdx]);
+      if (lastUsed > capLast - SAFETY && result[lastIdx].length > 1) {
+        const moved: string[] = [];
+        while (result[lastIdx].length > 1 && computeUsed(result[lastIdx]) > capLast - SAFETY) {
+          const x = result[lastIdx].pop();
+          if (!x) break;
+          moved.unshift(x);
         }
-
-        // keep only the items that fit in the true last page
-        const keepCount = overflow.length;
-        const movedOut = result[lastIdx].slice(keepCount);
-
-        result[lastIdx] = result[lastIdx].slice(0, keepCount);
-        if (movedOut.length) result.push(movedOut);
+        if (moved.length) result.push(moved);
       }
     }
 
-    // Third pass: BACKFILL (fills bottom gaps by pulling next page’s first item up if it fits)
-    const getHeightById = (id: string) => {
-      const idx = chainVisitIds.indexOf(id);
-      return idx >= 0 ? (blockHeights[idx] ?? 0) : 0;
-    };
-
-    const computeUsed = (pageIds: string[]) => pageIds.reduce((s, id) => s + getHeightById(id), 0);
-
-    // we may change page count; repeat until stable
-    for (let pass = 0; pass < 3; pass++) {
+    // Backfill gaps: pull from next page if it fits
+    for (let pass = 0; pass < 5; pass++) {
       for (let p = 0; p < result.length - 1; p++) {
-        const isLast = p === result.length - 1;
-        const cap = (() => {
-          const base = p === 0 ? capFirst : capNext;
-          // if this page becomes last after moves, notes will apply—handled at the end by keeping SAFETY
-          return base;
-        })();
+        const cap = p === 0 ? capFirst : capNext;
 
         while (result[p + 1].length > 0) {
           const nextId = result[p + 1][0];
-          const h = getHeightById(nextId);
           const used = computeUsed(result[p]);
+          const h = getHeightById(nextId);
 
           if (used + h <= cap - SAFETY) {
             result[p].push(nextId);
@@ -535,10 +507,11 @@ export function PrescriptionPreview({
           }
         }
       }
-
-      // remove empty pages if created
       result = result.filter((x) => x.length > 0);
-      if (!result.length) result = [chainVisitIds];
+      if (!result.length) {
+        result = [chainVisitIds];
+        break;
+      }
     }
 
     setPages(result);
@@ -567,7 +540,6 @@ export function PrescriptionPreview({
       <div className="space-y-4">
         {ids.map((id) => {
           const v = visitMetaMap.get(id);
-
           const isAnchor = anchorVisitId != null && id === anchorVisitId;
           const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
 
@@ -603,21 +575,15 @@ export function PrescriptionPreview({
     );
   };
 
-  const shouldShowNotesOnThisPage = hasNotes && page === totalPages;
+  const shouldShowNotesOnThisPage = historyEnabled && hasNotes && page === totalPages;
   const isFirstPage = page === 1;
 
   const measureTemplate = shouldMeasure ? (
     <div
       aria-hidden="true"
       className="pointer-events-none fixed left-0 top-0"
-      style={{
-        width: 0,
-        height: 0,
-        overflow: 'hidden',
-        opacity: 0,
-      }}
+      style={{ width: 0, height: 0, overflow: 'hidden', opacity: 0 }}
     >
-      {/* keep your existing measurement DOM exactly the same inside */}
       <div style={{ width: BASE_W }}>
         <div ref={measureContainerRef} className="w-full">
           <div className="h-[1080px] w-full overflow-hidden border bg-white">
@@ -655,29 +621,31 @@ export function PrescriptionPreview({
     </div>
   ) : null;
 
+  // -----------------------------------------
+  // CURRENT-ONLY PRINT MODE
+  // - Hide header/patient blocks visually but KEEP their space
+  // - Render ONLY current medicines/tooth details in the body area
+  // -----------------------------------------
+  const currentOnlyHeaderStyle: React.CSSProperties | undefined = currentOnly
+    ? { visibility: 'hidden' }
+    : undefined;
+
+  const currentOnlyNotes = null; // never show notes in currentOnly (caller should pass undefined too)
+
   return (
     <div className="w-full">
       {measureTemplate}
 
       <div ref={wrapRef} className="w-full">
-        <div
-          className="relative w-full"
-          style={{
-            height: Math.ceil(BASE_H * scale),
-          }}
-        >
+        <div className="relative w-full" style={{ height: Math.ceil(BASE_H * scale) }}>
           <div
             className="origin-top-left"
-            style={{
-              width: BASE_W,
-              height: BASE_H,
-              transform: `scale(${scale})`,
-            }}
+            style={{ width: BASE_W, height: BASE_H, transform: `scale(${scale})` }}
           >
             <div className="h-full w-full overflow-hidden rounded-xl border bg-white shadow-sm">
               {isFirstPage ? (
                 <div className="flex h-full flex-col">
-                  <div className="shrink-0 px-6 pt-4">
+                  <div className="shrink-0 px-6 pt-4" style={currentOnlyHeaderStyle}>
                     <div className="flex items-start justify-between gap-4">
                       <div className="relative h-16 w-16">
                         <Image
@@ -721,7 +689,7 @@ export function PrescriptionPreview({
                     <div className="mt-2 h-px w-full bg-emerald-600/60" />
                   </div>
 
-                  <div className="shrink-0 px-6 pt-3">
+                  <div className="shrink-0 px-6 pt-3" style={currentOnlyHeaderStyle}>
                     <div className="flex items-start justify-between gap-6">
                       <div className="min-w-0 flex flex-col">
                         <div className="text-[0.8rem] font-bold text-gray-900">
@@ -788,9 +756,9 @@ export function PrescriptionPreview({
                   </div>
 
                   <div className="min-h-0 flex-1 px-6 pt-4 pb-4">
-                    {!historyEnabled ? (
+                    {currentOnly ? (
                       <>
-                        {showCurrentToothDetails ? (
+                        {currentToothDetails.length > 0 ? (
                           <div className="mb-3">
                             <ToothDetailsBlock toothDetails={currentToothDetails} />
                             <div className="mt-3 h-px w-full bg-gray-200" />
@@ -812,12 +780,36 @@ export function PrescriptionPreview({
                           </ol>
                         )}
                       </>
-                    ) : (
+                    ) : historyEnabled ? (
                       renderHistoryBlocks(visiblePageIds)
+                    ) : (
+                      <>
+                        {currentToothDetails.length > 0 ? (
+                          <div className="mb-3">
+                            <ToothDetailsBlock toothDetails={currentToothDetails} />
+                            <div className="mt-3 h-px w-full bg-gray-200" />
+                          </div>
+                        ) : null}
+
+                        {lines.length === 0 ? (
+                          <div className="text-[13px] text-gray-500">No medicines added yet.</div>
+                        ) : (
+                          <ol className="text-sm leading-6 text-gray-900">
+                            {lines.map((l, idx) => (
+                              <li key={idx} className="flex gap-1">
+                                <div className="w-4 shrink-0 text-right font-medium">
+                                  {idx + 1}.
+                                </div>
+                                <div className="font-medium">{buildLineText(l)}</div>
+                              </li>
+                            ))}
+                          </ol>
+                        )}
+                      </>
                     )}
                   </div>
 
-                  {shouldShowNotesOnThisPage ? renderNotes() : null}
+                  {!currentOnly && shouldShowNotesOnThisPage ? renderNotes() : currentOnlyNotes}
                 </div>
               ) : (
                 <div className="flex h-full flex-col">
