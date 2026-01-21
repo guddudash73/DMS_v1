@@ -337,15 +337,17 @@ export function PrescriptionPreview({
   const showCurrentToothDetails = !historyEnabled && currentToothDetails.length > 0;
 
   // ---------------------------------------
-  // ✅ PAGINATION (history mode only)
+  // ✅ PAGINATION + PERFECT FIT
   // ---------------------------------------
   const measureContainerRef = useRef<HTMLDivElement | null>(null);
   const measureFirstCapRef = useRef<HTMLDivElement | null>(null);
   const measureNextCapRef = useRef<HTMLDivElement | null>(null);
+  const measureNotesRef = useRef<HTMLDivElement | null>(null);
 
   const [blockHeights, setBlockHeights] = useState<number[]>([]);
   const [capFirst, setCapFirst] = useState<number>(560);
   const [capNext, setCapNext] = useState<number>(980);
+  const [notesH, setNotesH] = useState<number>(0);
 
   const [pages, setPages] = useState<string[][]>([chainVisitIds]);
   const [page, setPage] = useState(1);
@@ -366,7 +368,6 @@ export function PrescriptionPreview({
 
   const shouldMeasure = historyEnabled && chainVisitIds.length > 1;
 
-  // ✅ FIX: include margins from `space-y-*` when measuring blocks
   useEffect(() => {
     if (!shouldMeasure) {
       setPages([chainVisitIds]);
@@ -385,21 +386,34 @@ export function PrescriptionPreview({
         const h = measureNextCapRef.current.getBoundingClientRect().height;
         if (Number.isFinite(h) && h > 0) setCapNext(Math.floor(h));
       }
+      if (measureNotesRef.current) {
+        const h = measureNotesRef.current.getBoundingClientRect().height;
+        setNotesH(Number.isFinite(h) && h > 0 ? Math.ceil(h) : 0);
+      }
 
       const kids = Array.from(root.querySelectorAll('[data-rx-block="1"]')) as HTMLElement[];
 
       const heights = kids.map((k) => {
         const rectH = Math.ceil(k.getBoundingClientRect().height);
+
+        // ✅ include margins (space-y-4 creates margin-top)
         const cs = window.getComputedStyle(k);
         const mt = Number.parseFloat(cs.marginTop || '0') || 0;
         const mb = Number.parseFloat(cs.marginBottom || '0') || 0;
+
         return Math.ceil(rectH + mt + mb);
       });
 
       setBlockHeights(heights);
     };
 
+    // run twice: once now, once after layout + fonts settle
     measure();
+    requestAnimationFrame(() => measure());
+    // (font load can slightly change heights)
+    if ((document as any).fonts?.ready) {
+      (document as any).fonts.ready.then(() => requestAnimationFrame(() => measure()));
+    }
 
     const ro = new ResizeObserver(() => measure());
     ro.observe(root);
@@ -407,11 +421,7 @@ export function PrescriptionPreview({
   }, [shouldMeasure, measureKey]);
 
   useEffect(() => {
-    if (!historyEnabled) {
-      setPages([chainVisitIds]);
-      return;
-    }
-    if (!shouldMeasure) {
+    if (!historyEnabled || !shouldMeasure) {
       setPages([chainVisitIds]);
       return;
     }
@@ -420,34 +430,128 @@ export function PrescriptionPreview({
       return;
     }
 
-    // ✅ slightly bigger safety margin (fonts/rounding/borders)
-    const SAFETY = 34;
+    // Smaller safety (we already measure margins; keep tiny buffer for rounding)
+    const SAFETY = 10;
 
-    const result: string[][] = [];
-    let cur: string[] = [];
-    let used = 0;
-    let cap = capFirst;
+    const capsForPage = (pageIndex: number, totalPagesGuess?: number) => {
+      // pageIndex is 0-based
+      const base = pageIndex === 0 ? capFirst : capNext;
 
-    for (let i = 0; i < chainVisitIds.length; i++) {
-      const id = chainVisitIds[i];
-      const h = blockHeights[i] ?? 0;
-
-      // move block if it won't fully fit
-      if (cur.length > 0 && used + h > cap - SAFETY) {
-        result.push(cur);
-        cur = [];
-        used = 0;
-        cap = capNext;
+      // only the LAST page includes reception notes block (if present)
+      if (hasNotes && totalPagesGuess != null && pageIndex === totalPagesGuess - 1) {
+        // notes are OUTSIDE the flex-1 content area; flex will shrink, so reduce usable height
+        return Math.max(0, base - notesH);
       }
+      return base;
+    };
 
-      cur.push(id);
-      used += h;
+    // First pass: greedy split (without knowing last page yet)
+    let result: string[][] = [];
+    {
+      let cur: string[] = [];
+      let used = 0;
+      let cap = capFirst;
+
+      for (let i = 0; i < chainVisitIds.length; i++) {
+        const id = chainVisitIds[i];
+        const h = blockHeights[i] ?? 0;
+
+        if (cur.length > 0 && used + h > cap - SAFETY) {
+          result.push(cur);
+          cur = [];
+          used = 0;
+          cap = capNext;
+        }
+
+        cur.push(id);
+        used += h;
+      }
+      if (cur.length) result.push(cur);
+      if (!result.length) result = [chainVisitIds];
     }
 
-    if (cur.length) result.push(cur);
+    // Second pass: adjust for notes on last page (if any)
+    if (hasNotes && notesH > 0 && result.length > 0) {
+      const lastIdx = result.length - 1;
+      const lastCap = capsForPage(lastIdx, result.length);
 
-    setPages(result.length ? result : [chainVisitIds]);
-  }, [historyEnabled, shouldMeasure, chainVisitIds, blockHeights, capFirst, capNext]);
+      const getIdx = (id: string) => chainVisitIds.indexOf(id);
+      const lastUsed = result[lastIdx].reduce((sum, id) => {
+        const i = getIdx(id);
+        return sum + (blockHeights[i] ?? 0);
+      }, 0);
+
+      // If last page overflows due to notes height, push items to a new page
+      if (lastUsed > lastCap - SAFETY && result[lastIdx].length > 1) {
+        const overflow: string[] = [];
+        let used = 0;
+        for (const id of result[lastIdx]) {
+          const i = getIdx(id);
+          const h = blockHeights[i] ?? 0;
+
+          // pack into new last page (with notes)
+          if (overflow.length > 0 && used + h > lastCap - SAFETY) break;
+          overflow.push(id);
+          used += h;
+        }
+
+        // keep only the items that fit in the true last page
+        const keepCount = overflow.length;
+        const movedOut = result[lastIdx].slice(keepCount);
+
+        result[lastIdx] = result[lastIdx].slice(0, keepCount);
+        if (movedOut.length) result.push(movedOut);
+      }
+    }
+
+    // Third pass: BACKFILL (fills bottom gaps by pulling next page’s first item up if it fits)
+    const getHeightById = (id: string) => {
+      const idx = chainVisitIds.indexOf(id);
+      return idx >= 0 ? (blockHeights[idx] ?? 0) : 0;
+    };
+
+    const computeUsed = (pageIds: string[]) => pageIds.reduce((s, id) => s + getHeightById(id), 0);
+
+    // we may change page count; repeat until stable
+    for (let pass = 0; pass < 3; pass++) {
+      for (let p = 0; p < result.length - 1; p++) {
+        const isLast = p === result.length - 1;
+        const cap = (() => {
+          const base = p === 0 ? capFirst : capNext;
+          // if this page becomes last after moves, notes will apply—handled at the end by keeping SAFETY
+          return base;
+        })();
+
+        while (result[p + 1].length > 0) {
+          const nextId = result[p + 1][0];
+          const h = getHeightById(nextId);
+          const used = computeUsed(result[p]);
+
+          if (used + h <= cap - SAFETY) {
+            result[p].push(nextId);
+            result[p + 1].shift();
+          } else {
+            break;
+          }
+        }
+      }
+
+      // remove empty pages if created
+      result = result.filter((x) => x.length > 0);
+      if (!result.length) result = [chainVisitIds];
+    }
+
+    setPages(result);
+  }, [
+    historyEnabled,
+    shouldMeasure,
+    chainVisitIds,
+    blockHeights,
+    capFirst,
+    capNext,
+    hasNotes,
+    notesH,
+  ]);
 
   useEffect(() => {
     const total = pages.length || 1;
@@ -463,6 +567,7 @@ export function PrescriptionPreview({
       <div className="space-y-4">
         {ids.map((id) => {
           const v = visitMetaMap.get(id);
+
           const isAnchor = anchorVisitId != null && id === anchorVisitId;
           const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
 
@@ -517,6 +622,11 @@ export function PrescriptionPreview({
               </div>
               <div className="min-h-0 flex-1 px-6 pt-4 pb-4">
                 <div ref={measureFirstCapRef} className="h-full w-full" />
+              </div>
+              <div className="shrink-0 px-6 pb-2">
+                <div ref={measureNotesRef} className="w-full">
+                  {renderNotes()}
+                </div>
               </div>
             </div>
           </div>
