@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 
-// ✅ Lazy-load heavy widgets (same pattern as doctor page)
+// ✅ Lazy-load heavy widgets
 const PrescriptionPreview = dynamic(
   () => import('@/components/prescription/PrescriptionPreview').then((m) => m.PrescriptionPreview),
   {
@@ -46,7 +46,6 @@ import {
   useGetVisitRxVersionsQuery,
   useUpdateVisitRxReceptionNotesMutation,
   useGetDoctorsQuery,
-  useGetPatientVisitsQuery,
   useUpdateVisitStatusMutation,
 } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
@@ -60,8 +59,6 @@ type VisitExtras = {
   opdNumber?: string;
   sdId?: string;
   doctorId?: string;
-  anchorVisitId?: string;
-  tag?: string;
 };
 type VisitWithExtras = Visit & VisitExtras;
 
@@ -181,14 +178,6 @@ function getErrorMessage(err: unknown): string {
   return 'Request failed.';
 }
 
-function anchorIdFromVisit(v: Visit): string | undefined {
-  return (
-    getPropString(v as unknown, 'anchorVisitId') ??
-    getPropString(v as unknown, 'anchorId') ??
-    undefined
-  );
-}
-
 export default function ClinicVisitInfoPageClient() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -196,36 +185,21 @@ export default function ClinicVisitInfoPageClient() {
 
   const visitId = String(params?.visitId ?? '');
 
-  const visitQuery = useGetVisitByIdQuery(visitId, {
-    skip: !visitId,
-    refetchOnMountOrArgChange: true,
-  });
+  // ✅ Don’t force refetch on mount; let RTK Query cache help
+  const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
 
   const visit = (visitQuery.data ?? null) as VisitWithExtras | null;
   const isOfflineVisit = Boolean(visit?.isOffline);
 
   const patientId = visit?.patientId;
 
-  const patientQuery = useGetPatientByIdQuery(patientId ?? '', {
-    skip: !patientId,
-    refetchOnMountOrArgChange: true,
-  });
+  const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
+  // doctors list is cached 1 hour in api.ts; no aggressive refetch needed
   const doctorsQuery = useGetDoctorsQuery(undefined);
-  const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', {
-    skip: !patientId,
-    refetchOnMountOrArgChange: true,
-  });
 
-  const allVisitsRaw = React.useMemo(() => {
-    const items = getProp(visitsQuery.data, 'items');
-    return Array.isArray(items) ? (items as Visit[]) : [];
-  }, [visitsQuery.data]);
-
-  const versionsQuery = useGetVisitRxVersionsQuery(
-    { visitId },
-    { skip: !visitId, refetchOnMountOrArgChange: true },
-  );
+  // versions: keep for dropdown
+  const versionsQuery = useGetVisitRxVersionsQuery({ visitId }, { skip: !visitId });
 
   const versions = React.useMemo(() => {
     const v = getProp(versionsQuery.data, 'versions');
@@ -244,16 +218,14 @@ export default function ClinicVisitInfoPageClient() {
     if (latestVersion != null) setSelectedRxVersion(latestVersion);
   }, [latestVersion, selectedRxVersion]);
 
-  const rxLatestQuery = useGetVisitRxQuery(
-    { visitId },
-    { skip: !visitId, refetchOnMountOrArgChange: true },
-  );
+  // ✅ only latest is needed for first paint
+  const rxLatestQuery = useGetVisitRxQuery({ visitId }, { skip: !visitId });
 
+  // versioned only when user has a selection (kept)
   const rxByVersionQuery = useGetVisitRxQuery(
     { visitId, version: selectedRxVersion ?? undefined },
     {
       skip: !visitId || selectedRxVersion == null,
-      refetchOnMountOrArgChange: true,
     },
   );
 
@@ -333,8 +305,6 @@ export default function ClinicVisitInfoPageClient() {
     try {
       await updateNotes({ visitId, receptionNotes: notes }).unwrap();
       toast.success('Notes saved.');
-      rxLatestQuery.refetch();
-      rxByVersionQuery.refetch();
     } catch (err: unknown) {
       toast.error(getErrorMessage(err) ?? 'Failed to save notes.');
     }
@@ -440,61 +410,6 @@ export default function ClinicVisitInfoPageClient() {
     offlineCheckoutBusy ||
     updateVisitStatusState.isLoading ||
     (!isCheckedOut && !visitDone && !isOfflineVisit);
-
-  const rxChain = React.useMemo(() => {
-    const meta = new Map<string, Visit>();
-    for (const v of allVisitsRaw) meta.set(v.visitId, v);
-    if (visit?.visitId) meta.set(visit.visitId, visit);
-
-    const tag = getPropString(visit, 'tag');
-    const anchorVisitId = getPropString(visit, 'anchorVisitId');
-
-    const anchorId = tag === 'F' ? anchorVisitId : visitId;
-    if (!anchorId) return { visitIds: [visitId], meta, currentVisitId: visitId };
-
-    const anchor = meta.get(anchorId);
-    const chain: Visit[] = [];
-    if (anchor) chain.push(anchor);
-
-    const followups: Visit[] = [];
-    for (const v of meta.values()) {
-      const aId = anchorIdFromVisit(v);
-      if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
-    }
-
-    followups.sort(
-      (a, b) =>
-        (getPropNumber(a, 'createdAt') ?? getPropNumber(a, 'updatedAt') ?? 0) -
-        (getPropNumber(b, 'createdAt') ?? getPropNumber(b, 'updatedAt') ?? 0),
-    );
-    chain.push(...followups);
-
-    if (!chain.some((v) => v.visitId === visitId)) {
-      const cur = meta.get(visitId);
-      chain.push(cur ?? ({ visitId } as Visit));
-    }
-
-    chain.sort(
-      (a, b) =>
-        (getPropNumber(a, 'createdAt') ?? getPropNumber(a, 'updatedAt') ?? 0) -
-        (getPropNumber(b, 'createdAt') ?? getPropNumber(b, 'updatedAt') ?? 0),
-    );
-
-    const seen = new Set<string>();
-    const chainIdsOrdered = chain
-      .map((v) => v.visitId)
-      .filter((id) => {
-        if (!id) return false;
-        if (seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
-
-    const idx = chainIdsOrdered.indexOf(visitId);
-    const limitedIds = idx >= 0 ? chainIdsOrdered.slice(0, idx + 1) : [visitId];
-
-    return { visitIds: limitedIds, meta, currentVisitId: visitId };
-  }, [allVisitsRaw, visit, visitId]);
 
   const versionOptions = React.useMemo(() => {
     if (!versions.length) return [];
@@ -629,9 +544,7 @@ export default function ClinicVisitInfoPageClient() {
               }
               receptionNotes={notes}
               toothDetails={toothDetails}
-              currentVisitId={rxChain.currentVisitId}
-              chainVisitIds={rxChain.visitIds}
-              visitMetaMap={rxChain.meta}
+              // ✅ IMPORTANT: do NOT pass history props here (kills extra Rx calls)
             />
           </div>
         </div>

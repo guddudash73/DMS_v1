@@ -2,11 +2,12 @@
 
 import * as React from 'react';
 import { useRouter } from 'next/navigation';
+import { useDispatch } from 'react-redux';
 
 import { Card } from '@/components/ui/card';
 import { useAuth } from '@/src/hooks/useAuth';
 import { clinicDateISO } from '@/src/lib/clinicTime';
-import { useGetPatientQueueQuery } from '@/src/store/api';
+import { api, useGetPatientQueueQuery } from '@/src/store/api';
 
 import type { PatientQueueItem, Visit } from '@dcm/types';
 
@@ -51,6 +52,11 @@ function getVisitLabel(v: PatientQueueItem): string {
   return name && name.length > 0 ? name : `Patient: ${v.patientId}`;
 }
 
+function getPatientIdFromQueueItem(v: PatientQueueItem): string | null {
+  const pid = (v as any)?.patientId ?? v.patientId;
+  return typeof pid === 'string' && pid.trim() ? pid.trim() : null;
+}
+
 function OfflineBadge() {
   return (
     <span
@@ -66,12 +72,14 @@ function QueueItemRow({
   label,
   status,
   onClick,
+  onPrefetch,
   isOffline,
   dailyPatientNumber,
 }: {
   label: string;
   status: VisitStatus;
   onClick: () => void;
+  onPrefetch?: () => void;
   isOffline?: boolean;
   dailyPatientNumber?: number | null;
 }) {
@@ -79,6 +87,8 @@ function QueueItemRow({
     <button
       type="button"
       onClick={onClick}
+      onPointerEnter={onPrefetch}
+      onPointerDown={onPrefetch}
       className="flex h-10 w-full cursor-pointer items-center justify-between rounded-xl bg-white px-3 text-left text-xs text-gray-800 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] transition hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-black/10"
       title="Open visit"
     >
@@ -110,20 +120,56 @@ type ClinicQueueCardProps = {
 
 export default function DoctorQueueCard({ onViewAll }: ClinicQueueCardProps) {
   const router = useRouter();
+  const dispatch = useDispatch();
   const auth = useAuth();
   const canUseApi = auth.status === 'authenticated' && !!auth.accessToken;
 
   const todayIso = React.useMemo(() => clinicDateISO(new Date()), []);
 
-  const queueQ = useGetPatientQueueQuery({ date: todayIso }, { skip: !canUseApi });
-  const allItems = (queueQ.data?.items ?? []) as PatientQueueItem[];
-
-  const waiting = React.useMemo(() => allItems.filter((x) => x.status === 'QUEUED'), [allItems]);
-  const inProgress = React.useMemo(
-    () => allItems.filter((x) => x.status === 'IN_PROGRESS'),
-    [allItems],
+  const queueQ = useGetPatientQueueQuery(
+    { date: todayIso },
+    {
+      skip: !canUseApi,
+      selectFromResult: (r) => ({
+        ...r,
+        items: (r.data?.items ?? []) as PatientQueueItem[],
+        hasData: Boolean(r.data),
+      }),
+    },
   );
-  const done = React.useMemo(() => allItems.filter((x) => x.status === 'DONE'), [allItems]);
+
+  const prefetchVisit = React.useCallback(
+    (item: PatientQueueItem) => {
+      const visitId = item.visitId;
+      if (!visitId) return;
+
+      // 1) route chunk prefetch
+      router.prefetch(`/visits/${visitId}`);
+
+      // 2) warm RTK Query cache
+      dispatch(api.util.prefetch('getVisitById', visitId, { force: false }) as any);
+      dispatch(api.util.prefetch('getVisitRx', { visitId }, { force: false }) as any);
+      dispatch(api.util.prefetch('getVisitRxVersions', { visitId }, { force: false }) as any);
+
+      const patientId = getPatientIdFromQueueItem(item);
+      if (patientId) {
+        dispatch(api.util.prefetch('getPatientById', patientId, { force: false }) as any);
+      }
+    },
+    [dispatch, router],
+  );
+
+  const openClinicVisit = (visitId: string) => router.push(`/visits/${visitId}`);
+
+  const waiting = React.useMemo(
+    () => queueQ.items.filter((x) => x.status === 'QUEUED'),
+    [queueQ.items],
+  );
+  const inProgress = React.useMemo(
+    () => queueQ.items.filter((x) => x.status === 'IN_PROGRESS'),
+    [queueQ.items],
+  );
+  const done = React.useMemo(() => queueQ.items.filter((x) => x.status === 'DONE'), [queueQ.items]);
 
   const cols: Array<{ status: VisitStatus; data: PatientQueueItem[] }> = [
     { status: 'QUEUED', data: waiting },
@@ -131,10 +177,8 @@ export default function DoctorQueueCard({ onViewAll }: ClinicQueueCardProps) {
     { status: 'DONE', data: done },
   ];
 
-  const loading = queueQ.isLoading || queueQ.isFetching;
+  const showSkeleton = queueQ.isLoading && !queueQ.hasData;
   const error = !!queueQ.isError;
-
-  const openClinicVisit = (visitId: string) => router.push(`/visits/${visitId}`);
 
   return (
     <Card className="w-full rounded-2xl border-none bg-white px-4 pb-4 pt-2 shadow-sm">
@@ -181,7 +225,7 @@ export default function DoctorQueueCard({ onViewAll }: ClinicQueueCardProps) {
                         <PlaceholderBlock key={`err-${i}`} text="—" />
                       ))}
                     </>
-                  ) : loading ? (
+                  ) : showSkeleton ? (
                     Array.from({ length: SLOTS_PER_COLUMN }).map((_, i) => (
                       <PlaceholderBlock key={`load-${i}`} text="Loading…" />
                     ))
@@ -199,6 +243,7 @@ export default function DoctorQueueCard({ onViewAll }: ClinicQueueCardProps) {
                           key={v.visitId}
                           label={getVisitLabel(v)}
                           status={v.status}
+                          onPrefetch={() => prefetchVisit(v)}
                           onClick={() => openClinicVisit(v.visitId)}
                           isOffline={isOfflineQueueItem(v)}
                           dailyPatientNumber={getDailyPatientNumber(v)}
@@ -221,6 +266,10 @@ export default function DoctorQueueCard({ onViewAll }: ClinicQueueCardProps) {
           })}
         </div>
       )}
+
+      {queueQ.isFetching && queueQ.hasData ? (
+        <div className="mt-3 text-[10px] text-gray-400">Syncing…</div>
+      ) : null}
     </Card>
   );
 }

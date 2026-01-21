@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import { useGetXrayUrlQuery, useListVisitXraysQuery } from '@/src/store/api';
 import { XrayViewerModal } from './XrayViewerModal';
@@ -21,19 +21,49 @@ function formatClinicDateTime(ts: number | string) {
   }).format(d);
 }
 
-function Thumb({ xrayId }: { xrayId: string }) {
-  const { data } = useGetXrayUrlQuery({ xrayId, size: 'thumb' });
-  if (!data?.url) return <div className="h-18 w-18 rounded-xl bg-gray-100" />;
+function useInView<T extends Element>(options?: IntersectionObserverInit) {
+  const ref = useRef<T | null>(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+
+    const obs = new IntersectionObserver((entries) => {
+      const e = entries[0];
+      if (!e) return;
+      if (e.isIntersecting) setInView(true);
+    }, options);
+
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [options]);
+
+  return { ref, inView };
+}
+
+function Thumb({ xrayId, enabled }: { xrayId: string; enabled: boolean }) {
+  const { ref, inView } = useInView<HTMLDivElement>({ rootMargin: '250px' });
+
+  const shouldFetch = enabled && inView;
+
+  const { data } = useGetXrayUrlQuery({ xrayId, size: 'thumb' }, { skip: !shouldFetch });
 
   return (
-    <Image
-      src={data.url}
-      alt="X-ray thumb"
-      width={160}
-      height={160}
-      className="h-18 w-18 rounded-xl object-cover"
-      unoptimized
-    />
+    <div ref={ref} className="h-18 w-18">
+      {!data?.url ? (
+        <div className="h-18 w-18 rounded-xl bg-gray-100" />
+      ) : (
+        <Image
+          src={data.url}
+          alt="X-ray thumb"
+          width={160}
+          height={160}
+          className="h-18 w-18 rounded-xl object-cover"
+          unoptimized
+        />
+      )}
+    </div>
   );
 }
 
@@ -53,6 +83,38 @@ export function XrayTrayReadOnly({ visitId }: { visitId: string }) {
     setActiveId(xrayId);
     setViewerOpen(true);
   };
+
+  // ✅ Defer all thumb URL calls until after initial paint / idle time
+  const [thumbsEnabled, setThumbsEnabled] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const enable = () => {
+      if (cancelled) return;
+      setThumbsEnabled(true);
+    };
+
+    // prefer idle time, fallback to small timeout
+    const ric = (window as any).requestIdleCallback as
+      | ((cb: () => void, opts?: { timeout: number }) => number)
+      | undefined;
+
+    if (typeof ric === 'function') {
+      const id = ric(enable, { timeout: 800 });
+      return () => {
+        cancelled = true;
+        const cancel = (window as any).cancelIdleCallback as ((id: number) => void) | undefined;
+        cancel?.(id);
+      };
+    }
+
+    const t = window.setTimeout(enable, 450);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t);
+    };
+  }, [visitId]);
 
   return (
     <div className="rounded-2xl border bg-white p-3">
@@ -80,7 +142,7 @@ export function XrayTrayReadOnly({ visitId }: { visitId: string }) {
               className="group rounded-2xl border bg-white p-2 pb-3 transition hover:shadow-sm focus:outline-none focus:ring-2 focus:ring-gray-900/10"
               onClick={() => openViewer(x.xrayId)}
             >
-              <Thumb xrayId={x.xrayId} />
+              <Thumb xrayId={x.xrayId} enabled={thumbsEnabled} />
               <div className="mt-2 text-left">
                 <div className="text-[11px] font-medium text-gray-800">
                   {formatClinicDateTime(x.takenAt)}
