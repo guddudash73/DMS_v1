@@ -22,6 +22,8 @@ jobs:
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
       NEXT_PUBLIC_WS_BASE_URL: ${{ secrets.NEXT_PUBLIC_WS_BASE_URL }}
       NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL }}
+      APP_DOMAIN: trail.dcm.tcplgroups.com
+      APP_CERT_ARN: ${{ secrets.APP_CERT_ARN }}
       NODE_OPTIONS: --max-old-space-size=8192
       SST_TELEMETRY_DISABLED: '1'
       TURBO_TELEMETRY_DISABLED: '1'
@@ -60,7 +62,6 @@ jobs:
           test -f packages/config/dist/env.js
           test -n "${SST_PASSPHRASE}"
           test -n "${QZ_PRIVATE_KEY_SECRET_ID}"
-          test -n "${NEXT_PUBLIC_API_BASE_URL}"
 
           # ✅ Bootstrap-friendly: WS URL may not exist before first deploy
           if [ -z "${NEXT_PUBLIC_WS_BASE_URL}" ]; then
