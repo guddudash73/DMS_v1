@@ -20,7 +20,7 @@ export default $config({
       domain: {
         name: process.env.APP_DOMAIN!, // trial.tcplgroups.com
         cert: process.env.APP_CERT_ARN!, // ACM cert ARN (must be us-east-1)
-        dns: false, // since Route53 is not hosting DNS
+        dns: false, // since Route53 is not hosting DNS.
       },
     });
 
