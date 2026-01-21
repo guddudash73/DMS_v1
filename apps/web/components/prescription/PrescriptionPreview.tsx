@@ -350,7 +350,6 @@ export function PrescriptionPreview({
   const [pages, setPages] = useState<string[][]>([chainVisitIds]);
   const [page, setPage] = useState(1);
 
-  // reset to page 1 when chain changes
   useEffect(() => {
     setPage(1);
   }, [historyEnabled, chainVisitIds.join('|')]);
@@ -367,7 +366,7 @@ export function PrescriptionPreview({
 
   const shouldMeasure = historyEnabled && chainVisitIds.length > 1;
 
-  // measure caps and blocks
+  // ✅ FIX: include margins from `space-y-*` when measuring blocks
   useEffect(() => {
     if (!shouldMeasure) {
       setPages([chainVisitIds]);
@@ -388,7 +387,15 @@ export function PrescriptionPreview({
       }
 
       const kids = Array.from(root.querySelectorAll('[data-rx-block="1"]')) as HTMLElement[];
-      const heights = kids.map((k) => Math.ceil(k.getBoundingClientRect().height));
+
+      const heights = kids.map((k) => {
+        const rectH = Math.ceil(k.getBoundingClientRect().height);
+        const cs = window.getComputedStyle(k);
+        const mt = Number.parseFloat(cs.marginTop || '0') || 0;
+        const mb = Number.parseFloat(cs.marginBottom || '0') || 0;
+        return Math.ceil(rectH + mt + mb);
+      });
+
       setBlockHeights(heights);
     };
 
@@ -399,7 +406,6 @@ export function PrescriptionPreview({
     return () => ro.disconnect();
   }, [shouldMeasure, measureKey]);
 
-  // split into pages with “no partial visit” guarantee
   useEffect(() => {
     if (!historyEnabled) {
       setPages([chainVisitIds]);
@@ -414,9 +420,8 @@ export function PrescriptionPreview({
       return;
     }
 
-    // ✅ safety margin to guarantee we never clip the last block
-    // (handles font load differences, rounding, borders, etc.)
-    const SAFETY = 18;
+    // ✅ slightly bigger safety margin (fonts/rounding/borders)
+    const SAFETY = 34;
 
     const result: string[][] = [];
     let cur: string[] = [];
@@ -427,7 +432,7 @@ export function PrescriptionPreview({
       const id = chainVisitIds[i];
       const h = blockHeights[i] ?? 0;
 
-      // if this block won't fully fit, push it to next page
+      // move block if it won't fully fit
       if (cur.length > 0 && used + h > cap - SAFETY) {
         result.push(cur);
         cur = [];
@@ -441,28 +446,9 @@ export function PrescriptionPreview({
 
     if (cur.length) result.push(cur);
 
-    // ensure reception notes fit on last page; if not, create a notes-only page
-    if (hasNotes) {
-      const APPROX_NOTES_H = 120;
-      const lastCap = result.length === 1 ? capFirst : capNext;
-
-      const lastIds = result[result.length - 1] ?? [];
-      const lastUsed = lastIds
-        .map((id) => {
-          const idx = chainVisitIds.indexOf(id);
-          return idx >= 0 ? (blockHeights[idx] ?? 0) : 0;
-        })
-        .reduce((a, b) => a + b, 0);
-
-      if (lastUsed + APPROX_NOTES_H > lastCap - SAFETY) {
-        result.push([]);
-      }
-    }
-
     setPages(result.length ? result : [chainVisitIds]);
-  }, [historyEnabled, shouldMeasure, chainVisitIds, blockHeights, capFirst, capNext, hasNotes]);
+  }, [historyEnabled, shouldMeasure, chainVisitIds, blockHeights, capFirst, capNext]);
 
-  // clamp page
   useEffect(() => {
     const total = pages.length || 1;
     if (page > total) setPage(total);
@@ -512,17 +498,13 @@ export function PrescriptionPreview({
     );
   };
 
-  // Only show notes on LAST page
   const shouldShowNotesOnThisPage = hasNotes && page === totalPages;
+  const isFirstPage = page === 1;
 
-  // ---------------------------------------
-  // ✅ Offscreen measurement template
-  // ---------------------------------------
   const measureTemplate = shouldMeasure ? (
     <div className="pointer-events-none absolute left-[-99999px] top-0 opacity-0">
       <div style={{ width: BASE_W }}>
         <div ref={measureContainerRef} className="w-full">
-          {/* Page 1 template */}
           <div className="h-[1080px] w-full overflow-hidden border bg-white">
             <div className="flex h-full flex-col">
               <div className="shrink-0 px-6 pt-4">
@@ -533,35 +515,25 @@ export function PrescriptionPreview({
                 <div className="h-24 w-full" />
                 <div className="mt-3 h-px w-full" />
               </div>
-
-              {/* ✅ include SAME padding as visible content: pt-4 pb-4 */}
               <div className="min-h-0 flex-1 px-6 pt-4 pb-4">
                 <div ref={measureFirstCapRef} className="h-full w-full" />
               </div>
             </div>
           </div>
 
-          {/* Blank page template */}
           <div className="mt-8 h-[1080px] w-full overflow-hidden border bg-white">
             <div className="flex h-full flex-col">
-              {/* ✅ include SAME padding as visible content: pt-6 pb-4 */}
               <div className="min-h-0 flex-1 px-6 pt-6 pb-4">
                 <div ref={measureNextCapRef} className="h-full w-full" />
               </div>
             </div>
           </div>
 
-          {/* Blocks for measuring heights */}
           <div className="mt-8 px-6 pt-4">{renderHistoryBlocks(chainVisitIds)}</div>
         </div>
       </div>
     </div>
   ) : null;
-
-  // ---------------------------------------
-  // ✅ Visible render (ONE page only)
-  // ---------------------------------------
-  const isFirstPage = page === 1;
 
   return (
     <div className="w-full">
@@ -695,7 +667,6 @@ export function PrescriptionPreview({
                     <div className="mt-3 h-px w-full bg-gray-900/30" />
                   </div>
 
-                  {/* ✅ IMPORTANT: pt-4 pb-4 so last block doesn’t clip */}
                   <div className="min-h-0 flex-1 px-6 pt-4 pb-4">
                     {!historyEnabled ? (
                       <>
@@ -729,13 +700,10 @@ export function PrescriptionPreview({
                   {shouldShowNotesOnThisPage ? renderNotes() : null}
                 </div>
               ) : (
-                // Blank page (no header)
                 <div className="flex h-full flex-col">
-                  {/* ✅ IMPORTANT: pt-6 pb-4 so last block doesn’t clip */}
                   <div className="min-h-0 flex-1 px-6 pt-6 pb-4">
                     {historyEnabled ? renderHistoryBlocks(visiblePageIds) : null}
                   </div>
-
                   {shouldShowNotesOnThisPage ? renderNotes() : null}
                 </div>
               )}
@@ -743,7 +711,6 @@ export function PrescriptionPreview({
           </div>
         </div>
 
-        {/* ✅ Pagination OUTSIDE the prescription area (below preview) */}
         {historyEnabled ? (
           <PaginationBar page={page} total={totalPages} onChange={setPage} />
         ) : null}
