@@ -18,12 +18,23 @@ jobs:
     env:
       AWS_REGION: us-east-1
       SST_STAGE: prod
+
+      # Required
       SST_PASSPHRASE: ${{ secrets.SST_PASSPHRASE }}
+
+      # Your existing secrets
       QZ_PRIVATE_KEY_SECRET_ID: ${{ secrets.QZ_PRIVATE_KEY_SECRET_ID }}
       NEXT_PUBLIC_WS_BASE_URL: ${{ secrets.NEXT_PUBLIC_WS_BASE_URL }}
       NEXT_PUBLIC_API_BASE_URL: ${{ secrets.NEXT_PUBLIC_API_BASE_URL }}
+
+      # Domain/cert (used by infra if you wire it in)
       APP_DOMAIN: trial.tcplgroups.com
       APP_CERT_ARN: ${{ secrets.APP_CERT_ARN }}
+
+      # ✅ NEW: JWT secrets stored in GitHub
+      JWT_ACCESS_SECRET: ${{ secrets.JWT_ACCESS_SECRET }}
+      JWT_REFRESH_SECRET: ${{ secrets.JWT_REFRESH_SECRET }}
+
       NODE_OPTIONS: --max-old-space-size=8192
       SST_TELEMETRY_DISABLED: '1'
       TURBO_TELEMETRY_DISABLED: '1'
@@ -63,7 +74,11 @@ jobs:
           test -n "${SST_PASSPHRASE}"
           test -n "${QZ_PRIVATE_KEY_SECRET_ID}"
 
-          # ✅ Bootstrap-friendly: WS URL may not exist before first deploy
+          # JWT secrets must exist for prod
+          test -n "${JWT_ACCESS_SECRET}"
+          test -n "${JWT_REFRESH_SECRET}"
+
+          # Bootstrap-friendly: WS URL may not exist before first deploy
           if [ -z "${NEXT_PUBLIC_WS_BASE_URL}" ]; then
             echo "::warning::NEXT_PUBLIC_WS_BASE_URL is not set. Realtime UI will not connect until after first prod deploy. Set it and redeploy."
           fi
@@ -124,6 +139,15 @@ jobs:
             console.log("[pulumi-error-patch] WARNING: nothing patched.");
           }
           NODE
+
+      # ✅ NEW: Seed SST secrets from GitHub before deploying
+      - name: Seed SST secrets (JWT) for prod stage
+        run: |
+          set -euxo pipefail
+
+          # These set the SST-managed secrets used by infra/secrets.ts
+          npx sst secret set JWT_ACCESS_SECRET "$JWT_ACCESS_SECRET" --stage "$SST_STAGE"
+          npx sst secret set JWT_REFRESH_SECRET "$JWT_REFRESH_SECRET" --stage "$SST_STAGE"
 
       - name: Deploy
         run: |
