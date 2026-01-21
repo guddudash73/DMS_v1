@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Textarea } from '@/components/ui/textarea';
 
-// ✅ Lazy-load heavy widgets
+// ✅ Lazy-load heavy widgets (same pattern as doctor page)
 const PrescriptionPreview = dynamic(
   () => import('@/components/prescription/PrescriptionPreview').then((m) => m.PrescriptionPreview),
   {
@@ -46,6 +46,7 @@ import {
   useGetVisitRxVersionsQuery,
   useUpdateVisitRxReceptionNotesMutation,
   useGetDoctorsQuery,
+  useGetPatientVisitsQuery,
   useUpdateVisitStatusMutation,
 } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
@@ -59,6 +60,8 @@ type VisitExtras = {
   opdNumber?: string;
   sdId?: string;
   doctorId?: string;
+  anchorVisitId?: string;
+  tag?: string;
 };
 type VisitWithExtras = Visit & VisitExtras;
 
@@ -178,6 +181,14 @@ function getErrorMessage(err: unknown): string {
   return 'Request failed.';
 }
 
+function anchorIdFromVisit(v: Visit): string | undefined {
+  return (
+    getPropString(v as unknown, 'anchorVisitId') ??
+    getPropString(v as unknown, 'anchorId') ??
+    undefined
+  );
+}
+
 export default function ClinicVisitInfoPageClient() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -185,21 +196,36 @@ export default function ClinicVisitInfoPageClient() {
 
   const visitId = String(params?.visitId ?? '');
 
-  // ✅ Don’t force refetch on mount; let RTK Query cache help
-  const visitQuery = useGetVisitByIdQuery(visitId, { skip: !visitId });
+  const visitQuery = useGetVisitByIdQuery(visitId, {
+    skip: !visitId,
+    refetchOnMountOrArgChange: true,
+  });
 
   const visit = (visitQuery.data ?? null) as VisitWithExtras | null;
   const isOfflineVisit = Boolean(visit?.isOffline);
 
   const patientId = visit?.patientId;
 
-  const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
+  const patientQuery = useGetPatientByIdQuery(patientId ?? '', {
+    skip: !patientId,
+    refetchOnMountOrArgChange: true,
+  });
 
-  // doctors list is cached 1 hour in api.ts; no aggressive refetch needed
   const doctorsQuery = useGetDoctorsQuery(undefined);
+  const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', {
+    skip: !patientId,
+    refetchOnMountOrArgChange: true,
+  });
 
-  // versions: keep for dropdown
-  const versionsQuery = useGetVisitRxVersionsQuery({ visitId }, { skip: !visitId });
+  const allVisitsRaw = React.useMemo(() => {
+    const items = getProp(visitsQuery.data, 'items');
+    return Array.isArray(items) ? (items as Visit[]) : [];
+  }, [visitsQuery.data]);
+
+  const versionsQuery = useGetVisitRxVersionsQuery(
+    { visitId },
+    { skip: !visitId, refetchOnMountOrArgChange: true },
+  );
 
   const versions = React.useMemo(() => {
     const v = getProp(versionsQuery.data, 'versions');
@@ -218,14 +244,16 @@ export default function ClinicVisitInfoPageClient() {
     if (latestVersion != null) setSelectedRxVersion(latestVersion);
   }, [latestVersion, selectedRxVersion]);
 
-  // ✅ only latest is needed for first paint
-  const rxLatestQuery = useGetVisitRxQuery({ visitId }, { skip: !visitId });
+  const rxLatestQuery = useGetVisitRxQuery(
+    { visitId },
+    { skip: !visitId, refetchOnMountOrArgChange: true },
+  );
 
-  // versioned only when user has a selection (kept)
   const rxByVersionQuery = useGetVisitRxQuery(
     { visitId, version: selectedRxVersion ?? undefined },
     {
       skip: !visitId || selectedRxVersion == null,
+      refetchOnMountOrArgChange: true,
     },
   );
 
@@ -305,6 +333,8 @@ export default function ClinicVisitInfoPageClient() {
     try {
       await updateNotes({ visitId, receptionNotes: notes }).unwrap();
       toast.success('Notes saved.');
+      rxLatestQuery.refetch();
+      rxByVersionQuery.refetch();
     } catch (err: unknown) {
       toast.error(getErrorMessage(err) ?? 'Failed to save notes.');
     }
@@ -411,6 +441,61 @@ export default function ClinicVisitInfoPageClient() {
     updateVisitStatusState.isLoading ||
     (!isCheckedOut && !visitDone && !isOfflineVisit);
 
+  const rxChain = React.useMemo(() => {
+    const meta = new Map<string, Visit>();
+    for (const v of allVisitsRaw) meta.set(v.visitId, v);
+    if (visit?.visitId) meta.set(visit.visitId, visit);
+
+    const tag = getPropString(visit, 'tag');
+    const anchorVisitId = getPropString(visit, 'anchorVisitId');
+
+    const anchorId = tag === 'F' ? anchorVisitId : visitId;
+    if (!anchorId) return { visitIds: [visitId], meta, currentVisitId: visitId };
+
+    const anchor = meta.get(anchorId);
+    const chain: Visit[] = [];
+    if (anchor) chain.push(anchor);
+
+    const followups: Visit[] = [];
+    for (const v of meta.values()) {
+      const aId = anchorIdFromVisit(v);
+      if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
+    }
+
+    followups.sort(
+      (a, b) =>
+        (getPropNumber(a, 'createdAt') ?? getPropNumber(a, 'updatedAt') ?? 0) -
+        (getPropNumber(b, 'createdAt') ?? getPropNumber(b, 'updatedAt') ?? 0),
+    );
+    chain.push(...followups);
+
+    if (!chain.some((v) => v.visitId === visitId)) {
+      const cur = meta.get(visitId);
+      chain.push(cur ?? ({ visitId } as Visit));
+    }
+
+    chain.sort(
+      (a, b) =>
+        (getPropNumber(a, 'createdAt') ?? getPropNumber(a, 'updatedAt') ?? 0) -
+        (getPropNumber(b, 'createdAt') ?? getPropNumber(b, 'updatedAt') ?? 0),
+    );
+
+    const seen = new Set<string>();
+    const chainIdsOrdered = chain
+      .map((v) => v.visitId)
+      .filter((id) => {
+        if (!id) return false;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+
+    const idx = chainIdsOrdered.indexOf(visitId);
+    const limitedIds = idx >= 0 ? chainIdsOrdered.slice(0, idx + 1) : [visitId];
+
+    return { visitIds: limitedIds, meta, currentVisitId: visitId };
+  }, [allVisitsRaw, visit, visitId]);
+
   const versionOptions = React.useMemo(() => {
     if (!versions.length) return [];
     const latest = latestVersion ?? null;
@@ -425,6 +510,9 @@ export default function ClinicVisitInfoPageClient() {
     rxByVersionQuery.isFetching;
 
   const rxReady = !!rxToShow;
+
+  // ✅ Option A: keep chain metadata, but only fetch older visits when user toggles
+  const [showHistory, setShowHistory] = React.useState(false);
 
   type PreviewProps = React.ComponentProps<typeof PrescriptionPreview>;
   const Preview = PrescriptionPreview as React.ComponentType<PreviewProps>;
@@ -526,6 +614,27 @@ export default function ClinicVisitInfoPageClient() {
             </div>
           ) : null}
 
+          {/* ✅ Toggle: keep chain, but don’t fetch history until enabled */}
+          <div className="mb-3 flex items-center justify-between rounded-xl border bg-white px-3 py-2">
+            <div className="text-xs text-gray-700">
+              Visits in chain:{' '}
+              <span className="font-semibold text-gray-900">{rxChain.visitIds.length}</span>
+            </div>
+
+            <button
+              type="button"
+              className="rounded-xl border bg-white px-3 py-1 text-xs font-medium text-gray-800 hover:bg-gray-50"
+              onClick={() => setShowHistory((v) => !v)}
+              title={
+                showHistory
+                  ? 'Hide previous visits'
+                  : 'Show previous visits (loads older prescriptions)'
+              }
+            >
+              {showHistory ? 'Hide history' : 'Show history'}
+            </button>
+          </div>
+
           <div className="min-w-0 overflow-hidden">
             <Preview
               patientName={patientName as PreviewProps['patientName']}
@@ -544,7 +653,10 @@ export default function ClinicVisitInfoPageClient() {
               }
               receptionNotes={notes}
               toothDetails={toothDetails}
-              // ✅ IMPORTANT: do NOT pass history props here (kills extra Rx calls)
+              currentVisitId={rxChain.currentVisitId}
+              chainVisitIds={rxChain.visitIds}
+              visitMetaMap={rxChain.meta}
+              historyEnabled={showHistory} // ✅ NEW: prevents history fetch until true
             />
           </div>
         </div>
