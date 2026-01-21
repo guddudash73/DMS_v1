@@ -195,6 +195,15 @@ function VisitRxPreviewBlock(props: {
   );
 }
 
+function PageIndicator({ page, total }: { page: number; total: number }) {
+  if (total <= 1) return null;
+  return (
+    <div className="absolute right-4 top-3 text-[10px] font-semibold text-gray-500">
+      {page}/{total}
+    </div>
+  );
+}
+
 export function PrescriptionPreview({
   patientName,
   patientPhone,
@@ -272,6 +281,13 @@ export function PrescriptionPreview({
 
   const BASE_W = 760;
   const BASE_H = Math.round((BASE_W * 297) / 210);
+
+  // Pages:
+  // Page 1: full header + content
+  // Page 2+: blank pages (no header), only overflow content
+  const CONTENT_H_FIRST = 560; // tuned for your current header/patient layout at BASE scale
+  const CONTENT_H_NEXT = 980; // blank page: more room (no header)
+
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
 
@@ -292,193 +308,362 @@ export function PrescriptionPreview({
   const currentToothDetails = useMemo(() => toothDetailsProp ?? [], [toothDetailsProp]);
   const showCurrentToothDetails = !historyEnabled && currentToothDetails.length > 0;
 
-  return (
-    <div ref={wrapRef} className="w-full">
-      <div
-        className="relative w-full"
-        style={{
-          height: Math.ceil(BASE_H * scale),
-        }}
-      >
-        <div
-          className="origin-top-left"
-          style={{
-            width: BASE_W,
-            height: BASE_H,
-            transform: `scale(${scale})`,
-          }}
-        >
-          <div className="h-full w-full overflow-hidden rounded-xl border bg-white shadow-sm">
-            <div className="flex h-full flex-col">
-              <div className="shrink-0 px-6 pt-4">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="relative h-16 w-16">
-                    <Image
-                      src="/rx-logo-r.png"
-                      alt="Rx Logo"
-                      fill
-                      className="object-contain"
-                      priority
-                      unoptimized
-                    />
-                  </div>
+  // -----------------------------
+  // ✅ PAGINATION FOR HISTORY MODE
+  // -----------------------------
+  const measureContainerRef = useRef<HTMLDivElement | null>(null);
+  const [blockHeights, setBlockHeights] = useState<number[]>([]);
+  const [pages, setPages] = useState<string[][]>([chainVisitIds]);
 
-                  <div className="mt-1 flex w-full flex-col items-center justify-center text-center">
-                    <div className="text-[10px] font-semibold tracking-[0.30em] text-emerald-600">
-                      CONTACT
-                    </div>
-                    <div className="text-[12px] font-semibold text-gray-900">{CONTACT_NUMBER}</div>
+  // Re-measure when content changes that could affect height
+  const measureKey = useMemo(() => {
+    return [
+      historyEnabled ? 'H' : 'N',
+      chainVisitIds.join(','),
+      String(lines.length),
+      String(currentToothDetails.length),
+      receptionNotes?.length ?? 0,
+    ].join('|');
+  }, [historyEnabled, chainVisitIds, lines.length, currentToothDetails.length, receptionNotes]);
 
-                    <div className="mt-1 max-w-130 text-[9px] font-medium leading-4  text-gray-700">
-                      {ADDRESS_ONE_LINE}
-                    </div>
-                    <div className="max-w-130 text-[9px] font-medium leading-4 text-red-400 uppercase">
-                      {CLINIC_HOURS}
-                    </div>
-                  </div>
+  // Measure blocks in an offscreen container
+  useEffect(() => {
+    if (!historyEnabled) {
+      setPages([chainVisitIds]);
+      return;
+    }
 
-                  <div className="relative h-14 w-38">
-                    <Image
-                      src="/dashboard-logo.png"
-                      alt="Sarangi Dentistry"
-                      fill
-                      className="object-contain"
-                      priority
-                      unoptimized
-                    />
-                  </div>
-                </div>
+    const el = measureContainerRef.current;
+    if (!el) return;
 
-                <div className="mt-2 h-px w-full bg-emerald-600/60" />
-              </div>
+    const measure = () => {
+      const kids = Array.from(el.querySelectorAll('[data-rx-block="1"]')) as HTMLElement[];
+      const heights = kids.map((k) => Math.ceil(k.getBoundingClientRect().height));
+      setBlockHeights(heights);
+    };
 
-              <div className="shrink-0 px-6 pt-3">
-                <div className="flex items-start justify-between gap-6">
-                  <div className="min-w-0 flex flex-col">
-                    <div className="text-[0.8rem] font-bold text-gray-900">
-                      Dr. Soumendra Sarangi
-                    </div>
-                    <div className="mt-0 text-[0.7rem] font-light text-gray-700">
-                      B.D.S. Regd. - 68
-                    </div>
-                  </div>
+    measure();
 
-                  <div className="min-w-0 flex flex-col items-end text-right">
-                    <div className="text-[0.8rem] font-bold text-gray-900">
-                      Dr. Vaishnovee Sarangi
-                    </div>
-                    <div className="mt-0 text-[0.7rem] font-light text-gray-700">
-                      B.D.S. Redg. - 3057
-                    </div>
-                  </div>
-                </div>
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [historyEnabled, measureKey]);
 
-                <div className="mt-2 flex w-full justify-between gap-6">
-                  <div className="space-y-0.5 text-[0.8rem] text-gray-800">
-                    <div className="flex gap-3">
-                      <div className="w-20 text-gray-600">Patient Name</div>
-                      <div className="text-gray-600">:</div>
-                      <div className="font-semibold text-gray-900">{patientName ?? '—'}</div>
-                    </div>
+  // Split into pages based on measured heights
+  useEffect(() => {
+    if (!historyEnabled) {
+      setPages([chainVisitIds]);
+      return;
+    }
 
-                    <div className="flex gap-3">
-                      <div className="w-20 text-gray-600">Contact No.</div>
-                      <div className="text-gray-600">:</div>
-                      <div className="font-semibold text-gray-900">{patientPhone ?? '—'}</div>
-                    </div>
+    // If heights aren’t ready, keep single page to avoid flicker
+    if (!blockHeights.length || blockHeights.length !== chainVisitIds.length) {
+      setPages([chainVisitIds]);
+      return;
+    }
 
-                    <div className="flex gap-3">
-                      <div className="w-20 text-gray-600">Age/Sex</div>
-                      <div className="text-gray-600">:</div>
-                      <div className="font-semibold text-gray-900">{ageSex}</div>
-                    </div>
-                  </div>
+    const result: string[][] = [];
+    let cur: string[] = [];
+    let used = 0;
 
-                  <div className="w-[320px] justify-start space-y-0 text-[0.8rem]">
-                    <div className="flex gap-3">
-                      <div className="w-20 text-gray-600">Regd. Date</div>
-                      <div className="text-gray-600">:</div>
-                      <div className="font-semibold text-gray-900">{visitISO}</div>
-                    </div>
+    let cap = CONTENT_H_FIRST;
 
-                    <div className="flex gap-3">
-                      <div className="w-20 text-gray-600">SD. ID</div>
-                      <div className="text-gray-600">:</div>
-                      <div className="font-semibold text-gray-900">{sdId ?? '—'}</div>
-                    </div>
+    for (let i = 0; i < chainVisitIds.length; i++) {
+      const id = chainVisitIds[i];
+      const h = blockHeights[i] ?? 0;
 
-                    <div className="flex gap-3">
-                      <div className="w-20 text-gray-600">OPD. No</div>
-                      <div className="text-gray-600">:</div>
-                      <div className="font-semibold text-gray-900">{headerOpdNo}</div>
-                    </div>
-                  </div>
-                </div>
+      // if current page has something and adding this would overflow -> new page
+      if (cur.length > 0 && used + h > cap) {
+        result.push(cur);
+        cur = [];
+        used = 0;
+        cap = CONTENT_H_NEXT; // subsequent pages are blank pages
+      }
 
-                <div className="mt-3 h-px w-full bg-gray-900/30" />
-              </div>
+      cur.push(id);
+      used += h;
+    }
 
-              <div className="min-h-0 flex-1 px-6 pt-4">
-                {!historyEnabled ? (
-                  <>
-                    {showCurrentToothDetails ? (
-                      <div className="mb-3">
-                        <ToothDetailsBlock toothDetails={currentToothDetails} />
-                        <div className="mt-3 h-px w-full bg-gray-200" />
-                      </div>
-                    ) : null}
+    if (cur.length) result.push(cur);
 
-                    {lines.length === 0 ? (
-                      <div className="text-[13px] text-gray-500">No medicines added yet.</div>
-                    ) : (
-                      <ol className="text-sm leading-6 text-gray-900">
-                        {lines.map((l, idx) => (
-                          <li key={idx} className="flex gap-1">
-                            <div className="w-4 shrink-0 text-right font-medium">{idx + 1}.</div>
-                            <div className="font-medium">{buildLineText(l)}</div>
-                          </li>
-                        ))}
-                      </ol>
-                    )}
-                  </>
-                ) : (
-                  <div className="space-y-4">
-                    {chainVisitIds.map((id) => {
-                      const v = visitMetaMap.get(id);
+    // Reception notes should appear at the end; if last page is too tight, move notes to a new blank page.
+    // We approximate notes height; if you want exact measurement, we can measure it too.
+    if (hasNotes) {
+      const APPROX_NOTES_H = 90;
+      const lastCap = result.length === 1 ? CONTENT_H_FIRST : CONTENT_H_NEXT;
+      const lastPageIds = result[result.length - 1] ?? [];
+      const lastHeights = lastPageIds
+        .map((id) => {
+          const idx = chainVisitIds.indexOf(id);
+          return idx >= 0 ? (blockHeights[idx] ?? 0) : 0;
+        })
+        .reduce((a, b) => a + b, 0);
 
-                      const isAnchor = anchorVisitId != null && id === anchorVisitId;
-                      const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
+      if (lastPageIds.length > 0 && lastHeights + APPROX_NOTES_H > lastCap) {
+        result.push([]); // extra blank page for notes
+      }
+    }
 
-                      return (
-                        <VisitRxPreviewBlock
-                          key={id}
-                          visitId={id === 'CURRENT' ? '' : id}
-                          isCurrent={id === currentVisitId}
-                          currentLines={lines}
-                          visit={v}
-                          showOpdInline={!isAnchor}
-                          opdInlineText={opdInline}
-                          currentToothDetails={currentToothDetails}
-                        />
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
+    setPages(result.length ? result : [chainVisitIds]);
+  }, [historyEnabled, chainVisitIds, blockHeights, hasNotes]);
 
-              {hasNotes ? (
-                <div className="shrink-0 px-6 pb-2">
-                  <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
-                    <div className="text-[10px] font-semibold text-gray-700">Reception Notes</div>
-                    <div className="mt-1 whitespace-pre-wrap text-[10px] leading-4 text-gray-900">
-                      {receptionNotes}
-                    </div>
-                  </div>
-                </div>
-              ) : null}
+  // -----------------------------
+  // RENDER HELPERS
+  // -----------------------------
+  const renderHistoryBlocks = (ids: string[]) => {
+    return (
+      <div className="space-y-4">
+        {ids.map((id) => {
+          const v = visitMetaMap.get(id);
+          const isAnchor = anchorVisitId != null && id === anchorVisitId;
+          const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
+
+          return (
+            <div key={id} data-rx-block="1">
+              <VisitRxPreviewBlock
+                visitId={id === 'CURRENT' ? '' : id}
+                isCurrent={id === currentVisitId}
+                currentLines={lines}
+                visit={v}
+                showOpdInline={!isAnchor}
+                opdInlineText={opdInline}
+                currentToothDetails={currentToothDetails}
+              />
             </div>
+          );
+        })}
+      </div>
+    );
+  };
+
+  const renderNotes = () => {
+    if (!hasNotes) return null;
+    return (
+      <div className="shrink-0 px-6 pb-2">
+        <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
+          <div className="text-[10px] font-semibold text-gray-700">Reception Notes</div>
+          <div className="mt-1 whitespace-pre-wrap text-[10px] leading-4 text-gray-900">
+            {receptionNotes}
           </div>
         </div>
+      </div>
+    );
+  };
+
+  // Offscreen measurement for history blocks
+  const shouldMeasure = historyEnabled && chainVisitIds.length > 1;
+
+  return (
+    <div ref={wrapRef} className="w-full">
+      {/* Offscreen measure container */}
+      {shouldMeasure ? (
+        <div
+          ref={measureContainerRef}
+          className="pointer-events-none absolute left-[-99999px] top-0 w-[760px] opacity-0"
+        >
+          <div className="px-6 pt-4">{renderHistoryBlocks(chainVisitIds)}</div>
+        </div>
+      ) : null}
+
+      {/* Visible pages */}
+      <div className="w-full space-y-4">
+        {pages.map((pageIds, pageIdx) => {
+          const pageNum = pageIdx + 1;
+          const totalPages = pages.length;
+
+          const isFirst = pageIdx === 0;
+
+          return (
+            <div
+              key={`page-${pageIdx}`}
+              className="relative w-full"
+              style={{
+                height: Math.ceil(BASE_H * scale),
+              }}
+            >
+              <div
+                className="origin-top-left"
+                style={{
+                  width: BASE_W,
+                  height: BASE_H,
+                  transform: `scale(${scale})`,
+                }}
+              >
+                <div className="relative h-full w-full overflow-hidden rounded-xl border bg-white shadow-sm">
+                  <PageIndicator page={pageNum} total={totalPages} />
+
+                  {/* Page 1 has header; other pages are blank */}
+                  {isFirst ? (
+                    <div className="flex h-full flex-col">
+                      <div className="shrink-0 px-6 pt-4">
+                        <div className="flex items-start justify-between gap-4">
+                          <div className="relative h-16 w-16">
+                            <Image
+                              src="/rx-logo-r.png"
+                              alt="Rx Logo"
+                              fill
+                              className="object-contain"
+                              priority
+                              unoptimized
+                            />
+                          </div>
+
+                          <div className="mt-1 flex w-full flex-col items-center justify-center text-center">
+                            <div className="text-[10px] font-semibold tracking-[0.30em] text-emerald-600">
+                              CONTACT
+                            </div>
+                            <div className="text-[12px] font-semibold text-gray-900">
+                              {CONTACT_NUMBER}
+                            </div>
+
+                            <div className="mt-1 max-w-130 text-[9px] font-medium leading-4  text-gray-700">
+                              {ADDRESS_ONE_LINE}
+                            </div>
+                            <div className="max-w-130 text-[9px] font-medium leading-4 text-red-400 uppercase">
+                              {CLINIC_HOURS}
+                            </div>
+                          </div>
+
+                          <div className="relative h-14 w-38">
+                            <Image
+                              src="/dashboard-logo.png"
+                              alt="Sarangi Dentistry"
+                              fill
+                              className="object-contain"
+                              priority
+                              unoptimized
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-2 h-px w-full bg-emerald-600/60" />
+                      </div>
+
+                      <div className="shrink-0 px-6 pt-3">
+                        <div className="flex items-start justify-between gap-6">
+                          <div className="min-w-0 flex flex-col">
+                            <div className="text-[0.8rem] font-bold text-gray-900">
+                              Dr. Soumendra Sarangi
+                            </div>
+                            <div className="mt-0 text-[0.7rem] font-light text-gray-700">
+                              B.D.S. Regd. - 68
+                            </div>
+                          </div>
+
+                          <div className="min-w-0 flex flex-col items-end text-right">
+                            <div className="text-[0.8rem] font-bold text-gray-900">
+                              Dr. Vaishnovee Sarangi
+                            </div>
+                            <div className="mt-0 text-[0.7rem] font-light text-gray-700">
+                              B.D.S. Redg. - 3057
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-2 flex w-full justify-between gap-6">
+                          <div className="space-y-0.5 text-[0.8rem] text-gray-800">
+                            <div className="flex gap-3">
+                              <div className="w-20 text-gray-600">Patient Name</div>
+                              <div className="text-gray-600">:</div>
+                              <div className="font-semibold text-gray-900">
+                                {patientName ?? '—'}
+                              </div>
+                            </div>
+
+                            <div className="flex gap-3">
+                              <div className="w-20 text-gray-600">Contact No.</div>
+                              <div className="text-gray-600">:</div>
+                              <div className="font-semibold text-gray-900">
+                                {patientPhone ?? '—'}
+                              </div>
+                            </div>
+
+                            <div className="flex gap-3">
+                              <div className="w-20 text-gray-600">Age/Sex</div>
+                              <div className="text-gray-600">:</div>
+                              <div className="font-semibold text-gray-900">{ageSex}</div>
+                            </div>
+                          </div>
+
+                          <div className="w-[320px] justify-start space-y-0 text-[0.8rem]">
+                            <div className="flex gap-3">
+                              <div className="w-20 text-gray-600">Regd. Date</div>
+                              <div className="text-gray-600">:</div>
+                              <div className="font-semibold text-gray-900">{visitISO}</div>
+                            </div>
+
+                            <div className="flex gap-3">
+                              <div className="w-20 text-gray-600">SD. ID</div>
+                              <div className="text-gray-600">:</div>
+                              <div className="font-semibold text-gray-900">{sdId ?? '—'}</div>
+                            </div>
+
+                            <div className="flex gap-3">
+                              <div className="w-20 text-gray-600">OPD. No</div>
+                              <div className="text-gray-600">:</div>
+                              <div className="font-semibold text-gray-900">{headerOpdNo}</div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-3 h-px w-full bg-gray-900/30" />
+                      </div>
+
+                      <div className="min-h-0 flex-1 px-6 pt-4">
+                        {!historyEnabled ? (
+                          <>
+                            {showCurrentToothDetails ? (
+                              <div className="mb-3">
+                                <ToothDetailsBlock toothDetails={currentToothDetails} />
+                                <div className="mt-3 h-px w-full bg-gray-200" />
+                              </div>
+                            ) : null}
+
+                            {lines.length === 0 ? (
+                              <div className="text-[13px] text-gray-500">
+                                No medicines added yet.
+                              </div>
+                            ) : (
+                              <ol className="text-sm leading-6 text-gray-900">
+                                {lines.map((l, idx) => (
+                                  <li key={idx} className="flex gap-1">
+                                    <div className="w-4 shrink-0 text-right font-medium">
+                                      {idx + 1}.
+                                    </div>
+                                    <div className="font-medium">{buildLineText(l)}</div>
+                                  </li>
+                                ))}
+                              </ol>
+                            )}
+                          </>
+                        ) : (
+                          renderHistoryBlocks(pageIds)
+                        )}
+                      </div>
+
+                      {/* Notes only on the LAST page */}
+                      {pageIdx === pages.length - 1 ? renderNotes() : null}
+                    </div>
+                  ) : (
+                    // Blank pages (no header)
+                    <div className="flex h-full flex-col">
+                      <div className="min-h-0 flex-1 px-6 pt-6">
+                        {historyEnabled ? (
+                          renderHistoryBlocks(pageIds)
+                        ) : (
+                          <div className="text-[13px] text-gray-500">—</div>
+                        )}
+                      </div>
+
+                      {/* Notes only on the LAST page */}
+                      {pageIdx === pages.length - 1 ? renderNotes() : null}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
