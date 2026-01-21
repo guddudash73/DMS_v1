@@ -5,14 +5,14 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 
 import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 import type { Visit } from '@dcm/types';
-import type { Prescription } from '@dcm/types';
-
 import { useGetVisitRxQuery } from '@/src/store/api';
 
-import { ClipboardList, Image as ImageIcon } from 'lucide-react';
+import { ClipboardList, Image as ImageIcon, History } from 'lucide-react';
 import type { VisitPrescriptionQuickLookDialogProps } from './dialogs/VisitPrescriptionQuickLookDialog';
 
 const PrescriptionPreview = dynamic(
@@ -77,7 +77,6 @@ export function DoctorVisitDoneView(props: {
     visitId,
     patientId,
     patient,
-    visit,
     doctorName,
     doctorRegdLabel,
     visitDate,
@@ -86,17 +85,22 @@ export function DoctorVisitDoneView(props: {
     rxLatest,
   } = props;
 
-  // keep same “version selection” behavior you had, but simplified here:
-  // (If you need the exact version-selector logic, we can move it in as well.)
+  // Rx selection: prefer fresh query, fall back to rxLatest
   const rxQuery = useGetVisitRxQuery({ visitId });
   const rxToShow = rxQuery.data?.rx ?? (isRecord(rxLatest) ? rxLatest : null);
 
   const lines = Array.isArray(getProp(rxToShow, 'lines'))
-    ? (getProp(rxToShow, 'lines') as any[] as any)
+    ? (getProp(rxToShow, 'lines') as any[])
     : [];
   const toothDetails = Array.isArray(getProp(rxToShow, 'toothDetails'))
-    ? (getProp(rxToShow, 'toothDetails') as any[] as any)
+    ? (getProp(rxToShow, 'toothDetails') as any[])
     : [];
+
+  // ✅ Toggle: show/hide history (mount cost)
+  const [showHistory, setShowHistory] = React.useState(true);
+
+  // ✅ Toggle: switch between Prescription and X-rays (tabs)
+  const [pane, setPane] = React.useState<'rx' | 'xray'>('rx');
 
   // Quick look dialogs (opened from history panel)
   const [rxQuickOpen, setRxQuickOpen] = React.useState(false);
@@ -114,88 +118,123 @@ export function DoctorVisitDoneView(props: {
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <Card className="lg:col-span-6 rounded-2xl border bg-white p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <ClipboardList className="h-4 w-4 text-gray-700" />
-            <div className="text-sm font-semibold text-gray-900">Prescription</div>
-            <div className="ml-auto text-xs text-gray-500">{visitDate ? visitDate.trim() : ''}</div>
-          </div>
+      <div className="mb-3 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-2 text-xs text-gray-600">
+          <History className="h-4 w-4" />
+          <span className="font-medium text-gray-900">Done Summary</span>
+          <span className="text-gray-400">·</span>
+          <span>{visitDate ? visitDate.trim() : ''}</span>
+        </div>
 
-          <div className="min-w-0 overflow-x-hidden">
-            <PrescriptionPreview
-              patientName={getProp(patient, 'name') as any}
-              patientPhone={getProp(patient, 'phone') as any}
-              patientAge={undefined}
-              patientSex={undefined}
-              sdId={getProp(patient, 'sdId') as any}
-              opdNo={opdNo}
-              doctorName={doctorName}
-              doctorRegdLabel={doctorRegdLabel}
-              visitDateLabel={visitDateLabel}
-              lines={lines as any}
-              receptionNotes={
-                isRecord(rxToShow) ? String(getProp(rxToShow, 'receptionNotes') ?? '') : ''
-              }
-              toothDetails={toothDetails as any}
-              currentVisitId={visitId}
-              chainVisitIds={[visitId]}
-              visitMetaMap={new Map()}
-            />
-          </div>
-        </Card>
-
-        <Card className="lg:col-span-6 rounded-2xl border bg-white p-4">
-          <div className="mb-3 flex items-center gap-2">
-            <ImageIcon className="h-4 w-4 text-gray-700" />
-            <div className="text-sm font-semibold text-gray-900">X-rays</div>
-            <div className="ml-auto text-xs text-gray-500">All images for this visit</div>
-          </div>
-
-          <div className="min-h-60">
-            <XrayTrayReadOnly visitId={visitId} />
-          </div>
-        </Card>
+        <div className="flex items-center gap-2 self-end rounded-xl border bg-white px-3 py-2">
+          <Switch id="toggle-history" checked={showHistory} onCheckedChange={setShowHistory} />
+          <Label htmlFor="toggle-history" className="text-xs text-gray-700">
+            Show history
+          </Label>
+        </div>
       </div>
 
-      {/* History is deferred until expanded */}
-      <DoctorVisitHistoryPanel
-        patientId={patientId}
-        onOpenVisit={(vId) => router.push(`/doctor/visits/${vId}`)}
-        onOpenRxQuick={openRxQuick}
-        onOpenXrayQuick={openXrayQuick}
-      />
+      <Tabs value={pane} onValueChange={(v) => setPane(v === 'xray' ? 'xray' : 'rx')}>
+        <TabsList className="mb-3">
+          <TabsTrigger value="rx" className="text-xs">
+            Prescription
+          </TabsTrigger>
+          <TabsTrigger value="xray" className="text-xs">
+            X-rays
+          </TabsTrigger>
+        </TabsList>
 
-      <VisitPrescriptionQuickLookDialog
-        open={rxQuickOpen}
-        onOpenChange={setRxQuickOpen}
-        visitId={quickVisitId}
-        patientId={patientId}
-        patientName={
-          typeof getProp(patient, 'name') === 'string'
-            ? (getProp(patient, 'name') as string)
-            : undefined
-        }
-        patientPhone={
-          typeof getProp(patient, 'phone') === 'string'
-            ? (getProp(patient, 'phone') as string)
-            : undefined
-        }
-        patientSdId={
-          typeof getProp(patient, 'sdId') === 'string'
-            ? (getProp(patient, 'sdId') as string)
-            : undefined
-        }
-        opdNo={opdNo}
-        doctorName={doctorName}
-        doctorRegdLabel={doctorRegdLabel}
-      />
+        <TabsContent value="rx">
+          <Card className="rounded-2xl border bg-white p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <ClipboardList className="h-4 w-4 text-gray-700" />
+              <div className="text-sm font-semibold text-gray-900">Prescription</div>
+              <div className="ml-auto text-xs text-gray-500">
+                {visitDate ? visitDate.trim() : ''}
+              </div>
+            </div>
 
-      <VisitXrayQuickLookDialog
-        open={xrayQuickOpen}
-        onOpenChange={setXrayQuickOpen}
-        visitId={quickVisitId}
-      />
+            <div className="min-w-0 overflow-x-hidden">
+              <PrescriptionPreview
+                patientName={getProp(patient, 'name') as any}
+                patientPhone={getProp(patient, 'phone') as any}
+                patientAge={undefined}
+                patientSex={undefined}
+                sdId={getProp(patient, 'sdId') as any}
+                opdNo={opdNo}
+                doctorName={doctorName}
+                doctorRegdLabel={doctorRegdLabel}
+                visitDateLabel={visitDateLabel}
+                lines={lines as any}
+                receptionNotes={
+                  isRecord(rxToShow) ? String(getProp(rxToShow, 'receptionNotes') ?? '') : ''
+                }
+                toothDetails={toothDetails as any}
+                currentVisitId={visitId}
+                chainVisitIds={[visitId]}
+                visitMetaMap={new Map()}
+              />
+            </div>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="xray">
+          <Card className="rounded-2xl border bg-white p-4">
+            <div className="mb-3 flex items-center gap-2">
+              <ImageIcon className="h-4 w-4 text-gray-700" />
+              <div className="text-sm font-semibold text-gray-900">X-rays</div>
+              <div className="ml-auto text-xs text-gray-500">All images for this visit</div>
+            </div>
+
+            <div className="min-h-60">
+              <XrayTrayReadOnly visitId={visitId} />
+            </div>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* ✅ History is mounted only if toggle is ON */}
+      {showHistory ? (
+        <>
+          <DoctorVisitHistoryPanel
+            patientId={patientId}
+            onOpenVisit={(vId) => router.push(`/doctor/visits/${vId}`)}
+            onOpenRxQuick={openRxQuick}
+            onOpenXrayQuick={openXrayQuick}
+          />
+
+          <VisitPrescriptionQuickLookDialog
+            open={rxQuickOpen}
+            onOpenChange={setRxQuickOpen}
+            visitId={quickVisitId}
+            patientId={patientId}
+            patientName={
+              typeof getProp(patient, 'name') === 'string'
+                ? (getProp(patient, 'name') as string)
+                : undefined
+            }
+            patientPhone={
+              typeof getProp(patient, 'phone') === 'string'
+                ? (getProp(patient, 'phone') as string)
+                : undefined
+            }
+            patientSdId={
+              typeof getProp(patient, 'sdId') === 'string'
+                ? (getProp(patient, 'sdId') as string)
+                : undefined
+            }
+            opdNo={opdNo}
+            doctorName={doctorName}
+            doctorRegdLabel={doctorRegdLabel}
+          />
+
+          <VisitXrayQuickLookDialog
+            open={xrayQuickOpen}
+            onOpenChange={setXrayQuickOpen}
+            visitId={quickVisitId}
+          />
+        </>
+      ) : null}
     </>
   );
 }
