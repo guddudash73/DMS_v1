@@ -338,16 +338,12 @@ export default function PrescriptionPrintPreviewPage() {
             doctorRegdLabel={resolvedDoctorRegdLabel}
             visitDateLabel={visitCreatedDateLabel}
             lines={rx?.lines ?? []}
+            currentVisitId={printChain.currentVisitId}
+            chainVisitIds={printChain.visitIds}
+            visitMetaMap={printChain.meta}
             toothDetails={currentToothDetails}
             receptionNotes={previewCurrentOnly ? undefined : (rx?.receptionNotes ?? '')}
-            displayMode={previewCurrentOnly ? 'currentOnly' : 'default'}
-            {...(!previewCurrentOnly
-              ? {
-                  currentVisitId: printChain.currentVisitId,
-                  chainVisitIds: printChain.visitIds,
-                  visitMetaMap: printChain.meta,
-                }
-              : {})}
+            currentOnly={previewCurrentOnly}
           />
         </div>
       </Card>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
 import type { RxLineType, Visit, ToothDetail } from '@dcm/types';
 import { clinicDateISO, formatClinicDateShort } from '@/src/lib/clinicTime';
@@ -8,8 +8,6 @@ import { useGetVisitRxQuery } from '@/src/store/api';
 import { ToothDetailsBlock } from './ToothDetailsBlock';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
-
-type DisplayMode = 'default' | 'currentOnly';
 
 type Props = {
   patientName?: string;
@@ -31,10 +29,12 @@ type Props = {
   toothDetails?: ToothDetail[];
 
   /**
-   * default: normal rendering (history-enabled if chain props provided)
-   * currentOnly: render ONLY current visit medicines (keeps printable alignment)
+   * ✅ When true:
+   * - show ONLY the current visit’s block
+   * - keep its vertical position exactly the same as history mode
+   * - hide header + pagination
    */
-  displayMode?: DisplayMode;
+  currentOnly?: boolean;
 };
 
 const FREQ_LABEL: Record<RxLineType['frequency'], string> = {
@@ -266,10 +266,8 @@ export function PrescriptionPreview({
 
   toothDetails: toothDetailsProp,
 
-  displayMode = 'default',
+  currentOnly = false,
 }: Props) {
-  const currentOnly = displayMode === 'currentOnly';
-
   const hasNotes = !!receptionNotes?.trim();
   const ageSex = formatAgeSex(patientAge, patientSex);
 
@@ -301,7 +299,6 @@ export function PrescriptionPreview({
   );
 
   const historyEnabled =
-    !currentOnly &&
     !!currentVisitIdProp &&
     !!chainVisitIdsProp &&
     chainVisitIdsProp.length > 0 &&
@@ -347,10 +344,11 @@ export function PrescriptionPreview({
   }, []);
 
   const currentToothDetails = useMemo(() => toothDetailsProp ?? [], [toothDetailsProp]);
+  const showCurrentToothDetails = !historyEnabled && currentToothDetails.length > 0;
 
-  // -----------------------------
-  // PAGINATION (history only)
-  // -----------------------------
+  // ---------------------------------------
+  // Pagination + "perfect fit" measurement
+  // ---------------------------------------
   const measureContainerRef = useRef<HTMLDivElement | null>(null);
   const measureFirstCapRef = useRef<HTMLDivElement | null>(null);
   const measureNextCapRef = useRef<HTMLDivElement | null>(null);
@@ -364,10 +362,6 @@ export function PrescriptionPreview({
   const [pages, setPages] = useState<string[][]>([chainVisitIds]);
   const [page, setPage] = useState(1);
 
-  useEffect(() => {
-    setPage(1);
-  }, [historyEnabled, chainVisitIds.join('|')]);
-
   const measureKey = useMemo(() => {
     return [
       historyEnabled ? 'H' : 'N',
@@ -379,6 +373,11 @@ export function PrescriptionPreview({
   }, [historyEnabled, chainVisitIds, lines.length, currentToothDetails.length, receptionNotes]);
 
   const shouldMeasure = historyEnabled && chainVisitIds.length > 1;
+
+  // reset page when chain changes (normal mode)
+  useEffect(() => {
+    if (!currentOnly) setPage(1);
+  }, [currentOnly, historyEnabled, chainVisitIds.join('|')]);
 
   useEffect(() => {
     if (!shouldMeasure) {
@@ -437,17 +436,9 @@ export function PrescriptionPreview({
       return;
     }
 
-    // tighter packing (still prevents clipping)
-    const SAFETY = 2;
+    const SAFETY = 10;
 
-    const getHeightById = (id: string) => {
-      const idx = chainVisitIds.indexOf(id);
-      return idx >= 0 ? (blockHeights[idx] ?? 0) : 0;
-    };
-
-    const computeUsed = (pageIds: string[]) => pageIds.reduce((s, id) => s + getHeightById(id), 0);
-
-    // First greedy split
+    // greedy split
     let result: string[][] = [];
     {
       let cur: string[] = [];
@@ -472,45 +463,40 @@ export function PrescriptionPreview({
       if (!result.length) result = [chainVisitIds];
     }
 
-    // If last page has notes, reduce last capacity a bit (notes live below)
-    if (hasNotes && notesH > 0 && result.length > 0) {
-      const lastIdx = result.length - 1;
-      const capLast = Math.max(0, capNext - notesH);
+    // backfill gaps (pull from next page if fits)
+    const getHeightById = (id: string) => {
+      const idx = chainVisitIds.indexOf(id);
+      return idx >= 0 ? (blockHeights[idx] ?? 0) : 0;
+    };
+    const computeUsed = (pageIds: string[]) => pageIds.reduce((s, id) => s + getHeightById(id), 0);
 
-      const lastUsed = computeUsed(result[lastIdx]);
-      if (lastUsed > capLast - SAFETY && result[lastIdx].length > 1) {
-        const moved: string[] = [];
-        while (result[lastIdx].length > 1 && computeUsed(result[lastIdx]) > capLast - SAFETY) {
-          const x = result[lastIdx].pop();
-          if (!x) break;
-          moved.unshift(x);
-        }
-        if (moved.length) result.push(moved);
-      }
-    }
-
-    // Backfill gaps: pull from next page if it fits
-    for (let pass = 0; pass < 5; pass++) {
+    for (let pass = 0; pass < 3; pass++) {
       for (let p = 0; p < result.length - 1; p++) {
         const cap = p === 0 ? capFirst : capNext;
 
         while (result[p + 1].length > 0) {
           const nextId = result[p + 1][0];
-          const used = computeUsed(result[p]);
           const h = getHeightById(nextId);
+          const used = computeUsed(result[p]);
 
           if (used + h <= cap - SAFETY) {
             result[p].push(nextId);
             result[p + 1].shift();
-          } else {
-            break;
-          }
+          } else break;
         }
       }
       result = result.filter((x) => x.length > 0);
-      if (!result.length) {
-        result = [chainVisitIds];
-        break;
+      if (!result.length) result = [chainVisitIds];
+    }
+
+    // last page notes shrink (keep it simple: if notes exist, ensure last page isn't overstuffed)
+    if (hasNotes && notesH > 0 && result.length > 0) {
+      const lastIdx = result.length - 1;
+      const lastCap = (lastIdx === 0 ? capFirst : capNext) - notesH;
+      const used = computeUsed(result[lastIdx]);
+      if (used > lastCap - SAFETY && result[lastIdx].length > 1) {
+        const moved = result[lastIdx].pop();
+        if (moved) result.push([moved]);
       }
     }
 
@@ -526,6 +512,16 @@ export function PrescriptionPreview({
     notesH,
   ]);
 
+  // ✅ If currentOnly, jump to the page that contains currentVisitId
+  useEffect(() => {
+    if (!historyEnabled) return;
+    if (!currentOnly) return;
+    if (!pages.length) return;
+
+    const idx = pages.findIndex((arr) => arr.includes(currentVisitId));
+    if (idx >= 0) setPage(idx + 1);
+  }, [currentOnly, historyEnabled, pages, currentVisitId]);
+
   useEffect(() => {
     const total = pages.length || 1;
     if (page > total) setPage(total);
@@ -535,31 +531,9 @@ export function PrescriptionPreview({
   const totalPages = pages.length || 1;
   const visiblePageIds = pages[Math.max(0, page - 1)] ?? chainVisitIds;
 
-  const renderHistoryBlocks = (ids: string[]) => {
-    return (
-      <div className="space-y-4">
-        {ids.map((id) => {
-          const v = visitMetaMap.get(id);
-          const isAnchor = anchorVisitId != null && id === anchorVisitId;
-          const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
-
-          return (
-            <div key={id} data-rx-block="1">
-              <VisitRxPreviewBlock
-                visitId={id === 'CURRENT' ? '' : id}
-                isCurrent={id === currentVisitId}
-                currentLines={lines}
-                visit={v}
-                showOpdInline={!isAnchor}
-                opdInlineText={opdInline}
-                currentToothDetails={currentToothDetails}
-              />
-            </div>
-          );
-        })}
-      </div>
-    );
-  };
+  const hiddenStyle: React.CSSProperties | undefined = currentOnly
+    ? { visibility: 'hidden' }
+    : undefined;
 
   const renderNotes = () => {
     if (!hasNotes) return null;
@@ -575,8 +549,44 @@ export function PrescriptionPreview({
     );
   };
 
-  const shouldShowNotesOnThisPage = historyEnabled && hasNotes && page === totalPages;
+  const shouldShowNotesOnThisPage = hasNotes && page === totalPages && !currentOnly;
   const isFirstPage = page === 1;
+
+  const renderHistoryBlocks = (ids: string[]) => {
+    return (
+      <div className="space-y-4">
+        {ids.map((id) => {
+          const v = visitMetaMap.get(id);
+          const isAnchor = anchorVisitId != null && id === anchorVisitId;
+          const opdInline = !isAnchor ? getVisitOpdNo(v) : undefined;
+
+          const isCur = id === currentVisitId;
+
+          return (
+            <div
+              key={id}
+              data-rx-block="1"
+              style={
+                currentOnly && !isCur
+                  ? ({ visibility: 'hidden' } as React.CSSProperties)
+                  : undefined
+              }
+            >
+              <VisitRxPreviewBlock
+                visitId={id === 'CURRENT' ? '' : id}
+                isCurrent={isCur}
+                currentLines={lines}
+                visit={v}
+                showOpdInline={!isAnchor}
+                opdInlineText={opdInline}
+                currentToothDetails={currentToothDetails}
+              />
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
 
   const measureTemplate = shouldMeasure ? (
     <div
@@ -621,17 +631,6 @@ export function PrescriptionPreview({
     </div>
   ) : null;
 
-  // -----------------------------------------
-  // CURRENT-ONLY PRINT MODE
-  // - Hide header/patient blocks visually but KEEP their space
-  // - Render ONLY current medicines/tooth details in the body area
-  // -----------------------------------------
-  const currentOnlyHeaderStyle: React.CSSProperties | undefined = currentOnly
-    ? { visibility: 'hidden' }
-    : undefined;
-
-  const currentOnlyNotes = null; // never show notes in currentOnly (caller should pass undefined too)
-
   return (
     <div className="w-full">
       {measureTemplate}
@@ -645,7 +644,8 @@ export function PrescriptionPreview({
             <div className="h-full w-full overflow-hidden rounded-xl border bg-white shadow-sm">
               {isFirstPage ? (
                 <div className="flex h-full flex-col">
-                  <div className="shrink-0 px-6 pt-4" style={currentOnlyHeaderStyle}>
+                  {/* header (hidden in currentOnly but space preserved) */}
+                  <div className="shrink-0 px-6 pt-4" style={hiddenStyle}>
                     <div className="flex items-start justify-between gap-4">
                       <div className="relative h-16 w-16">
                         <Image
@@ -689,7 +689,8 @@ export function PrescriptionPreview({
                     <div className="mt-2 h-px w-full bg-emerald-600/60" />
                   </div>
 
-                  <div className="shrink-0 px-6 pt-3" style={currentOnlyHeaderStyle}>
+                  {/* doctor+patient band (hidden in currentOnly but space preserved) */}
+                  <div className="shrink-0 px-6 pt-3" style={hiddenStyle}>
                     <div className="flex items-start justify-between gap-6">
                       <div className="min-w-0 flex flex-col">
                         <div className="text-[0.8rem] font-bold text-gray-900">
@@ -756,9 +757,9 @@ export function PrescriptionPreview({
                   </div>
 
                   <div className="min-h-0 flex-1 px-6 pt-4 pb-4">
-                    {currentOnly ? (
+                    {!historyEnabled ? (
                       <>
-                        {currentToothDetails.length > 0 ? (
+                        {showCurrentToothDetails ? (
                           <div className="mb-3">
                             <ToothDetailsBlock toothDetails={currentToothDetails} />
                             <div className="mt-3 h-px w-full bg-gray-200" />
@@ -780,36 +781,12 @@ export function PrescriptionPreview({
                           </ol>
                         )}
                       </>
-                    ) : historyEnabled ? (
-                      renderHistoryBlocks(visiblePageIds)
                     ) : (
-                      <>
-                        {currentToothDetails.length > 0 ? (
-                          <div className="mb-3">
-                            <ToothDetailsBlock toothDetails={currentToothDetails} />
-                            <div className="mt-3 h-px w-full bg-gray-200" />
-                          </div>
-                        ) : null}
-
-                        {lines.length === 0 ? (
-                          <div className="text-[13px] text-gray-500">No medicines added yet.</div>
-                        ) : (
-                          <ol className="text-sm leading-6 text-gray-900">
-                            {lines.map((l, idx) => (
-                              <li key={idx} className="flex gap-1">
-                                <div className="w-4 shrink-0 text-right font-medium">
-                                  {idx + 1}.
-                                </div>
-                                <div className="font-medium">{buildLineText(l)}</div>
-                              </li>
-                            ))}
-                          </ol>
-                        )}
-                      </>
+                      renderHistoryBlocks(visiblePageIds)
                     )}
                   </div>
 
-                  {!currentOnly && shouldShowNotesOnThisPage ? renderNotes() : currentOnlyNotes}
+                  {shouldShowNotesOnThisPage ? renderNotes() : null}
                 </div>
               ) : (
                 <div className="flex h-full flex-col">
@@ -823,7 +800,8 @@ export function PrescriptionPreview({
           </div>
         </div>
 
-        {historyEnabled ? (
+        {/* ✅ Hide pagination completely in currentOnly mode */}
+        {historyEnabled && !currentOnly ? (
           <PaginationBar page={page} total={totalPages} onChange={setPage} />
         ) : null}
       </div>
