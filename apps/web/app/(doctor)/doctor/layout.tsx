@@ -1,32 +1,18 @@
-'use client';
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import DoctorLayoutClient from './DoctorLayoutClient';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import DoctorShell from '@/components/layout/DoctorShell';
-import { useRequireAuth } from '@/src/hooks/useAuth';
+export const dynamic = 'force-dynamic';
 
-export default function DoctorLayout({ children }: { children: React.ReactNode }) {
-  const auth = useRequireAuth();
-  const router = useRouter();
+const REFRESH_COOKIE = 'refreshToken';
 
-  useEffect(() => {
-    if (auth.status !== 'authenticated') return;
+export default async function DoctorLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies();
+  const hasRefresh = Boolean(cookieStore.get(REFRESH_COOKIE)?.value);
 
-    if (auth.role === 'RECEPTION') router.replace('/');
-  }, [auth.status, auth.role, router]);
-
-  if (
-    auth.status === 'authenticated' &&
-    auth.role &&
-    auth.role !== 'DOCTOR' &&
-    auth.role !== 'ADMIN'
-  ) {
-    return (
-      <div className="flex h-screen items-center justify-center text-sm text-gray-700">
-        Redirecting…
-      </div>
-    );
+  if (!hasRefresh) {
+    redirect('/login?from=/doctor');
   }
 
-  return <DoctorShell>{children}</DoctorShell>;
+  return <DoctorLayoutClient>{children}</DoctorLayoutClient>;
 }

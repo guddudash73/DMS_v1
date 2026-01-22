@@ -20,6 +20,7 @@ dist/
 .next/cache/
 .turbo/
 .open-next/
+apps/web/.open-next/
 
 # TypeScript incremental build files
 *.tsbuildinfo

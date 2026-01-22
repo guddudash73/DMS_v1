@@ -1,32 +1,18 @@
-'use client';
+import { cookies } from 'next/headers';
+import { redirect } from 'next/navigation';
+import ClinicLayoutClient from './ClinicLayoutClient';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
-import ClinicShell from '@/components/layout/ClinicShell';
-import { useRequireAuth } from '@/src/hooks/useAuth';
+export const dynamic = 'force-dynamic';
 
-export default function ClinicLayout({ children }: { children: React.ReactNode }) {
-  const auth = useRequireAuth();
-  const router = useRouter();
+const REFRESH_COOKIE = 'refreshToken';
 
-  useEffect(() => {
-    if (auth.status !== 'authenticated') return;
+export default async function ClinicLayout({ children }: { children: React.ReactNode }) {
+  const cookieStore = await cookies();
+  const hasRefresh = Boolean(cookieStore.get(REFRESH_COOKIE)?.value);
 
-    if (auth.role === 'DOCTOR') router.replace('/doctor');
-  }, [auth.status, auth.role, router]);
-
-  if (
-    auth.status === 'authenticated' &&
-    auth.role &&
-    auth.role !== 'RECEPTION' &&
-    auth.role !== 'ADMIN'
-  ) {
-    return (
-      <div className="flex h-screen items-center justify-center text-sm text-gray-700">
-        Redirecting…
-      </div>
-    );
+  if (!hasRefresh) {
+    redirect('/login');
   }
 
-  return <ClinicShell>{children}</ClinicShell>;
+  return <ClinicLayoutClient>{children}</ClinicLayoutClient>;
 }
