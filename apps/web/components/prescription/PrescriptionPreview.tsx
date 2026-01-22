@@ -596,7 +596,7 @@ export function PrescriptionPreview({
     >
       <div style={{ width: BASE_W }}>
         <div ref={measureContainerRef} className="w-full">
-          <div className="h-[1080px] w-full overflow-hidden border bg-white">
+          <div className="h-270 w-full overflow-hidden border bg-white">
             <div className="flex h-full flex-col">
               <div className="shrink-0 px-6 pt-4">
                 <div className="h-16 w-full" />
@@ -617,7 +617,7 @@ export function PrescriptionPreview({
             </div>
           </div>
 
-          <div className="mt-8 h-[1080px] w-full overflow-hidden border bg-white">
+          <div className="mt-8 h-270 w-full overflow-hidden border bg-white">
             <div className="flex h-full flex-col">
               <div className="min-h-0 flex-1 px-6 pt-6 pb-4">
                 <div ref={measureNextCapRef} className="h-full w-full" />
