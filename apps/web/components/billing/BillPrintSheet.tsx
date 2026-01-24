@@ -301,7 +301,7 @@ export function BillPrintSheet(props: Props) {
                   </div>
                 </div>
 
-                <div className="clinic-line">SCR-76, UNIT-III, BHUBANESWAR</div>
+                <div className="clinic-line">A-33, STALWART COMPLEX, UNIT - IV, BHUBANESWAR</div>
               </div>
 
               <div className="w-[28%]">
