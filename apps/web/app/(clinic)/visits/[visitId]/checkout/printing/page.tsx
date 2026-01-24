@@ -95,6 +95,9 @@ function toLocalISODate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/* ------------------------------------------------------------------ */
+/* backend-aligned: DOB preferred; fallback to stored age              */
+/* ------------------------------------------------------------------ */
 function safeParseDobToDate(dob: unknown): Date | null {
   if (!dob) return null;
 
@@ -225,7 +228,12 @@ export default function VisitCheckoutPrintingPage() {
   const patientDob = safeParseDobToDate(patientDobRaw);
 
   const visitCreatedAtMs = getNumFromRecord(visitRec, 'createdAt') ?? Date.now();
-  const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
+
+  // ✅ UPDATED (backend-aligned): compute from DOB if present; else fallback to stored age
+  const ageFromDob = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
+  const ageStored = getNumFromRecord(patientRec, 'age');
+  const patientAge = ageFromDob ?? ageStored;
+
   const patientSex = normalizeSex(patientSexRaw);
 
   const visitCreatedDateLabel = visitCreatedAtMs

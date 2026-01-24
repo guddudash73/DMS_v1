@@ -23,6 +23,13 @@ type Props = {
 
   doctorName?: string;
   doctorRegdLabel?: string;
+
+  /**
+   * ✅ NEW: Patient registration date (prints in header "Regd. Date")
+   * Pass from parent; do NOT derive from visitDateLabel.
+   */
+  regdDate?: string;
+
   visitDateLabel?: string;
 
   lines: RxLineType[];
@@ -32,6 +39,14 @@ type Props = {
   visitMetaMap?: Map<string, Visit>;
   printWithHistory?: boolean;
 
+  /**
+   * ✅ Printable doctor notes (must print on prescription)
+   */
+  doctorNotes?: string;
+
+  /**
+   * ✅ Receptionist notes (printable) - KEEP AS IS
+   */
   receptionNotes?: string;
 
   toothDetails?: ToothDetail[];
@@ -122,6 +137,8 @@ function VisitRxBlock(props: {
   visitId: string;
   isCurrent: boolean;
   currentLines: RxLineType[];
+  currentDoctorNotes?: string;
+
   visit?: Visit;
 
   showOpdInline?: boolean;
@@ -133,6 +150,7 @@ function VisitRxBlock(props: {
     visitId,
     isCurrent,
     currentLines,
+    currentDoctorNotes,
     visit,
     showOpdInline,
     opdInlineText,
@@ -144,12 +162,18 @@ function VisitRxBlock(props: {
   const lines = isCurrent ? currentLines : (rxQuery.data?.rx?.lines ?? []);
   const toothDetails = isCurrent ? currentToothDetails : (rxQuery.data?.rx?.toothDetails ?? []);
 
+  // ✅ printable doctor notes
+  const doctorNotes = isCurrent
+    ? (currentDoctorNotes ?? '')
+    : (rxQuery.data?.rx?.doctorNotes ?? '');
+  const hasDoctorNotes = !!doctorNotes?.trim();
+
   const visitDate = getMetaString(visit, 'visitDate');
   const reason = getMetaString(visit, 'reason');
 
   const hasToothDetails = (toothDetails?.length ?? 0) > 0;
 
-  if (!lines.length && !reason && !visitDate && !hasToothDetails)
+  if (!lines.length && !reason && !visitDate && !hasToothDetails && !hasDoctorNotes)
     return <div className="h-2 rx-block rx-block-prev" />;
 
   return (
@@ -191,6 +215,14 @@ function VisitRxBlock(props: {
         <div className="text-[12px] text-gray-500">No medicines recorded.</div>
       )}
 
+      {/* ✅ Doctor Notes (Printed) */}
+      {hasDoctorNotes ? (
+        <div className="mt-2 text-[11px] leading-4 text-gray-900">
+          <span className="font-semibold">Notes: </span>
+          <span className="whitespace-pre-wrap">{doctorNotes.trim()}</span>
+        </div>
+      ) : null}
+
       <div className="rx-block-sep mt-3 h-px w-full bg-gray-200" />
     </div>
   );
@@ -204,8 +236,10 @@ export function PrescriptionPrintSheet(props: Props) {
     patientSex,
     sdId,
     opdNo,
+    regdDate,
     visitDateLabel,
     lines,
+    doctorNotes,
     receptionNotes,
 
     currentVisitId: currentVisitIdProp,
@@ -218,7 +252,9 @@ export function PrescriptionPrintSheet(props: Props) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const hasNotes = !!receptionNotes?.trim();
+  const hasReceptionNotes = !!receptionNotes?.trim();
+  const hasDoctorNotes = !!doctorNotes?.trim();
+
   const ageSex = formatAgeSex(patientAge, patientSex);
 
   const currentVisitId = useMemo(() => currentVisitIdProp ?? 'CURRENT', [currentVisitIdProp]);
@@ -260,6 +296,11 @@ export function PrescriptionPrintSheet(props: Props) {
   const ADDRESS_ONE_LINE = 'A-33, STALWART COMPLEX, UNIT - IV, BHUBANESWAR';
   const CLINIC_HOURS =
     'Clinic hours: 10 : 00 AM - 01 : 30 PM & 06 : 00 PM - 08:00 PM, Sunday Closed';
+
+  const headerRegdDate = useMemo(() => {
+    const s = (regdDate ?? '').toString().trim();
+    return s || '—';
+  }, [regdDate]);
 
   if (!mounted) return null;
 
@@ -395,9 +436,7 @@ export function PrescriptionPrintSheet(props: Props) {
                 <div className="flex gap-3">
                   <div className="w-28 text-gray-600">Regd. Date</div>
                   <div className="text-gray-600">:</div>
-                  <div className="font-semibold text-gray-900">
-                    {visitDateLabel?.replace('Visit:', '').trim() || '—'}
-                  </div>
+                  <div className="font-semibold text-gray-900">{headerRegdDate}</div>
                 </div>
 
                 <div className="flex gap-3">
@@ -440,6 +479,14 @@ export function PrescriptionPrintSheet(props: Props) {
                   <div className="text-[12px] text-gray-500">No medicines recorded.</div>
                 )}
 
+                {/* ✅ Doctor Notes (Printed) */}
+                {hasDoctorNotes ? (
+                  <div className="mt-2 text-[11px] leading-4 text-gray-900">
+                    <span className="font-semibold">Notes: </span>
+                    <span className="whitespace-pre-wrap">{doctorNotes!.trim()}</span>
+                  </div>
+                ) : null}
+
                 <div className="mt-3 h-px w-full bg-gray-200" />
               </div>
             ) : (
@@ -456,6 +503,7 @@ export function PrescriptionPrintSheet(props: Props) {
                       visitId={id === 'CURRENT' ? '' : id}
                       isCurrent={id === currentVisitId}
                       currentLines={lines}
+                      currentDoctorNotes={doctorNotes}
                       visit={v}
                       showOpdInline={!isAnchor}
                       opdInlineText={opdInline}
@@ -467,7 +515,8 @@ export function PrescriptionPrintSheet(props: Props) {
             )}
           </div>
 
-          {hasNotes ? (
+          {/* ✅ Receptionist Notes (Printed) - unchanged */}
+          {hasReceptionNotes ? (
             <div className="rx-print-notes shrink-0 pb-2">
               <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2">
                 <div className="text-[11px] font-semibold text-gray-700">Reception Notes</div>

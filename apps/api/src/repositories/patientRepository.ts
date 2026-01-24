@@ -118,6 +118,7 @@ export class DynamoDBPatientRepository implements PatientRepository {
       name: input.name,
       phone: input.phone,
       dob: input.dob,
+      age: input.age,
       gender: input.gender,
       address: input.address,
 
@@ -221,6 +222,8 @@ export class DynamoDBPatientRepository implements PatientRepository {
     const now = Date.now();
 
     const setParts: string[] = ['#updatedAt = :updatedAt'];
+    const removeParts: string[] = [];
+
     const names: Record<string, string> = {
       '#updatedAt': 'updatedAt',
     };
@@ -228,7 +231,7 @@ export class DynamoDBPatientRepository implements PatientRepository {
       ':updatedAt': now,
     };
 
-    const add = (field: keyof PatientUpdate & string) => {
+    const setField = (field: keyof PatientUpdate & string) => {
       const value = patch[field];
       if (value === undefined) return;
       const n = `#${field}`;
@@ -238,11 +241,26 @@ export class DynamoDBPatientRepository implements PatientRepository {
       setParts.push(`${n} = ${v}`);
     };
 
-    add('name');
-    add('phone');
-    add('dob');
-    add('gender');
-    add('address');
+    setField('name');
+    setField('phone');
+    setField('dob');
+    setField('age'); // ✅ new
+    setField('gender');
+    setField('address');
+
+    // ✅ Enforce "only one of dob/age" at storage level too.
+    // If dob is provided, remove age. If age is provided, remove dob.
+    const dobProvided = patch.dob !== undefined;
+    const ageProvided = patch.age !== undefined;
+
+    if (dobProvided && !ageProvided) {
+      names['#age'] = 'age';
+      removeParts.push('#age');
+    }
+    if (ageProvided && !dobProvided) {
+      names['#dob'] = 'dob';
+      removeParts.push('#dob');
+    }
 
     const mergedName = (patch.name ?? existing.name)!;
     const mergedPhone = patch.phone ?? existing.phone;
@@ -272,12 +290,16 @@ export class DynamoDBPatientRepository implements PatientRepository {
     const phoneChanged = oldNormalizedPhone !== newNormalizedPhone;
     const nameChanged = oldNormalizedName !== newNormalizedName;
 
+    const baseUpdateExpr =
+      `SET ${setParts.join(', ')}` +
+      (removeParts.length ? ` REMOVE ${removeParts.join(', ')}` : '');
+
     if (!phoneChanged && !nameChanged) {
       const { Attributes } = await docClient.send(
         new UpdateCommand({
           TableName: TABLE_NAME,
           Key: buildPatientKeys(patientId),
-          UpdateExpression: `SET ${setParts.join(', ')}`,
+          UpdateExpression: baseUpdateExpr,
           ExpressionAttributeNames: names,
           ExpressionAttributeValues: values,
           ConditionExpression: 'attribute_exists(PK)',
@@ -290,6 +312,7 @@ export class DynamoDBPatientRepository implements PatientRepository {
 
     try {
       const updateExpressionParts = [...setParts];
+      const transactRemoveParts = [...removeParts];
 
       names['#normalizedName'] = 'normalizedName';
       values[':normalizedName'] = newNormalizedName;
@@ -301,15 +324,19 @@ export class DynamoDBPatientRepository implements PatientRepository {
         updateExpressionParts.push('#normalizedPhone = :normalizedPhone');
       } else {
         names['#normalizedPhone'] = 'normalizedPhone';
-        updateExpressionParts.push('REMOVE #normalizedPhone');
+        transactRemoveParts.push('#normalizedPhone');
       }
+
+      const updateExpr =
+        `SET ${updateExpressionParts.join(', ')}` +
+        (transactRemoveParts.length ? ` REMOVE ${transactRemoveParts.join(', ')}` : '');
 
       const transactItems: NonNullable<TransactWriteCommandInput['TransactItems']> = [
         {
           Update: {
             TableName: TABLE_NAME,
             Key: buildPatientKeys(patientId),
-            UpdateExpression: `SET ${updateExpressionParts.join(', ')}`,
+            UpdateExpression: updateExpr,
             ExpressionAttributeNames: names,
             ExpressionAttributeValues: values,
             ConditionExpression: 'attribute_exists(PK)',
@@ -345,6 +372,7 @@ export class DynamoDBPatientRepository implements PatientRepository {
 
       await docClient.send(new TransactWriteCommand({ TransactItems: transactItems }));
     } catch (err) {
+      // keep existing error handling
       if (
         err instanceof ConditionalCheckFailedException ||
         err instanceof TransactionCanceledException

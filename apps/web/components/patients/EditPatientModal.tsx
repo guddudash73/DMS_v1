@@ -19,15 +19,62 @@ import { Textarea } from '@/components/ui/textarea';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import PatientDobCalendar from '@/components/patients/PatientDobCalendar';
 
-const EditPatientSchema = z.object({
-  name: z.string().trim().min(1),
-  phone: z.string().trim().min(6),
-  dob: z.string().optional(),
-  gender: z.enum(['MALE', 'FEMALE', 'OTHER', 'UNKNOWN']).optional(),
-  address: z.string().optional(),
-});
+/* ---------------- schema ---------------- */
 
-type FormValues = z.infer<typeof EditPatientSchema>;
+const EditPatientSchema = z
+  .object({
+    mode: z.enum(['DOB', 'AGE']).default('DOB'),
+
+    name: z.string().trim().min(1),
+    phone: z.string().trim().min(6),
+
+    dob: z.string().optional(),
+    age: z.coerce.number().int().min(0).max(130).optional(),
+
+    gender: z.enum(['MALE', 'FEMALE', 'OTHER', 'UNKNOWN']).optional(),
+    address: z.string().optional(),
+  })
+  .superRefine((v, ctx) => {
+    const hasDob = !!v.dob?.trim();
+    const hasAge = typeof v.age === 'number' && Number.isFinite(v.age);
+
+    if (v.mode === 'DOB') {
+      if (!hasDob) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['dob'],
+          message: 'DOB is required.',
+        });
+      }
+      if (hasAge) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['age'],
+          message: 'Remove age when using DOB.',
+        });
+      }
+    }
+
+    if (v.mode === 'AGE') {
+      if (!hasAge) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['age'],
+          message: 'Age is required.',
+        });
+      }
+      if (hasDob) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['dob'],
+          message: 'Remove DOB when using Age.',
+        });
+      }
+    }
+  });
+
+type FormInput = z.input<typeof EditPatientSchema>;
+type FormOutput = z.output<typeof EditPatientSchema>;
 
 type Props = {
   patient: Patient;
@@ -36,6 +83,8 @@ type Props = {
 
 type UnknownRecord = Record<string, unknown>;
 const isRecord = (v: unknown): v is UnknownRecord => typeof v === 'object' && v !== null;
+
+/* ---------------- component ---------------- */
 
 export default function EditPatientModal({ patient, onClose }: Props) {
   const [updatePatient, { isLoading }] = useUpdatePatientMutation();
@@ -48,19 +97,31 @@ export default function EditPatientModal({ patient, onClose }: Props) {
     setValue,
     watch,
     formState: { isSubmitting },
-  } = useForm<FormValues>({
+  } = useForm<FormInput, unknown, FormOutput>({
     resolver: zodResolver(EditPatientSchema),
     defaultValues: {
+      mode: patient.dob ? 'DOB' : 'AGE',
       name: patient.name,
       phone: patient.phone,
       dob: patient.dob,
+      age: patient.age,
       gender: patient.gender,
       address: patient.address ?? '',
     },
   });
 
+  const mode = watch('mode');
   const dobIso = watch('dob');
   const dobDate = dobIso ? new Date(dobIso) : undefined;
+
+  // clear opposite field when switching mode
+  React.useEffect(() => {
+    if (mode === 'DOB') {
+      setValue('age', undefined, { shouldDirty: true });
+    } else {
+      setValue('dob', undefined, { shouldDirty: true });
+    }
+  }, [mode, setValue]);
 
   const close = () => {
     if (closing) return;
@@ -68,13 +129,16 @@ export default function EditPatientModal({ patient, onClose }: Props) {
     setTimeout(onClose, 180);
   };
 
-  const onSubmit: SubmitHandler<FormValues> = async (values) => {
+  const onSubmit: SubmitHandler<FormOutput> = async (values) => {
     const patch: PatientUpdate = {
       name: values.name.trim(),
       phone: values.phone.trim(),
-      dob: values.dob || undefined,
       gender: values.gender,
       address: values.address?.trim() || undefined,
+
+      ...(values.mode === 'DOB'
+        ? { dob: values.dob, age: undefined }
+        : { age: values.age, dob: undefined }),
     };
 
     try {
@@ -120,6 +184,14 @@ export default function EditPatientModal({ patient, onClose }: Props) {
               <Input {...register('phone')} className="rounded-xl" />
             </div>
 
+            <div>
+              <Label>DOB or Age</Label>
+              <select {...register('mode')} className="h-10 w-full rounded-xl border px-3">
+                <option value="DOB">DOB</option>
+                <option value="AGE">Age</option>
+              </select>
+            </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <Label>Gender</Label>
@@ -132,32 +204,45 @@ export default function EditPatientModal({ patient, onClose }: Props) {
                 </select>
               </div>
 
-              <div>
-                <Label>DOB</Label>
-                <Popover open={dobOpen} onOpenChange={setDobOpen}>
-                  <PopoverTrigger asChild>
-                    <Button variant="outline" className="w-full justify-between rounded-xl">
-                      <span className="flex items-center gap-2">
-                        <CalendarIcon className="h-4 w-4" />
-                        {dobDate ? format(dobDate, 'dd/MM/yyyy') : 'Pick date'}
-                      </span>
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="p-0 bg-transparent border-none">
-                    <PatientDobCalendar
-                      value={dobDate}
-                      onChange={(d) => {
-                        if (!d) return;
-                        setValue('dob', d.toISOString().slice(0, 10), {
-                          shouldDirty: true,
-                        });
-                        setDobOpen(false);
-                      }}
-                      disabled={(d) => d > new Date()}
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
+              {mode === 'DOB' ? (
+                <div>
+                  <Label>DOB</Label>
+                  <Popover open={dobOpen} onOpenChange={setDobOpen}>
+                    <PopoverTrigger asChild>
+                      <Button variant="outline" className="w-full justify-between rounded-xl">
+                        <span className="flex items-center gap-2">
+                          <CalendarIcon className="h-4 w-4" />
+                          {dobDate ? format(dobDate, 'dd/MM/yyyy') : 'Pick date'}
+                        </span>
+                      </Button>
+                    </PopoverTrigger>
+
+                    <PopoverContent className="p-0 bg-transparent border-none">
+                      <PatientDobCalendar
+                        value={dobDate}
+                        onChange={(d) => {
+                          if (!d) return;
+                          setValue('dob', d.toISOString().slice(0, 10), {
+                            shouldDirty: true,
+                          });
+                          setDobOpen(false);
+                        }}
+                        disabled={(d) => d > new Date()}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+              ) : (
+                <div>
+                  <Label>Age</Label>
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    {...register('age')}
+                    className="rounded-xl"
+                  />
+                </div>
+              )}
             </div>
 
             <div>

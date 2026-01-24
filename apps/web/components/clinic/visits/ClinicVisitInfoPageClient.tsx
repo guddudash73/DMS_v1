@@ -205,7 +205,34 @@ function anchorIdFromVisit(v: Visit): string | undefined {
   );
 }
 
-type NavAction = 'PRIMARY' | 'EDIT_BILL' | null;
+/** ✅ NEW: format patient registration date for prescription header */
+function formatPatientRegdDate(patientData: unknown): string {
+  // prefer numeric ms timestamps
+  const createdAtNum =
+    getPropNumber(patientData, 'createdAt') ??
+    getPropNumber(patientData, 'created_at') ??
+    getPropNumber(patientData, 'registeredAt') ??
+    getPropNumber(patientData, 'regdAt');
+
+  if (typeof createdAtNum === 'number' && Number.isFinite(createdAtNum) && createdAtNum > 0) {
+    return new Date(createdAtNum).toLocaleDateString('en-GB');
+  }
+
+  const createdAtStr =
+    getPropString(patientData, 'createdAt') ??
+    getPropString(patientData, 'created_at') ??
+    getPropString(patientData, 'registeredAt') ??
+    getPropString(patientData, 'regdAt');
+
+  if (createdAtStr) {
+    const d = new Date(createdAtStr);
+    if (Number.isFinite(d.getTime())) return d.toLocaleDateString('en-GB');
+  }
+
+  return '—';
+}
+
+type NavAction = 'PRIMARY' | 'EDIT_BILL' | 'PRINT_RX' | null;
 
 export default function ClinicVisitInfoPageClient() {
   const params = useParams<{ visitId: string }>();
@@ -293,9 +320,33 @@ export default function ClinicVisitInfoPageClient() {
     return Array.isArray(td) ? (td as ToothDetail[]) : [];
   }, [rxToShow]);
 
+  /**
+   * ✅ Printed note INSIDE prescription:
+   * Keep using rx.doctorNotes for preview/print (your backend stores it in Rx JSON).
+   */
   const doctorNotes = React.useMemo(() => {
     if (!rxToShow || !isRecord(rxToShow)) return '';
     return String(getProp(rxToShow, 'doctorNotes') ?? '');
+  }, [rxToShow]);
+
+  /**
+   * ✅ NOT printed note (Doctor → Reception internal note)
+   */
+  const doctorReceptionNotes = React.useMemo(() => {
+    if (!rxToShow || !isRecord(rxToShow)) return '';
+    const candidates = [
+      'doctorReceptionNotes',
+      'doctorReceptionNote',
+      'receptionOnlyNotes',
+      'internalReceptionNotes',
+      'internalNotes',
+    ] as const;
+
+    for (const k of candidates) {
+      const v = getProp(rxToShow, k);
+      if (typeof v === 'string' && v.trim()) return v;
+    }
+    return '';
   }, [rxToShow]);
 
   const [updateNotes, updateNotesState] = useUpdateVisitRxReceptionNotesMutation();
@@ -382,6 +433,12 @@ export default function ClinicVisitInfoPageClient() {
     getProp(patientDataRec, 'dobIso') ??
     null;
 
+  const patientAgeRaw =
+    getProp(patientQuery.data, 'age') ??
+    getProp(patientDataRec, 'age') ??
+    getProp(patientDataRec, 'patientAge') ??
+    null;
+
   const patientSexRaw =
     getProp(patientQuery.data, 'gender') ??
     getProp(patientDataRec, 'sex') ??
@@ -391,9 +448,22 @@ export default function ClinicVisitInfoPageClient() {
   const patientDob = safeParseDobToDate(patientDobRaw);
 
   const visitCreatedAtMs = getPropNumber(visit, 'createdAt') ?? Date.now();
+  const atDate = new Date(visitCreatedAtMs);
 
-  const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
+  // ✅ FIX: if DOB exists calculate; else fall back to stored patient.age
+  const patientAgeFromDob = patientDob ? calculateAge(patientDob, atDate) : undefined;
+  const patientAgeStored =
+    typeof patientAgeRaw === 'number' && Number.isFinite(patientAgeRaw) ? patientAgeRaw : undefined;
+
+  const patientAge =
+    typeof patientAgeFromDob === 'number' ? patientAgeFromDob : (patientAgeStored ?? undefined);
+
   const patientSex = normalizeSex(patientSexRaw);
+
+  // ✅ NEW: patient registration date (formatted) for PrescriptionPreview
+  const patientRegdDate = React.useMemo(() => {
+    return formatPatientRegdDate(patientQuery.data);
+  }, [patientQuery.data]);
 
   const doctorId = getString(visit?.doctorId);
 
@@ -422,9 +492,7 @@ export default function ClinicVisitInfoPageClient() {
     return undefined;
   }, [doctorRegNoResolved]);
 
-  const rxVisitDateLabel = visitCreatedAtMs
-    ? `Visit: ${toLocalISODate(new Date(visitCreatedAtMs))}`
-    : undefined;
+  const rxVisitDateLabel = visitCreatedAtMs ? `Visit: ${toLocalISODate(atDate)}` : undefined;
 
   const role = auth.status === 'authenticated' ? auth.role : undefined;
   const isAdmin = role === 'ADMIN';
@@ -440,7 +508,7 @@ export default function ClinicVisitInfoPageClient() {
   const [updateVisitStatus, updateVisitStatusState] = useUpdateVisitStatusMutation();
   const [offlineCheckoutBusy, setOfflineCheckoutBusy] = React.useState(false);
 
-  // ✅ NEW: button-level loading for primary + edit bill
+  // ✅ NEW: button-level loading for primary + edit bill + print rx
   const [navAction, setNavAction] = React.useState<NavAction>(null);
 
   const doOfflineCheckout = async () => {
@@ -464,14 +532,18 @@ export default function ClinicVisitInfoPageClient() {
     }
   };
 
+  const actionLocked = navAction !== null;
+
   const primaryDisabled =
     !visit ||
     offlineCheckoutBusy ||
     updateVisitStatusState.isLoading ||
     (!isCheckedOut && !visitDone && !isOfflineVisit) ||
-    navAction !== null;
+    actionLocked;
 
-  const editBillDisabled = navAction !== null;
+  const editBillDisabled = actionLocked;
+
+  const printRxDisabled = !visitId || !visit || actionLocked;
 
   // ✅ Build chain only when toggle is ON; otherwise keep it light (current visit only)
   const rxChain = React.useMemo(() => {
@@ -576,6 +648,24 @@ export default function ClinicVisitInfoPageClient() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* ✅ NEW: Offline visit can always re-print blank Rx */}
+          {isOfflineVisit ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl cursor-pointer"
+              onClick={() => {
+                if (navAction) return;
+                setNavAction('PRINT_RX');
+                router.push(`/visits/${visitId}/printing/prescription-blank`);
+              }}
+              disabled={printRxDisabled}
+              title="Print blank prescription for this offline visit"
+            >
+              {navAction === 'PRINT_RX' ? <LoadingDots label="Opening" /> : 'Print Rx'}
+            </Button>
+          ) : null}
+
           {isCheckedOut && isAdmin ? (
             <Button
               type="button"
@@ -713,6 +803,7 @@ export default function ClinicVisitInfoPageClient() {
               doctorName={resolvedDoctorName}
               doctorRegdLabel={resolvedDoctorRegdLabel}
               visitDateLabel={rxVisitDateLabel}
+              regdDate={patientRegdDate} // ✅ NEW: pass patient registration date
               lines={
                 isRecord(rxToShow) && Array.isArray(getProp(rxToShow, 'lines'))
                   ? (getProp(rxToShow, 'lines') as PreviewProps['lines'])
@@ -720,6 +811,8 @@ export default function ClinicVisitInfoPageClient() {
               }
               receptionNotes={notes}
               toothDetails={toothDetails}
+              // ✅ Printed note inside prescription
+              doctorNotes={doctorNotes}
               currentVisitId={showHistory ? rxChain.currentVisitId : undefined}
               chainVisitIds={showHistory ? rxChain.visitIds : undefined}
               visitMetaMap={showHistory ? rxChain.meta : undefined}
@@ -736,14 +829,15 @@ export default function ClinicVisitInfoPageClient() {
             <XrayTrayReadOnly visitId={visitId} />
           </div>
 
+          {/* ✅ Doctor → Reception note (NOT printed) */}
           <div className="mt-4 rounded-2xl border bg-white p-3">
-            <div className="text-sm font-semibold text-gray-900">Doctor Notes</div>
+            <div className="text-sm font-semibold text-gray-900">Doctor Reception Note</div>
             <div className="text-xs text-gray-500">
               Internal note from doctor for reception. This will NOT print.
             </div>
 
             <div className="mt-3 min-h-20 whitespace-pre-wrap rounded-xl bg-gray-50 p-3 text-sm text-gray-800">
-              {doctorNotes.trim() ? doctorNotes : '—'}
+              {doctorReceptionNotes.trim() ? doctorReceptionNotes : '—'}
             </div>
           </div>
 

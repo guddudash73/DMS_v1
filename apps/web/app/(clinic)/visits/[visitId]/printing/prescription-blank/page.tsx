@@ -35,6 +35,9 @@ function toLocalISODate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/* ------------------------------------------------------------------ */
+/* backend-aligned: DOB preferred; fallback to stored age              */
+/* ------------------------------------------------------------------ */
 function safeParseDobToDate(dob: unknown): Date | null {
   if (!dob) return null;
 
@@ -95,7 +98,7 @@ export default function BlankPrescriptionPrintPage() {
   const visitRec: Record<string, unknown> = isRecord(visit)
     ? (visit as unknown as Record<string, unknown>)
     : {};
-  const patientId = getString(visitRec.patientId);
+  const patientId = getString((visitRec as any).patientId);
 
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
 
@@ -104,24 +107,34 @@ export default function BlankPrescriptionPrintPage() {
 
   const patientRec: Record<string, unknown> = isRecord(patientQuery.data) ? patientQuery.data : {};
 
-  const patientSdId = getString(patientRec.sdId) ?? getString(visitRec.sdId) ?? undefined;
+  const patientSdId =
+    getString((patientRec as any).sdId) ?? getString((visitRec as any).sdId) ?? undefined;
 
   const opdNo =
-    getString(visitRec.opdNo) ??
-    getString(visitRec.opdId) ??
-    getString(visitRec.opdNumber) ??
+    getString((visitRec as any).opdNo) ??
+    getString((visitRec as any).opdId) ??
+    getString((visitRec as any).opdNumber) ??
     undefined;
 
   const patientDobRaw =
-    patientRec.dob ?? patientRec.dateOfBirth ?? patientRec.birthDate ?? patientRec.dobIso ?? null;
+    (patientRec as any).dob ??
+    (patientRec as any).dateOfBirth ??
+    (patientRec as any).birthDate ??
+    (patientRec as any).dobIso ??
+    null;
 
-  const patientSexRaw = patientRec.sex ?? patientRec.gender ?? patientRec.patientSex ?? null;
+  const patientSexRaw =
+    (patientRec as any).sex ?? (patientRec as any).gender ?? (patientRec as any).patientSex ?? null;
 
   const patientDob = safeParseDobToDate(patientDobRaw);
 
-  const visitCreatedAtMs = getNumber(visitRec.createdAt) ?? Date.now();
+  const visitCreatedAtMs = getNumber((visitRec as any).createdAt) ?? Date.now();
 
-  const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
+  // ✅ UPDATED (backend-aligned): compute from DOB if present; else fallback to stored age
+  const ageFromDob = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
+  const ageStored = getNumber((patientRec as any).age);
+  const patientAge = ageFromDob ?? ageStored;
+
   const patientSex = normalizeSex(patientSexRaw);
 
   const visitCreatedDateLabel = visitCreatedAtMs

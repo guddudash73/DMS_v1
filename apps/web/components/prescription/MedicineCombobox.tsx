@@ -27,6 +27,17 @@ type Props = {
   onEnterPicked?: () => void;
 };
 
+function LoadingRow({ label = 'Searching…' }: { label?: string }) {
+  return (
+    <div className="flex items-center gap-2 px-2 py-2 text-sm text-gray-500">
+      <span className="inline-flex h-4 w-4 items-center justify-center">
+        <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-200 border-t-gray-600" />
+      </span>
+      <span>{label}</span>
+    </div>
+  );
+}
+
 export function MedicineCombobox({
   value,
   onPick,
@@ -53,6 +64,8 @@ export function MedicineCombobox({
   }, [open, query, triggerSearch]);
 
   const items = search.data?.items ?? [];
+
+  const isSearching = Boolean(open && (search.isFetching || search.isLoading));
 
   const canQuickAdd =
     query.trim().length >= 2 && !items.some((i) => i.displayName === query.trim());
@@ -93,6 +106,7 @@ export function MedicineCombobox({
   };
 
   const selectActive = () => {
+    if (isSearching) return;
     if (totalOptions <= 0) return;
 
     if (activeIndex < items.length) {
@@ -107,6 +121,7 @@ export function MedicineCombobox({
   };
 
   const moveActive = (delta: number) => {
+    if (isSearching) return;
     if (totalOptions <= 0) return;
     setActiveIndex((prev) => {
       const next = prev + delta;
@@ -126,7 +141,16 @@ export function MedicineCombobox({
           className="w-full justify-between rounded-xl cursor-pointer"
         >
           <span className="truncate text-left">{value || placeholder || 'Select medicine'}</span>
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+
+          <span className="ml-2 inline-flex items-center gap-2">
+            {open && isSearching ? (
+              <span
+                className="h-4 w-4 animate-spin rounded-full border-2 border-gray-200 border-t-gray-600"
+                aria-label="Loading"
+              />
+            ) : null}
+            <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+          </span>
         </Button>
       </PopoverTrigger>
 
@@ -160,7 +184,14 @@ export function MedicineCombobox({
           />
 
           <CommandList>
-            <CommandEmpty>No medicines found.</CommandEmpty>
+            {isSearching ? (
+              <CommandGroup heading="Searching">
+                {/* Using a plain div keeps it simple and reliable inside shadcn CommandList */}
+                <LoadingRow label="Fetching medicines…" />
+              </CommandGroup>
+            ) : null}
+
+            {!isSearching ? <CommandEmpty>No medicines found.</CommandEmpty> : null}
 
             <CommandGroup heading="Results">
               {items.map((item, idx) => {
@@ -198,11 +229,17 @@ export function MedicineCombobox({
                       value={`add:${query}`}
                       onMouseEnter={() => setActiveIndex(addIndex)}
                       onSelect={() => void doQuickAdd()}
-                      disabled={quickAddState.isLoading}
+                      disabled={quickAddState.isLoading || isSearching}
                       aria-selected={isActive}
                       data-selected={isActive ? 'true' : 'false'}
                     >
-                      <Plus className="mr-2 h-4 w-4" />
+                      {quickAddState.isLoading ? (
+                        <span className="mr-2 inline-flex h-4 w-4 items-center justify-center">
+                          <span className="h-4 w-4 animate-spin rounded-full border-2 border-gray-200 border-t-gray-600" />
+                        </span>
+                      ) : (
+                        <Plus className="mr-2 h-4 w-4" />
+                      )}
                       Add “{query.trim()}”
                     </CommandItem>
                   );

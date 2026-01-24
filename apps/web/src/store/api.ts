@@ -1239,15 +1239,27 @@ export const apiSlice = createApi({
 
     upsertVisitRx: builder.mutation<
       { rxId: string; visitId: string; version: number; createdAt: number; updatedAt: number },
-      { visitId: string; lines: RxLineType[]; toothDetails?: ToothDetail[]; doctorNotes?: string }
+      {
+        visitId: string;
+        lines: RxLineType[];
+        toothDetails?: ToothDetail[];
+
+        // ✅ printable
+        doctorNotes?: string;
+
+        // ✅ non-printable
+        doctorReceptionNotes?: string;
+      }
     >({
-      query: ({ visitId, lines, toothDetails, doctorNotes }) => ({
+      query: ({ visitId, lines, toothDetails, doctorNotes, doctorReceptionNotes }) => ({
         url: `/visits/${visitId}/rx`,
         method: 'POST',
         body: {
           lines: lines ?? [],
           ...(toothDetails !== undefined ? { toothDetails } : {}),
+
           ...(doctorNotes !== undefined ? { doctorNotes } : {}),
+          ...(doctorReceptionNotes !== undefined ? { doctorReceptionNotes } : {}),
         },
       }),
       invalidatesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
@@ -1289,14 +1301,14 @@ export const apiSlice = createApi({
       invalidatesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
     }),
 
-    updateVisitRxDoctorNotes: builder.mutation<
+    updateVisitRxDoctorReceptionNotes: builder.mutation<
       { rx: Prescription },
-      { visitId: string; doctorNotes: string }
+      { visitId: string; doctorReceptionNotes: string }
     >({
-      query: ({ visitId, doctorNotes }) => ({
-        url: `/visits/${visitId}/rx/doctor-notes`,
+      query: ({ visitId, doctorReceptionNotes }) => ({
+        url: `/visits/${visitId}/rx/doctor-reception-notes`,
         method: 'PATCH',
-        body: { doctorNotes },
+        body: { doctorReceptionNotes },
       }),
       invalidatesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
     }),
@@ -1314,15 +1326,26 @@ export const apiSlice = createApi({
 
     updateRxById: builder.mutation<
       { rxId: string; visitId: string; version: number; createdAt: number; updatedAt: number },
-      { rxId: string; lines: RxLineType[]; toothDetails?: ToothDetail[]; doctorNotes?: string }
+      {
+        rxId: string;
+        lines: RxLineType[];
+        toothDetails?: ToothDetail[];
+
+        // ✅ printable
+        doctorNotes?: string;
+
+        // ✅ non-printable
+        doctorReceptionNotes?: string;
+      }
     >({
-      query: ({ rxId, lines, toothDetails, doctorNotes }) => ({
+      query: ({ rxId, lines, toothDetails, doctorNotes, doctorReceptionNotes }) => ({
         url: `/rx/${rxId}`,
         method: 'PUT',
         body: {
           lines: lines ?? [],
           ...(toothDetails !== undefined ? { toothDetails } : {}),
           ...(doctorNotes !== undefined ? { doctorNotes } : {}),
+          ...(doctorReceptionNotes !== undefined ? { doctorReceptionNotes } : {}),
         },
       }),
     }),
@@ -1596,7 +1619,7 @@ export const {
   useGetVisitRxQuery,
   useGetVisitRxVersionsQuery,
   useUpdateVisitRxReceptionNotesMutation,
-  useUpdateVisitRxDoctorNotesMutation,
+  useUpdateVisitRxDoctorReceptionNotesMutation,
   useStartVisitRxRevisionMutation,
   useUpdateRxByIdMutation,
 

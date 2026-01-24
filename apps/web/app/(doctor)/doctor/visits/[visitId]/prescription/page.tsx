@@ -86,7 +86,7 @@ export default function DoctorVisitHandlingPage() {
 
   return (
     <div className="p-4 2xl:p-8">
-      <div className="mb-4 flex items-center justify-end gap-3">
+      <div className="mb-4 flex items-center justify-end gap-3 cursor-pointer">
         {!isDone ? (
           <Button type="button" variant="outline" className="rounded-xl" disabled>
             Hold Session
@@ -95,7 +95,7 @@ export default function DoctorVisitHandlingPage() {
 
         <Button
           type="button"
-          className="rounded-xl bg-black text-white hover:bg-black/90"
+          className="rounded-xl bg-black text-white hover:bg-black/90 cursor-pointer"
           disabled={isDone ? !isRevisionMode : !canEndSession}
           onClick={() => {
             if (isDone) return void onEndRevision();

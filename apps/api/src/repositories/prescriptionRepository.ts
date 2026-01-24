@@ -1,3 +1,4 @@
+// apps/api/src/repositories/prescriptionRepository.ts
 import {
   DynamoDBDocumentClient,
   GetCommand,
@@ -48,8 +49,14 @@ export interface PrescriptionRepository {
     lines: RxLineType[];
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
+
+    // ✅ printable (prints on prescription)
     doctorNotes?: Prescription['doctorNotes'];
+
+    // ✅ non-printable internal (doctor -> reception)
+    doctorReceptionNotes?: Prescription['doctorReceptionNotes'];
   }): Promise<Prescription>;
+
   ensureRevisionForVisit(params: { visit: Visit; jsonKey: string }): Promise<Prescription>;
 
   updateById(params: {
@@ -57,7 +64,12 @@ export interface PrescriptionRepository {
     lines: RxLineType[];
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
+
+    // ✅ printable
     doctorNotes?: Prescription['doctorNotes'];
+
+    // ✅ non-printable
+    doctorReceptionNotes?: Prescription['doctorReceptionNotes'];
   }): Promise<Prescription | null>;
 
   updateReceptionNotesById(params: {
@@ -145,11 +157,18 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     lines: RxLineType[];
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
+
+    // ✅ printable
     doctorNotes?: Prescription['doctorNotes'];
+
+    // ✅ non-printable
+    doctorReceptionNotes?: Prescription['doctorReceptionNotes'];
   }): Promise<Prescription> {
-    const { visit, lines, jsonKey, toothDetails, doctorNotes } = params;
+    const { visit, lines, jsonKey, toothDetails, doctorNotes, doctorReceptionNotes } = params;
+
     const rxId = rxIdFor(visit.visitId, 1);
     const existing = await this.getById(rxId);
+
     if (existing) {
       const updated = await this.updateById({
         rxId,
@@ -157,9 +176,11 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
         jsonKey,
         toothDetails,
         doctorNotes,
+        doctorReceptionNotes,
       });
       return updated ?? existing;
     }
+
     const now = Date.now();
     const version = 1 as const;
 
@@ -170,7 +191,14 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       version,
       jsonKey,
       ...(toothDetails !== undefined ? { toothDetails } : {}),
+
+      // ✅ printable
       ...(doctorNotes !== undefined ? { doctorNotes } : {}),
+
+      // ✅ non-printable
+      ...(doctorReceptionNotes !== undefined ? { doctorReceptionNotes } : {}),
+
+      // receptionist printable notes remain separate
       receptionNotes: undefined,
       createdAt: now,
       updatedAt: now,
@@ -249,6 +277,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
 
     const now = Date.now();
     const version = 2 as const;
+
     const v1 = await this.getById(rxIdFor(visit.visitId, 1));
 
     const base: Prescription = {
@@ -258,8 +287,18 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       version,
       jsonKey,
       ...(v1?.toothDetails !== undefined ? { toothDetails: v1.toothDetails } : {}),
+
+      // ✅ printable carry-forward
       ...(v1?.doctorNotes !== undefined ? { doctorNotes: v1.doctorNotes } : {}),
+
+      // ✅ non-printable carry-forward
+      ...(v1?.doctorReceptionNotes !== undefined
+        ? { doctorReceptionNotes: v1.doctorReceptionNotes }
+        : {}),
+
+      // ✅ receptionist printable notes carry-forward (unchanged)
       receptionNotes: v1?.receptionNotes,
+
       createdAt: now,
       updatedAt: now,
     };
@@ -333,9 +372,14 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     lines: RxLineType[];
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
+
+    // ✅ printable
     doctorNotes?: Prescription['doctorNotes'];
+
+    // ✅ non-printable
+    doctorReceptionNotes?: Prescription['doctorReceptionNotes'];
   }): Promise<Prescription | null> {
-    const { rxId, lines, jsonKey, toothDetails, doctorNotes } = params;
+    const { rxId, lines, jsonKey, toothDetails, doctorNotes, doctorReceptionNotes } = params;
 
     const existing = await this.getById(rxId);
     if (!existing) return null;
@@ -343,7 +387,9 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     const now = Date.now();
 
     const hasToothDetails = toothDetails !== undefined;
-    const hasDoctorNotes = doctorNotes !== undefined;
+
+    const hasDoctorNotes = doctorNotes !== undefined; // printable
+    const hasDoctorReceptionNotes = doctorReceptionNotes !== undefined; // non-printable
 
     const next: Prescription = {
       ...existing,
@@ -351,6 +397,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       jsonKey,
       ...(hasToothDetails ? { toothDetails } : {}),
       ...(hasDoctorNotes ? { doctorNotes } : {}),
+      ...(hasDoctorReceptionNotes ? { doctorReceptionNotes } : {}),
       updatedAt: now,
     };
 
@@ -376,6 +423,12 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       setParts.push('#doctorNotes = :dn');
       names['#doctorNotes'] = 'doctorNotes';
       values[':dn'] = doctorNotes;
+    }
+
+    if (hasDoctorReceptionNotes) {
+      setParts.push('#doctorReceptionNotes = :drn');
+      names['#doctorReceptionNotes'] = 'doctorReceptionNotes';
+      values[':drn'] = doctorReceptionNotes;
     }
 
     const updateExpression = `SET ${setParts.join(', ')}`;
@@ -415,6 +468,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     receptionNotes: string;
   }): Promise<Prescription | null> {
     const { rxId, receptionNotes } = params;
+
     const existing = await this.getById(rxId);
     if (!existing) return null;
 

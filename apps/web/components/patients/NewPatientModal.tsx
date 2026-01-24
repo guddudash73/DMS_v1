@@ -22,19 +22,59 @@ import { useCreatePatientMutation, type ErrorResponse } from '@/src/store/api';
 type Props = { onClose: () => void };
 type ApiError = { status?: number; data?: unknown };
 
-const PatientCreateFormSchema = z.object({
-  name: z.string().trim().min(1, 'Name is required'),
-  phone: z
-    .string()
-    .trim()
-    .min(1, 'Contact number is required')
-    .min(6, 'Contact number is too short'),
-  dob: z.string().trim().optional(),
-  gender: z.enum(['MALE', 'FEMALE', 'OTHER', 'UNKNOWN']).optional(),
-  address: z.string().trim().optional(),
-});
+/* ---------------- schema ---------------- */
 
-type PatientCreateFormValues = z.infer<typeof PatientCreateFormSchema>;
+const PatientCreateFormSchema = z
+  .object({
+    // default() makes INPUT optional, OUTPUT required — use z.input for RHF + z.output for submit
+    mode: z.enum(['DOB', 'AGE']).default('DOB'),
+
+    name: z.string().trim().min(1, 'Name is required'),
+    phone: z
+      .string()
+      .trim()
+      .min(1, 'Contact number is required')
+      .min(6, 'Contact number is too short'),
+
+    dob: z.string().trim().optional(),
+    age: z.coerce.number().int().min(0).max(130).optional(),
+
+    gender: z.enum(['MALE', 'FEMALE', 'OTHER', 'UNKNOWN']).optional(),
+    address: z.string().trim().optional(),
+  })
+  .superRefine((v, ctx) => {
+    const hasDob = !!v.dob?.trim();
+    const hasAge = typeof v.age === 'number' && Number.isFinite(v.age);
+
+    if (v.mode === 'DOB') {
+      if (!hasDob) {
+        ctx.addIssue({ code: 'custom', path: ['dob'], message: 'DOB is required.' });
+      }
+      if (hasAge) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['age'],
+          message: 'Remove age when using DOB.',
+        });
+      }
+    } else {
+      if (!hasAge) {
+        ctx.addIssue({ code: 'custom', path: ['age'], message: 'Age is required.' });
+      }
+      if (hasDob) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['dob'],
+          message: 'Remove DOB when using Age.',
+        });
+      }
+    }
+  });
+
+type PatientCreateFormInput = z.input<typeof PatientCreateFormSchema>;
+type PatientCreateFormOutput = z.output<typeof PatientCreateFormSchema>;
+
+/* ---------------- helpers ---------------- */
 
 const asErrorResponse = (data: unknown): ErrorResponse | null => {
   if (!data || typeof data !== 'object') return null;
@@ -66,13 +106,14 @@ const fromIsoDate = (iso: string): Date | null => {
   return Number.isFinite(d.getTime()) ? d : null;
 };
 
+/* ---------------- component ---------------- */
+
 export default function NewPatientModal({ onClose }: Props) {
   const router = useRouter();
   const [createPatient, { isLoading }] = useCreatePatientMutation();
 
   const [mounted, setMounted] = React.useState(false);
   const [closing, setClosing] = React.useState(false);
-
   const [dobOpen, setDobOpen] = React.useState(false);
 
   React.useEffect(() => {
@@ -103,34 +144,49 @@ export default function NewPatientModal({ onClose }: Props) {
     watch,
     setValue,
     formState: { errors, isSubmitting },
-  } = useForm({
+  } = useForm<PatientCreateFormInput, unknown, PatientCreateFormOutput>({
     resolver: zodResolver(PatientCreateFormSchema),
     mode: 'onSubmit',
     reValidateMode: 'onChange',
     defaultValues: {
+      mode: 'DOB',
       name: '',
       phone: '',
       dob: undefined,
+      age: undefined,
       gender: undefined,
       address: '',
     },
   });
 
-  const dobIso = watch('dob') as string | undefined;
+  const mode = watch('mode') ?? 'DOB';
+  const dobIso = watch('dob');
   const selectedDob = dobIso ? fromIsoDate(dobIso) : null;
 
-  const onSubmit: SubmitHandler<PatientCreateFormValues> = async (values) => {
+  // ✅ Clear opposite field when mode changes
+  React.useEffect(() => {
+    if (mode === 'DOB') {
+      setValue('age', undefined, { shouldDirty: true, shouldValidate: true });
+    } else {
+      setValue('dob', undefined, { shouldDirty: true, shouldValidate: true });
+      setDobOpen(false);
+    }
+  }, [mode, setValue]);
+
+  const onSubmit: SubmitHandler<PatientCreateFormOutput> = async (values) => {
     try {
+      // values is already OUTPUT type (defaults/coercions applied)
       const payload = {
         name: values.name.trim(),
         phone: values.phone.trim(),
-        dob: values.dob?.trim() ? values.dob.trim() : undefined,
         gender: values.gender,
         address: values.address?.trim() ? values.address.trim() : undefined,
+        ...(values.mode === 'DOB'
+          ? { dob: values.dob?.trim() ? values.dob.trim() : undefined }
+          : { age: values.age }),
       };
 
-      type CreatePatientArg = Parameters<typeof createPatient>[0];
-      const patient = await createPatient(payload as CreatePatientArg).unwrap();
+      const patient = await createPatient(payload).unwrap();
 
       toast.success('Patient created successfully.');
       handleClose();
@@ -147,7 +203,7 @@ export default function NewPatientModal({ onClose }: Props) {
     }
   };
 
-  const onSubmitError: SubmitErrorHandler<PatientCreateFormValues> = () => {
+  const onSubmitError: SubmitErrorHandler<PatientCreateFormInput> = () => {
     toast.error('Please check the highlighted fields.');
   };
 
@@ -209,6 +265,21 @@ export default function NewPatientModal({ onClose }: Props) {
                   />
                 </div>
 
+                {/* Mode selector */}
+                <div className="space-y-1">
+                  <Label className="text-sm font-medium text-gray-800">DOB / Age Mode</Label>
+                  <select
+                    {...register('mode')}
+                    className={[
+                      'h-10 w-full rounded-xl border bg-white px-3 text-sm',
+                      'border-gray-200 focus-visible:ring-gray-300',
+                    ].join(' ')}
+                  >
+                    <option value="DOB">DOB</option>
+                    <option value="AGE">Age</option>
+                  </select>
+                </div>
+
                 <div className="grid grid-cols-2 gap-4">
                   <div className="space-y-1">
                     <Label className="text-sm font-medium text-gray-800">Gender</Label>
@@ -230,56 +301,73 @@ export default function NewPatientModal({ onClose }: Props) {
                     </select>
                   </div>
 
-                  <div className="space-y-1">
-                    <Label className="text-sm font-medium text-gray-800">DOB</Label>
+                  {/* DOB or Age */}
+                  {mode === 'DOB' ? (
+                    <div className="space-y-1">
+                      <Label className="text-sm font-medium text-gray-800">DOB</Label>
 
-                    <Popover modal open={dobOpen} onOpenChange={setDobOpen}>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className={[
-                            'h-10 w-full justify-between rounded-xl px-3 text-sm font-normal bg-white',
-                            errors.dob
-                              ? 'border-red-500 focus-visible:ring-red-500'
-                              : 'border-gray-200 focus-visible:ring-gray-300',
-                            !selectedDob ? 'text-gray-400' : 'text-gray-900',
-                          ].join(' ')}
+                      <Popover modal open={dobOpen} onOpenChange={setDobOpen}>
+                        <PopoverTrigger asChild>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className={[
+                              'h-10 w-full justify-between rounded-xl px-3 text-sm font-normal bg-white',
+                              errors.dob
+                                ? 'border-red-500 focus-visible:ring-red-500'
+                                : 'border-gray-200 focus-visible:ring-gray-300',
+                              !selectedDob ? 'text-gray-400' : 'text-gray-900',
+                            ].join(' ')}
+                          >
+                            <span className="flex items-center gap-2">
+                              <CalendarIcon className="h-4 w-4 text-gray-500" />
+                              {selectedDob ? format(selectedDob, 'dd/MM/yyyy') : 'Pick a date'}
+                            </span>
+                            <span className="text-gray-500">▾</span>
+                          </Button>
+                        </PopoverTrigger>
+
+                        <PopoverContent
+                          align="start"
+                          className="w-auto p-0 border-none shadow-none bg-transparent"
+                          onPointerDownOutside={(e) => e.preventDefault()}
+                          onFocusOutside={(e) => e.preventDefault()}
+                          onInteractOutside={(e) => e.preventDefault()}
+                          onCloseAutoFocus={(e) => e.preventDefault()}
                         >
-                          <span className="flex items-center gap-2">
-                            <CalendarIcon className="h-4 w-4 text-gray-500" />
-                            {selectedDob ? format(selectedDob, 'dd/MM/yyyy') : 'Pick a date'}
-                          </span>
-                          <span className="text-gray-500">▾</span>
-                        </Button>
-                      </PopoverTrigger>
-
-                      <PopoverContent
-                        align="start"
-                        className="w-auto p-0 border-none shadow-none bg-transparent"
-                        onPointerDownOutside={(e) => e.preventDefault()}
-                        onFocusOutside={(e) => e.preventDefault()}
-                        onInteractOutside={(e) => e.preventDefault()}
-                        onCloseAutoFocus={(e) => e.preventDefault()}
-                      >
-                        <PatientDobCalendar
-                          value={selectedDob ?? undefined}
-                          onChange={(d) => {
-                            if (!d) return;
-                            setValue('dob', toIsoDate(d), {
-                              shouldDirty: true,
-                              shouldTouch: true,
-                              shouldValidate: true,
-                            });
-                            setDobOpen(false);
-                          }}
-                          fromYear={1900}
-                          toYear={new Date().getFullYear()}
-                          disabled={(d) => d > new Date()}
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
+                          <PatientDobCalendar
+                            value={selectedDob ?? undefined}
+                            onChange={(d) => {
+                              if (!d) return;
+                              setValue('dob', toIsoDate(d), {
+                                shouldDirty: true,
+                                shouldTouch: true,
+                                shouldValidate: true,
+                              });
+                              setDobOpen(false);
+                            }}
+                            fromYear={1900}
+                            toYear={new Date().getFullYear()}
+                            disabled={(d) => d > new Date()}
+                          />
+                        </PopoverContent>
+                      </Popover>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <Label className="text-sm font-medium text-gray-800">Age</Label>
+                      <Input
+                        type="number"
+                        className={[
+                          'h-10 rounded-xl text-sm',
+                          errors.age
+                            ? 'border-red-500 focus-visible:ring-red-500'
+                            : 'border-gray-200 focus-visible:ring-gray-300',
+                        ].join(' ')}
+                        {...register('age')}
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="space-y-1">

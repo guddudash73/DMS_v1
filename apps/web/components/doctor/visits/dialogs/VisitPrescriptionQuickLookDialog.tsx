@@ -41,11 +41,66 @@ function safeParseDate(input: unknown): Date | null {
   const d = input instanceof Date ? input : new Date(input as any);
   return Number.isFinite(d.getTime()) ? d : null;
 }
-function calcAgeYearsFromDates(dob: Date, at: Date): number {
+
+/** ✅ NEW: patient registration date formatter (matches PatientDetailPage style) */
+function formatPatientRegdDate(patient: unknown): string {
+  // prefer numeric timestamps
+  const createdAtNum =
+    getPropNumber(patient, 'createdAt') ??
+    getPropNumber(patient, 'created_at') ??
+    getPropNumber(patient, 'registeredAt') ??
+    getPropNumber(patient, 'regdAt');
+
+  if (typeof createdAtNum === 'number' && Number.isFinite(createdAtNum) && createdAtNum > 0) {
+    return new Date(createdAtNum).toLocaleDateString('en-GB');
+  }
+
+  // fallback to string date
+  const createdAtStr =
+    getPropString(patient, 'createdAt') ??
+    getPropString(patient, 'created_at') ??
+    getPropString(patient, 'registeredAt') ??
+    getPropString(patient, 'regdAt');
+
+  if (createdAtStr) {
+    const d = new Date(createdAtStr);
+    if (Number.isFinite(d.getTime())) return d.toLocaleDateString('en-GB');
+  }
+
+  return '—';
+}
+
+/* ------------------------------------------------------------------ */
+/* patient helpers (backend-aligned: DOB preferred; fallback to age) */
+/* ------------------------------------------------------------------ */
+
+function safeParseDobToDate(dob: unknown): Date | null {
+  if (typeof dob !== 'string') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob.trim());
+  if (!m) return null;
+
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  const date = new Date(y, mo, d);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function calculateAge(dob: Date, at: Date): number {
   let age = at.getFullYear() - dob.getFullYear();
   const m = at.getMonth() - dob.getMonth();
   if (m < 0 || (m === 0 && at.getDate() < dob.getDate())) age -= 1;
   return age < 0 ? 0 : age;
+}
+
+function normalizeSex(raw: unknown): PatientSex | undefined {
+  if (!raw) return undefined;
+  const s = String(raw).trim().toUpperCase();
+  if (s === 'MALE' || s === 'M') return 'M';
+  if (s === 'FEMALE' || s === 'F') return 'F';
+  if (s === 'OTHER' || s === 'O') return 'O';
+  if (s === 'UNKNOWN' || s === 'U') return 'U';
+  return undefined;
 }
 
 function anchorIdFromVisit(v: Visit): string | undefined {
@@ -106,22 +161,16 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
   }, [visitCreatedAtDate]);
 
   const patientSex = React.useMemo<PatientSex | undefined>(() => {
-    const raw = String(
+    const raw =
       getProp(patientQuery.data, 'gender') ??
-        getProp(patientQuery.data, 'sex') ??
-        getProp(patientQuery.data, 'patientSex') ??
-        '',
-    )
-      .trim()
-      .toUpperCase();
+      getProp(patientQuery.data, 'sex') ??
+      getProp(patientQuery.data, 'patientSex') ??
+      undefined;
 
-    if (raw === 'M' || raw === 'F' || raw === 'O' || raw === 'U') return raw as PatientSex;
-    if (raw === 'MALE') return 'M';
-    if (raw === 'FEMALE') return 'F';
-    if (raw === 'OTHER') return 'O';
-    return undefined;
+    return normalizeSex(raw);
   }, [patientQuery.data]);
 
+  // ✅ DOB preferred (YYYY-MM-DD), fallback to stored age, computed at visit createdAt
   const patientAge = React.useMemo<number | undefined>(() => {
     const dobRaw =
       getProp(patientQuery.data, 'dob') ??
@@ -130,13 +179,25 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
       getProp(patientQuery.data, 'dobIso') ??
       null;
 
-    const dob = safeParseDate(dobRaw);
+    const dob = safeParseDobToDate(dobRaw);
     const at = visitCreatedAtDate ?? new Date();
-    if (!dob) return undefined;
-    return calcAgeYearsFromDates(dob, at);
+
+    const ageFromDob = dob ? calculateAge(dob, at) : undefined;
+
+    const ageStoredRaw = getProp(patientQuery.data, 'age');
+    const ageStored =
+      typeof ageStoredRaw === 'number' && Number.isFinite(ageStoredRaw) ? ageStoredRaw : undefined;
+
+    return ageFromDob ?? ageStored;
   }, [patientQuery.data, visitCreatedAtDate]);
 
+  // ✅ NEW: patient registration date to show in Rx header
+  const patientRegdDate = React.useMemo(() => {
+    return formatPatientRegdDate(patientQuery.data);
+  }, [patientQuery.data]);
+
   const rxUnknown = getProp(rxQuery.data, 'rx');
+
   const currentLinesUnknown = isRecord(rxUnknown) ? getProp(rxUnknown, 'lines') : undefined;
   const currentLines = Array.isArray(currentLinesUnknown) ? currentLinesUnknown : [];
 
@@ -144,6 +205,13 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
     if (!rxUnknown || !isRecord(rxUnknown)) return [];
     const td = getProp(rxUnknown, 'toothDetails');
     return Array.isArray(td) ? (td as ToothDetail[]) : [];
+  }, [rxUnknown]);
+
+  // ✅ doctor notes for preview/print
+  const doctorNotes = React.useMemo<string>(() => {
+    if (!rxUnknown || !isRecord(rxUnknown)) return '';
+    const dn = getProp(rxUnknown, 'doctorNotes');
+    return dn == null ? '' : String(dn);
   }, [rxUnknown]);
 
   const rxChain = React.useMemo(() => {
@@ -250,8 +318,10 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
               doctorName={doctorName}
               doctorRegdLabel={doctorRegdLabel}
               visitDateLabel={visitDateLabelComputed}
+              regdDate={patientRegdDate} // ✅ NEW: show patient registration date
               lines={currentLines as PreviewProps['lines']}
               toothDetails={currentToothDetails}
+              doctorNotes={doctorNotes}
               currentVisitId={rxChain.currentVisitId}
               chainVisitIds={rxChain.visitIds}
               visitMetaMap={rxChain.meta}

@@ -208,7 +208,7 @@ export function XrayUploader({ visitId, onUploaded, variant = 'default', classNa
         onClick={pickFile}
         disabled={busy}
         className={cn(
-          'rounded-xl',
+          'rounded-xl cursor-pointer',
           variant === 'default' ? 'bg-black text-white hover:bg-black/90' : '',
           className,
         )}

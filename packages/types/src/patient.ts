@@ -1,3 +1,4 @@
+// packages/types/src/patient.ts
 import { z } from 'zod';
 
 export const PatientId = z.string().min(1);
@@ -22,12 +23,19 @@ const PatientGenderInput = z.preprocess((val) => {
   return val;
 }, PatientGender);
 
+const PatientDob = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const PatientAge = z.coerce.number().int().min(0).max(130);
+
 export const Patient = z.object({
   patientId: PatientId,
   sdId: z.string().min(1),
   name: z.string().min(1),
   phone: z.string().min(5).max(13),
-  dob: z.string().optional(),
+
+  // ✅ exactly one stored, but Patient record can have either depending on history
+  dob: PatientDob.optional(),
+  age: PatientAge.optional(),
+
   gender: PatientGender.optional(),
   address: z.string().min(1).max(500).optional(),
   createdAt: z.number().int().nonnegative(),
@@ -40,23 +48,81 @@ export const Patient = z.object({
 });
 export type Patient = z.infer<typeof Patient>;
 
-export const PatientCreate = z.object({
-  name: z.string().min(1),
-  phone: z.string().min(7).max(20),
-  dob: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/)
-    .optional(),
+export const PatientCreate = z
+  .object({
+    name: z.string().min(1),
+    phone: z.string().min(7).max(20),
 
-  gender: PatientGenderInput.optional(),
+    dob: PatientDob.optional(),
+    age: PatientAge.optional(),
 
-  address: z.string().min(1).max(500).optional(),
-});
+    gender: PatientGenderInput.optional(),
+    address: z.string().min(1).max(500).optional(),
+  })
+  .superRefine((val, ctx) => {
+    const hasDob = typeof val.dob === 'string' && val.dob.trim().length > 0;
+    const hasAge = typeof val.age === 'number' && Number.isFinite(val.age);
+
+    if (hasDob && hasAge) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['dob'],
+        message: 'Provide either DOB or Age, not both.',
+      });
+      ctx.addIssue({
+        code: 'custom',
+        path: ['age'],
+        message: 'Provide either DOB or Age, not both.',
+      });
+      return;
+    }
+
+    if (!hasDob && !hasAge) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['dob'],
+        message: 'DOB or Age is required.',
+      });
+      ctx.addIssue({
+        code: 'custom',
+        path: ['age'],
+        message: 'DOB or Age is required.',
+      });
+    }
+  });
 export type PatientCreate = z.infer<typeof PatientCreate>;
 
-export const PatientUpdate = PatientCreate.partial().refine((val) => Object.keys(val).length > 0, {
-  message: 'At least one field must be provided for update.',
-});
+export const PatientUpdate = z
+  .object({
+    name: z.string().min(1).optional(),
+    phone: z.string().min(7).max(20).optional(),
+
+    dob: PatientDob.optional(),
+    age: PatientAge.optional(),
+
+    gender: PatientGenderInput.optional(),
+    address: z.string().min(1).max(500).optional(),
+  })
+  .refine((val) => Object.keys(val).length > 0, {
+    message: 'At least one field must be provided for update.',
+  })
+  .superRefine((val, ctx) => {
+    const hasDob = typeof val.dob === 'string' && val.dob.trim().length > 0;
+    const hasAge = typeof val.age === 'number' && Number.isFinite(val.age);
+
+    if (hasDob && hasAge) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['dob'],
+        message: 'Provide either DOB or Age, not both.',
+      });
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['age'],
+        message: 'Provide either DOB or Age, not both.',
+      });
+    }
+  });
 export type PatientUpdate = z.infer<typeof PatientUpdate>;
 
 export const PatientSearchQuery = z.object({

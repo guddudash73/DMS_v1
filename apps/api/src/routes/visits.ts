@@ -352,11 +352,22 @@ router.patch(
   }),
 );
 
+/**
+ * ✅ doctorNotes = printable
+ * ✅ doctorReceptionNotes = non-printable (doctor -> reception internal note)
+ * ✅ receptionNotes (separate route) remains receptionist printable note
+ */
 const RxCreateBody = z
   .object({
-    lines: z.array(RxLine).optional().default([]),
-    toothDetails: z.array(ToothDetail).optional().default([]),
+    // IMPORTANT: no defaults — missing means "do not change"
+    lines: z.array(RxLine).optional(),
+    toothDetails: z.array(ToothDetail).optional(),
+
+    // ✅ printable notes
     doctorNotes: z.string().max(2000).optional(),
+
+    // ✅ non-printable notes
+    doctorReceptionNotes: z.string().max(2000).optional(),
   })
   .superRefine((val, ctx) => {
     const hasLines = (val.lines?.length ?? 0) > 0;
@@ -402,19 +413,55 @@ router.post(
         .json({ error: 'PATIENT_NOT_FOUND', message: 'Patient missing/deleted' });
     }
 
-    const { lines, toothDetails, doctorNotes } = parsedBody.data;
     const now = Date.now();
 
     const isDone = visit.status === 'DONE';
     const jsonKey = isDone ? revisionRxJsonKey(visit.visitId) : draftRxJsonKey(visit.visitId);
 
+    // detect whether client actually sent these keys
+    const hasLinesKey = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'lines');
+    const hasTeethKey = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'toothDetails');
+    const hasDoctorNotesKey = Object.prototype.hasOwnProperty.call(req.body ?? {}, 'doctorNotes');
+    const hasDoctorReceptionNotesKey = Object.prototype.hasOwnProperty.call(
+      req.body ?? {},
+      'doctorReceptionNotes',
+    );
+
+    // pull existing rx so we can preserve fields when omitted
+    const existingRx = await prescriptionRepository.getCurrentForVisit(visit.visitId);
+
+    const incomingLines = parsedBody.data.lines;
+    const incomingTeeth = parsedBody.data.toothDetails;
+
+    // ✅ printable
+    const incomingDoctorNotes = parsedBody.data.doctorNotes;
+
+    // ✅ non-printable
+    const incomingDoctorReceptionNotes = parsedBody.data.doctorReceptionNotes;
+
+    const nextLines = hasLinesKey ? (incomingLines ?? []) : (existingRx?.lines ?? []);
+    const nextToothDetails = hasTeethKey ? (incomingTeeth ?? []) : (existingRx?.toothDetails ?? []);
+
+    const nextDoctorNotes = hasDoctorNotesKey ? incomingDoctorNotes : existingRx?.doctorNotes;
+
+    const nextDoctorReceptionNotes = hasDoctorReceptionNotesKey
+      ? incomingDoctorReceptionNotes
+      : existingRx?.doctorReceptionNotes;
+
     const jsonPayload: Record<string, unknown> = {
       visitId: visit.visitId,
-      lines,
-      toothDetails,
-      createdAt: now,
+      lines: nextLines,
+      toothDetails: nextToothDetails,
+      createdAt: existingRx?.createdAt ?? now,
       updatedAt: now,
-      ...(doctorNotes !== undefined ? { doctorNotes } : {}),
+
+      // ✅ printable
+      ...(nextDoctorNotes !== undefined ? { doctorNotes: nextDoctorNotes } : {}),
+
+      // ✅ non-printable
+      ...(nextDoctorReceptionNotes !== undefined
+        ? { doctorReceptionNotes: nextDoctorReceptionNotes }
+        : {}),
     };
 
     try {
@@ -440,24 +487,35 @@ router.post(
       });
       throw new PrescriptionStorageError();
     }
+
     let prescription;
     if (!isDone) {
       prescription = await prescriptionRepository.upsertDraftForVisit({
         visit,
-        lines,
+        lines: nextLines,
         jsonKey,
-        toothDetails: toothDetails?.length ? toothDetails : [],
-        doctorNotes,
+        toothDetails: nextToothDetails,
+
+        // ✅ printable
+        doctorNotes: nextDoctorNotes,
+
+        // ✅ non-printable
+        doctorReceptionNotes: nextDoctorReceptionNotes,
       });
     } else {
       const revision = await prescriptionRepository.ensureRevisionForVisit({ visit, jsonKey });
       prescription =
         (await prescriptionRepository.updateById({
           rxId: revision.rxId,
-          lines,
+          lines: nextLines,
           jsonKey,
-          toothDetails: toothDetails?.length ? toothDetails : [],
-          doctorNotes,
+          toothDetails: nextToothDetails,
+
+          // ✅ printable
+          doctorNotes: nextDoctorNotes,
+
+          // ✅ non-printable
+          doctorReceptionNotes: nextDoctorReceptionNotes,
         })) ?? revision;
     }
 
@@ -848,7 +906,14 @@ router.post(
       toothDetails: revision.toothDetails ?? undefined,
       createdAt: now,
       updatedAt: now,
+
+      // ✅ printable
       ...(revision.doctorNotes !== undefined ? { doctorNotes: revision.doctorNotes } : {}),
+
+      // ✅ non-printable
+      ...(revision.doctorReceptionNotes !== undefined
+        ? { doctorReceptionNotes: revision.doctorReceptionNotes }
+        : {}),
     };
 
     try {

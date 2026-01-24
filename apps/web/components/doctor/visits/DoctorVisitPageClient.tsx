@@ -21,8 +21,7 @@ import {
 import { useAuth } from '@/src/hooks/useAuth';
 import { ArrowRight, Stethoscope } from 'lucide-react';
 
-import type { ToothDetail, Visit } from '@dcm/types';
-import { clinicDateISO } from '@/src/lib/clinicTime';
+import type { Visit } from '@dcm/types';
 
 // Lazy-load DONE view (heavy: Rx preview + X-rays + history + calendar)
 const DoctorVisitDoneView = dynamic(
@@ -74,6 +73,10 @@ function getString(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v : undefined;
 }
 
+function getNumber(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
 function getProp(obj: unknown, key: string): unknown {
   if (!isRecord(obj)) return undefined;
   return obj[key];
@@ -84,8 +87,7 @@ function getPropString(obj: unknown, key: string): string | undefined {
 }
 
 function getPropNumber(obj: unknown, key: string): number | undefined {
-  const v = getProp(obj, key);
-  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+  return getNumber(getProp(obj, key));
 }
 
 function getErrorMessage(err: unknown): string {
@@ -103,43 +105,37 @@ function getErrorMessage(err: unknown): string {
   return 'Request failed.';
 }
 
-function safeSexFromPatient(p: unknown): PatientSex {
-  const raw = String(getProp(p, 'gender') ?? getProp(p, 'sex') ?? getProp(p, 'patientSex') ?? '')
-    .trim()
-    .toUpperCase();
+/* ------------------------------------------------------------------ */
+/* patient helpers (backend-aligned, same intent as DoctorVisitDoneView) */
+/* ------------------------------------------------------------------ */
 
-  if (raw === 'M' || raw === 'MALE') return 'M';
-  if (raw === 'F' || raw === 'FEMALE') return 'F';
-  if (raw === 'O' || raw === 'OTHER') return 'O';
-  return 'U';
-}
-
-function parseDob(dob?: string): Date | null {
-  if (!dob) return null;
-  const s = String(dob).trim();
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+function safeParseDobToDate(dob: unknown): Date | null {
+  if (typeof dob !== 'string') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob.trim());
   if (!m) return null;
+
   const y = Number(m[1]);
-  const mm = Number(m[2]);
-  const dd = Number(m[3]);
-  const d = new Date(y, mm - 1, dd);
-  if (Number.isNaN(d.getTime())) return null;
-  return d;
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  const date = new Date(y, mo, d);
+  return Number.isFinite(date.getTime()) ? date : null;
 }
 
-function calcAgeYears(dob?: string, onDate?: string): number | null {
-  const birth = parseDob(dob);
-  if (!birth) return null;
+function calculateAge(dob: Date, at: Date): number {
+  let age = at.getFullYear() - dob.getFullYear();
+  const m = at.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && at.getDate() < dob.getDate())) age -= 1;
+  return age < 0 ? 0 : age;
+}
 
-  const ref = onDate ? parseDob(onDate) : null;
-  const today = ref ?? new Date();
-
-  let age = today.getFullYear() - birth.getFullYear();
-  const m = today.getMonth() - birth.getMonth();
-  if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age -= 1;
-
-  if (!Number.isFinite(age) || age < 0 || age > 130) return null;
-  return age;
+function normalizeSex(raw: unknown): PatientSex | undefined {
+  if (!raw) return undefined;
+  const s = String(raw).trim().toUpperCase();
+  if (s === 'MALE' || s === 'M') return 'M';
+  if (s === 'FEMALE' || s === 'F') return 'F';
+  if (s === 'OTHER' || s === 'O') return 'O';
+  if (s === 'UNKNOWN' || s === 'U') return 'U';
+  return undefined;
 }
 
 function stageLabel(status?: Visit['status']) {
@@ -205,8 +201,27 @@ export function DoctorVisitPageClient() {
   const visitDateLabel = visitDate ? `Visit: ${visitDate}` : undefined;
 
   const patient = patientQuery.data ?? null;
-  const patientSex = safeSexFromPatient(patient);
-  const patientAge = calcAgeYears(getPropString(patient, 'dob'), visitDate) ?? undefined;
+
+  // Backend-aligned age/sex (DOB preferred; fallback to stored age)
+  const visitAt = React.useMemo(() => {
+    const ts = getPropNumber(visit as unknown, 'createdAt') ?? Date.now();
+    return new Date(ts);
+  }, [visit]);
+
+  const patientDobRaw = getProp(patient, 'dob');
+  const patientAgeRaw = getProp(patient, 'age');
+
+  const dob = safeParseDobToDate(patientDobRaw);
+  const ageFromDob = dob ? calculateAge(dob, visitAt) : undefined;
+  const ageStored =
+    typeof patientAgeRaw === 'number' && Number.isFinite(patientAgeRaw) ? patientAgeRaw : undefined;
+
+  const patientAge = ageFromDob ?? ageStored;
+
+  const patientSex =
+    normalizeSex(
+      getProp(patient, 'gender') ?? getProp(patient, 'sex') ?? getProp(patient, 'patientSex'),
+    ) ?? 'U';
 
   const opdNo = getString(visit?.opdNo) ?? getString(visit?.opdId) ?? undefined;
 
@@ -427,7 +442,7 @@ export function DoctorVisitPageClient() {
               <div className="flex justify-between gap-3">
                 <div className="text-gray-600">Age/Sex</div>
                 <div className="font-semibold text-gray-900">
-                  {patientAge ? String(patientAge) : '—'}/{patientSex ?? '—'}
+                  {typeof patientAge === 'number' ? String(patientAge) : '—'}/{patientSex ?? '—'}
                 </div>
               </div>
 

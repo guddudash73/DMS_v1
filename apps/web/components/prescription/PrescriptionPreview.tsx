@@ -18,8 +18,28 @@ type Props = {
   opdNo?: string;
   doctorName?: string;
   doctorRegdLabel?: string;
+
+  /**
+   * ✅ NEW: Patient registration date (Regd. Date in header)
+   * Pass from parent (patient registration date), NOT visit date.
+   *
+   * Expected formats:
+   * - "YYYY-MM-DD" (preferred)
+   * - or any display-ready string you already format upstream
+   */
+  regdDate?: string;
+
   visitDateLabel?: string;
   lines: RxLineType[];
+
+  /**
+   * ✅ Printable doctor notes (will print in prescription)
+   */
+  doctorNotes?: string;
+
+  /**
+   * ✅ Receptionist printable notes (unchanged)
+   */
   receptionNotes?: string;
 
   currentVisitId?: string;
@@ -132,19 +152,23 @@ function VisitRxPreviewBlock(props: {
   visitId: string;
   isCurrent: boolean;
   currentLines: RxLineType[];
+  currentDoctorNotes?: string;
   visit?: Visit;
   showOpdInline?: boolean;
   opdInlineText?: string;
   currentToothDetails: ToothDetail[];
+  hideVisitDate?: boolean;
 }) {
   const {
     visitId,
     isCurrent,
     currentLines,
+    currentDoctorNotes,
     visit,
     showOpdInline,
     opdInlineText,
     currentToothDetails,
+    hideVisitDate,
   } = props;
 
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: isCurrent || !visitId });
@@ -152,18 +176,25 @@ function VisitRxPreviewBlock(props: {
   const lines = isCurrent ? currentLines : (rxQuery.data?.rx?.lines ?? []);
   const toothDetails = isCurrent ? currentToothDetails : (rxQuery.data?.rx?.toothDetails ?? []);
 
+  const doctorNotes = isCurrent
+    ? (currentDoctorNotes ?? '')
+    : (rxQuery.data?.rx?.doctorNotes ?? '');
+  const hasDoctorNotes = !!doctorNotes?.trim();
+
   const visitDate = getMetaString(visit, 'visitDate');
   const reason = getMetaString(visit, 'reason');
 
   const hasToothDetails = (toothDetails?.length ?? 0) > 0;
+  const hasMedicines = lines.length > 0;
 
-  if (!lines.length && !reason && !visitDate && !hasToothDetails) return <div className="h-2" />;
+  if (!hasMedicines && !reason && !visitDate && !hasToothDetails && !hasDoctorNotes)
+    return <div className="h-2" />;
 
   return (
     <div className="rx-prev-block">
       <div className="mb-2 flex items-baseline justify-between">
         <div className="text-[12px] font-bold text-gray-900">
-          {visitDate ? formatClinicDateShort(visitDate) : '—'}
+          {hideVisitDate ? '' : visitDate ? formatClinicDateShort(visitDate) : '—'}
         </div>
 
         <div className="ml-4 flex min-w-0 flex-1 items-baseline justify-end gap-3">
@@ -185,18 +216,27 @@ function VisitRxPreviewBlock(props: {
         </div>
       ) : null}
 
-      {lines.length === 0 ? (
-        <div className="text-[12px] text-gray-500">No medicines recorded.</div>
-      ) : (
-        <ol className="space-y-1 text-[13px] leading-5 text-gray-900">
-          {lines.map((l, idx) => (
-            <li key={idx} className="flex gap-2">
-              <div className="w-5 shrink-0 text-right font-medium">{idx + 1}.</div>
-              <div className="font-medium">{buildLineText(l)}</div>
-            </li>
-          ))}
-        </ol>
-      )}
+      {hasMedicines ? (
+        <>
+          <div className="mb-1 text-[11px] font-semibold text-gray-700">Medicines:</div>
+
+          <ol className="space-y-1 text-[13px] leading-5 text-gray-900">
+            {lines.map((l, idx) => (
+              <li key={idx} className="flex gap-2">
+                <div className="w-5 shrink-0 text-right font-medium">{idx + 1}.</div>
+                <div className="font-medium">{buildLineText(l)}</div>
+              </li>
+            ))}
+          </ol>
+        </>
+      ) : null}
+
+      {hasDoctorNotes ? (
+        <div className="mt-2 text-[11px] leading-4 text-gray-900">
+          <span className="font-semibold">Notes: </span>
+          <span className="whitespace-pre-wrap">{doctorNotes.trim()}</span>
+        </div>
+      ) : null}
 
       <div className="mt-3 h-px w-full bg-gray-200" />
     </div>
@@ -256,8 +296,10 @@ export function PrescriptionPreview({
   patientSex,
   sdId,
   opdNo,
+  regdDate,
   visitDateLabel,
   lines,
+  doctorNotes,
   receptionNotes,
 
   currentVisitId: currentVisitIdProp,
@@ -269,12 +311,20 @@ export function PrescriptionPreview({
   currentOnly = false,
 }: Props) {
   const hasNotes = !!receptionNotes?.trim();
+  const hasDoctorNotes = !!doctorNotes?.trim();
   const ageSex = formatAgeSex(patientAge, patientSex);
 
+  // (still used for internal/visit-related stuff; NOT for Regd. Date display)
   const visitISO = useMemo(
     () => extractIsoFromVisitLabel(visitDateLabel) ?? clinicDateISO(new Date()),
     [visitDateLabel],
   );
+
+  // ✅ NEW: header registration date (patient registration date)
+  const headerRegdDate = useMemo(() => {
+    const s = (regdDate ?? '').toString().trim();
+    return s || '—';
+  }, [regdDate]);
 
   const currentVisitId = useMemo(() => currentVisitIdProp ?? 'CURRENT', [currentVisitIdProp]);
 
@@ -368,13 +418,25 @@ export function PrescriptionPreview({
       chainVisitIds.join(','),
       String(lines.length),
       String(currentToothDetails.length),
+      String(doctorNotes?.length ?? 0),
       String(receptionNotes?.length ?? 0),
+      // include regdDate so measurements update if it changes
+      String(headerRegdDate),
+      String(visitISO),
     ].join('|');
-  }, [historyEnabled, chainVisitIds, lines.length, currentToothDetails.length, receptionNotes]);
+  }, [
+    historyEnabled,
+    chainVisitIds,
+    lines.length,
+    currentToothDetails.length,
+    doctorNotes,
+    receptionNotes,
+    headerRegdDate,
+    visitISO,
+  ]);
 
   const shouldMeasure = historyEnabled && chainVisitIds.length > 1;
 
-  // reset page when chain changes (normal mode)
   useEffect(() => {
     if (!currentOnly) setPage(1);
   }, [currentOnly, historyEnabled, chainVisitIds.join('|')]);
@@ -438,7 +500,6 @@ export function PrescriptionPreview({
 
     const SAFETY = 10;
 
-    // greedy split
     let result: string[][] = [];
     {
       let cur: string[] = [];
@@ -463,7 +524,6 @@ export function PrescriptionPreview({
       if (!result.length) result = [chainVisitIds];
     }
 
-    // backfill gaps (pull from next page if fits)
     const getHeightById = (id: string) => {
       const idx = chainVisitIds.indexOf(id);
       return idx >= 0 ? (blockHeights[idx] ?? 0) : 0;
@@ -489,7 +549,6 @@ export function PrescriptionPreview({
       if (!result.length) result = [chainVisitIds];
     }
 
-    // last page notes shrink (keep it simple: if notes exist, ensure last page isn't overstuffed)
     if (hasNotes && notesH > 0 && result.length > 0) {
       const lastIdx = result.length - 1;
       const lastCap = (lastIdx === 0 ? capFirst : capNext) - notesH;
@@ -512,7 +571,6 @@ export function PrescriptionPreview({
     notesH,
   ]);
 
-  // ✅ If currentOnly, jump to the page that contains currentVisitId
   useEffect(() => {
     if (!historyEnabled) return;
     if (!currentOnly) return;
@@ -528,14 +586,13 @@ export function PrescriptionPreview({
     if (page < 1) setPage(1);
   }, [pages.length, page]);
 
-  const totalPages = pages.length || 1;
   const visiblePageIds = pages[Math.max(0, page - 1)] ?? chainVisitIds;
 
   const hiddenStyle: React.CSSProperties | undefined = currentOnly
     ? { visibility: 'hidden' }
     : undefined;
 
-  const renderNotes = () => {
+  const renderReceptionNotes = () => {
     if (!hasNotes) return null;
     return (
       <div className="shrink-0 px-6 pb-2">
@@ -549,7 +606,18 @@ export function PrescriptionPreview({
     );
   };
 
-  const shouldShowNotesOnThisPage = hasNotes && page === totalPages && !currentOnly;
+  const renderDoctorNotesInline = () => {
+    if (!hasDoctorNotes) return null;
+    return (
+      <div className="mt-2 text-[11px] leading-4 text-gray-900">
+        <span className="font-semibold">Notes: </span>
+        <span className="whitespace-pre-wrap">{doctorNotes!.trim()}</span>
+      </div>
+    );
+  };
+
+  const totalPages = pages.length || 1;
+  const shouldShowReceptionNotesOnThisPage = hasNotes && page === totalPages && !currentOnly;
   const isFirstPage = page === 1;
 
   const renderHistoryBlocks = (ids: string[]) => {
@@ -576,10 +644,12 @@ export function PrescriptionPreview({
                 visitId={id === 'CURRENT' ? '' : id}
                 isCurrent={isCur}
                 currentLines={lines}
+                currentDoctorNotes={doctorNotes}
                 visit={v}
                 showOpdInline={!isAnchor}
                 opdInlineText={opdInline}
                 currentToothDetails={currentToothDetails}
+                hideVisitDate={false}
               />
             </div>
           );
@@ -611,7 +681,7 @@ export function PrescriptionPreview({
               </div>
               <div className="shrink-0 px-6 pb-2">
                 <div ref={measureNotesRef} className="w-full">
-                  {renderNotes()}
+                  {renderReceptionNotes()}
                 </div>
               </div>
             </div>
@@ -631,6 +701,8 @@ export function PrescriptionPreview({
     </div>
   ) : null;
 
+  const hasMedicines = lines.length > 0;
+
   return (
     <div className="w-full">
       {measureTemplate}
@@ -644,7 +716,6 @@ export function PrescriptionPreview({
             <div className="h-full w-full overflow-hidden rounded-xl border bg-white shadow-sm">
               {isFirstPage ? (
                 <div className="flex h-full flex-col">
-                  {/* header (hidden in currentOnly but space preserved) */}
                   <div className="shrink-0 px-6 pt-4" style={hiddenStyle}>
                     <div className="flex items-start justify-between gap-4">
                       <div className="relative h-16 w-16">
@@ -689,7 +760,6 @@ export function PrescriptionPreview({
                     <div className="mt-2 h-px w-full bg-emerald-600/60" />
                   </div>
 
-                  {/* doctor+patient band (hidden in currentOnly but space preserved) */}
                   <div className="shrink-0 px-6 pt-3" style={hiddenStyle}>
                     <div className="flex items-start justify-between gap-6">
                       <div className="min-w-0 flex flex-col">
@@ -736,7 +806,7 @@ export function PrescriptionPreview({
                         <div className="flex gap-3">
                           <div className="w-20 text-gray-600">Regd. Date</div>
                           <div className="text-gray-600">:</div>
-                          <div className="font-semibold text-gray-900">{visitISO}</div>
+                          <div className="font-semibold text-gray-900">{headerRegdDate}</div>
                         </div>
 
                         <div className="flex gap-3">
@@ -762,47 +832,51 @@ export function PrescriptionPreview({
                         {showCurrentToothDetails ? (
                           <div className="mb-3">
                             <ToothDetailsBlock toothDetails={currentToothDetails} />
-                            <div className="mt-3 h-px w-full bg-gray-200" />
                           </div>
                         ) : null}
 
-                        {lines.length === 0 ? (
-                          <div className="text-[13px] text-gray-500">No medicines added yet.</div>
-                        ) : (
-                          <ol className="text-sm leading-6 text-gray-900">
-                            {lines.map((l, idx) => (
-                              <li key={idx} className="flex gap-1">
-                                <div className="w-4 shrink-0 text-right font-medium">
-                                  {idx + 1}.
-                                </div>
-                                <div className="font-medium">{buildLineText(l)}</div>
-                              </li>
-                            ))}
-                          </ol>
-                        )}
+                        {hasMedicines ? (
+                          <>
+                            <div className="mb-1 text-[11px] font-semibold text-gray-700">
+                              Medicines:
+                            </div>
+
+                            <ol className="text-sm leading-6 text-gray-900">
+                              {lines.map((l, idx) => (
+                                <li key={idx} className="flex gap-1">
+                                  <div className="w-4 shrink-0 text-right font-medium">
+                                    {idx + 1}.
+                                  </div>
+                                  <div className="font-medium">{buildLineText(l)}</div>
+                                </li>
+                              ))}
+                            </ol>
+                          </>
+                        ) : null}
+
+                        {renderDoctorNotesInline()}
                       </>
                     ) : (
                       renderHistoryBlocks(visiblePageIds)
                     )}
                   </div>
 
-                  {shouldShowNotesOnThisPage ? renderNotes() : null}
+                  {shouldShowReceptionNotesOnThisPage ? renderReceptionNotes() : null}
                 </div>
               ) : (
                 <div className="flex h-full flex-col">
                   <div className="min-h-0 flex-1 px-6 pt-6 pb-4">
                     {historyEnabled ? renderHistoryBlocks(visiblePageIds) : null}
                   </div>
-                  {shouldShowNotesOnThisPage ? renderNotes() : null}
+                  {shouldShowReceptionNotesOnThisPage ? renderReceptionNotes() : null}
                 </div>
               )}
             </div>
           </div>
         </div>
 
-        {/* ✅ Hide pagination completely in currentOnly mode */}
         {historyEnabled && !currentOnly ? (
-          <PaginationBar page={page} total={totalPages} onChange={setPage} />
+          <PaginationBar page={page} total={pages.length || 1} onChange={setPage} />
         ) : null}
       </div>
     </div>

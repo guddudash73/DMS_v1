@@ -1,16 +1,21 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
-import React from 'react';
-import type { RxLineType, Visit } from '@dcm/types';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { RxLineType, Visit, ToothDetail } from '@dcm/types';
+
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
+
 import { PrescriptionPreview } from './PrescriptionPreview';
 import { MedicinesEditor } from './MedicinesEditor';
+import { RxPresetImportDialog } from './RxPresetImportDialog';
+import { MultiToothDetailsEditor } from './ToothDetailsEditor';
+
 import { XrayUploader } from '@/components/xray/XrayUploader';
 import { XrayGallery } from '@/components/xray/XrayGallery';
 import { XrayTrayReadOnly } from '@/components/xray/XrayTrayReadOnly';
+
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 import {
   useUpsertVisitRxMutation,
@@ -22,28 +27,10 @@ import {
   useGetMeQuery,
 } from '@/src/store/api';
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { Calendar } from '@/components/ui/calendar';
-import { RxPresetImportDialog } from './RxPresetImportDialog';
-
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-
-import { PaginationControl } from '@/components/ui/pagination-control';
-
-import { Calendar as CalendarIcon } from 'lucide-react';
+import { clinicDateISO, clinicDateISOFromMs } from '@/src/lib/clinicTime';
 import { useRouter } from 'next/navigation';
 
-import { clinicDateISO, clinicDateISOFromMs, formatClinicDateShort } from '@/src/lib/clinicTime';
-import type { ToothDetail } from '@dcm/types';
-import { ToothDetailsEditor } from './ToothDetailsEditor';
+import { DoctorVisitHistoryPanel } from '@/components/doctor/visits/DoctorVisitHistoryPanel';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
 
@@ -71,6 +58,88 @@ function getString(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v : undefined;
 }
 
+function getNumber(v: unknown): number | undefined {
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+function getProp(obj: unknown, key: string): unknown {
+  if (!isRecord(obj)) return undefined;
+  return obj[key];
+}
+
+function getPropString(obj: unknown, key: string): string | undefined {
+  return getString(getProp(obj, key));
+}
+
+function getPropNumber(obj: unknown, key: string): number | undefined {
+  return getNumber(getProp(obj, key));
+}
+
+/** ✅ NEW: patient registration date formatter (same idea as PatientDetailPage) */
+function formatPatientRegdDate(patientData: unknown): string {
+  // prefer numeric ms timestamps
+  const createdAtNum =
+    getPropNumber(patientData, 'createdAt') ??
+    getPropNumber(patientData, 'created_at') ??
+    getPropNumber(patientData, 'registeredAt') ??
+    getPropNumber(patientData, 'regdAt');
+
+  if (typeof createdAtNum === 'number' && Number.isFinite(createdAtNum) && createdAtNum > 0) {
+    return new Date(createdAtNum).toLocaleDateString('en-GB');
+  }
+
+  // fallback: string dates
+  const createdAtStr =
+    getPropString(patientData, 'createdAt') ??
+    getPropString(patientData, 'created_at') ??
+    getPropString(patientData, 'registeredAt') ??
+    getPropString(patientData, 'regdAt');
+
+  if (createdAtStr) {
+    const d = new Date(createdAtStr);
+    if (Number.isFinite(d.getTime())) return d.toLocaleDateString('en-GB');
+  }
+
+  return '—';
+}
+
+/* ------------------------------------------------------------------ */
+/* patient helpers (backend-aligned: DOB preferred; fallback to age) */
+/* ------------------------------------------------------------------ */
+
+function safeParseDobToDate(dob: unknown): Date | null {
+  if (typeof dob !== 'string') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob.trim());
+  if (!m) return null;
+
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  const date = new Date(y, mo, d);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function calculateAge(dob: Date, at: Date): number {
+  let age = at.getFullYear() - dob.getFullYear();
+  const m = at.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && at.getDate() < dob.getDate())) age -= 1;
+  return age < 0 ? 0 : age;
+}
+
+function normalizeSex(raw: unknown): PatientSex | undefined {
+  if (!raw) return undefined;
+  const s = String(raw).trim().toUpperCase();
+  if (s === 'MALE' || s === 'M') return 'M';
+  if (s === 'FEMALE' || s === 'F') return 'F';
+  if (s === 'OTHER' || s === 'O') return 'O';
+  if (s === 'UNKNOWN' || s === 'U') return 'U';
+  return undefined;
+}
+
+/* ------------------------------------------------------------------ */
+/* time parse util (for createdAt etc) */
+/* ------------------------------------------------------------------ */
+
 function safeParseDate(input: unknown): Date | null {
   if (!input) return null;
   if (input instanceof Date) return Number.isFinite(input.getTime()) ? input : null;
@@ -88,13 +157,6 @@ function safeParseDate(input: unknown): Date | null {
   }
 
   return null;
-}
-
-function calcAgeYears(dob: Date, at: Date): number {
-  let age = at.getFullYear() - dob.getFullYear();
-  const m = at.getMonth() - dob.getMonth();
-  if (m < 0 || (m === 0 && at.getDate() < dob.getDate())) age -= 1;
-  return age < 0 ? 0 : age;
 }
 
 function looksLikeDoctorIdLabel(name?: string) {
@@ -135,38 +197,27 @@ function MedicinesReadOnly({ lines }: { lines: RxLineType[] }) {
   }
 
   return (
-    <div className="mt-3 overflow-hidden rounded-2xl border">
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-gray-50">
-            <TableHead className="font-semibold text-gray-600">#</TableHead>
-            <TableHead className="font-semibold text-gray-600">Medicine</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {lines.map((l, idx) => {
-            const rec: Record<string, unknown> = isRecord(l)
-              ? (l as unknown as Record<string, unknown>)
-              : {};
-            const idVal = rec['id'];
-            const rxLineIdVal = rec['rxLineId'];
+    <div className="mt-3 space-y-2 rounded-2xl border p-3">
+      {lines.map((l, idx) => {
+        const rec: Record<string, unknown> = isRecord(l)
+          ? (l as unknown as Record<string, unknown>)
+          : {};
+        const idVal = rec['id'];
+        const rxLineIdVal = rec['rxLineId'];
+        const key =
+          typeof idVal === 'string'
+            ? idVal
+            : typeof rxLineIdVal === 'string'
+              ? rxLineIdVal
+              : `${idx}`;
 
-            const key =
-              typeof idVal === 'string'
-                ? idVal
-                : typeof rxLineIdVal === 'string'
-                  ? rxLineIdVal
-                  : `${idx}`;
-
-            return (
-              <TableRow key={key} className="hover:bg-gray-50/60">
-                <TableCell className="w-15 text-gray-700">{idx + 1}</TableCell>
-                <TableCell className="text-gray-800">{lineToText(l)}</TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
+        return (
+          <div key={key} className="text-sm text-gray-800">
+            <span className="mr-2 text-gray-500">{idx + 1}.</span>
+            {lineToText(l)}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -211,7 +262,7 @@ function VisitPrescriptionQuickLookDialog(props: {
 
   const visitCreatedAtDate = useMemo(() => {
     const dUnknown: unknown = visitQuery.data;
-    const createdAt = isRecord(dUnknown) ? dUnknown.createdAt : undefined;
+    const createdAt = isRecord(dUnknown) ? (dUnknown as any).createdAt : undefined;
     return safeParseDate(createdAt);
   }, [visitQuery.data]);
 
@@ -223,33 +274,43 @@ function VisitPrescriptionQuickLookDialog(props: {
   const patientSex = useMemo(() => {
     const pUnknown: unknown = patientQuery.data;
     const rec: Record<string, unknown> = isRecord(pUnknown) ? pUnknown : {};
-    const raw = String(rec.sex ?? rec.gender ?? rec.patientSex ?? '')
-      .trim()
-      .toUpperCase();
-
-    if (raw === 'M' || raw === 'F' || raw === 'O' || raw === 'U') return raw as PatientSex;
-    if (raw === 'MALE') return 'M';
-    if (raw === 'FEMALE') return 'F';
-    if (raw === 'OTHER') return 'O';
-    return undefined;
+    const raw = (rec as any).sex ?? (rec as any).gender ?? (rec as any).patientSex ?? undefined;
+    return normalizeSex(raw);
   }, [patientQuery.data]);
 
+  // ✅ DOB preferred, fallback to stored age, computed at visit createdAt
   const patientAge = useMemo(() => {
     const pUnknown: unknown = patientQuery.data;
     const rec: Record<string, unknown> = isRecord(pUnknown) ? pUnknown : {};
-    const dobRaw = rec.dob ?? rec.dateOfBirth ?? rec.birthDate ?? rec.dobIso ?? null;
 
-    const dob = safeParseDate(dobRaw);
+    const dobRaw =
+      (rec as any).dob ??
+      (rec as any).dateOfBirth ??
+      (rec as any).birthDate ??
+      (rec as any).dobIso ??
+      null;
+    const dob = safeParseDobToDate(dobRaw);
+
     const at = visitCreatedAtDate ?? new Date();
-    if (!dob) return undefined;
-    return calcAgeYears(dob, at);
+    const ageFromDob = dob ? calculateAge(dob, at) : undefined;
+    const ageStored = getNumber((rec as any).age);
+
+    return ageFromDob ?? ageStored;
   }, [patientQuery.data, visitCreatedAtDate]);
 
+  // ✅ NEW: patient registration date for preview header
+  const patientRegdDate = useMemo(() => {
+    return formatPatientRegdDate(patientQuery.data);
+  }, [patientQuery.data]);
+
   const currentLines = rxQuery.data?.rx?.lines ?? [];
+  const currentDoctorNotes = (rxQuery.data?.rx as any)?.doctorNotes;
+  const currentDoctorNotesStr = typeof currentDoctorNotes === 'string' ? currentDoctorNotes : '';
+
   const currentToothDetails = useMemo<ToothDetail[]>(() => {
     const rUnknown: unknown = rxQuery.data?.rx;
     if (!rUnknown || !isRecord(rUnknown)) return [];
-    const td = rUnknown.toothDetails;
+    const td = (rUnknown as any).toothDetails;
     return Array.isArray(td) ? (td as ToothDetail[]) : [];
   }, [rxQuery.data]);
 
@@ -260,8 +321,8 @@ function VisitPrescriptionQuickLookDialog(props: {
     for (const v of allVisitsRaw) meta.set(v.visitId, v);
 
     const vqUnknown: unknown = visitQuery.data;
-    if (isRecord(vqUnknown) && typeof vqUnknown.visitId === 'string') {
-      meta.set(vqUnknown.visitId, vqUnknown as unknown as Visit);
+    if (isRecord(vqUnknown) && typeof (vqUnknown as any).visitId === 'string') {
+      meta.set((vqUnknown as any).visitId, vqUnknown as unknown as Visit);
     }
 
     const vSelected = meta.get(selectedId) ?? (vqUnknown as unknown as Visit | undefined);
@@ -269,8 +330,8 @@ function VisitPrescriptionQuickLookDialog(props: {
     const selRec: Record<string, unknown> = isRecord(vSelected)
       ? (vSelected as unknown as Record<string, unknown>)
       : {};
-    const tag = getString(selRec.tag);
-    const anchorVisitId = getString(selRec.anchorVisitId);
+    const tag = getString((selRec as any).tag);
+    const anchorVisitId = getString((selRec as any).anchorVisitId);
 
     const anchorId = tag === 'F' ? anchorVisitId : selectedId;
     if (!anchorId)
@@ -286,22 +347,30 @@ function VisitPrescriptionQuickLookDialog(props: {
       const vRec: Record<string, unknown> = isRecord(v)
         ? (v as unknown as Record<string, unknown>)
         : {};
-      const aId = getString(vRec.anchorVisitId);
-      if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
+      const aId = getString((vRec as any).anchorVisitId);
+      if (aId && aId === anchorId && (v as any).visitId !== anchorId) followups.push(v);
     }
-    followups.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+    followups.sort(
+      (a, b) =>
+        ((a as any).createdAt ?? (a as any).updatedAt ?? 0) -
+        ((b as any).createdAt ?? (b as any).updatedAt ?? 0),
+    );
     chain.push(...followups);
 
-    if (selectedId && !chain.some((x) => x.visitId === selectedId)) {
+    if (selectedId && !chain.some((x) => (x as any).visitId === selectedId)) {
       const cur = meta.get(selectedId);
       chain.push(cur ?? ({ visitId: selectedId } as Visit));
     }
 
-    chain.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+    chain.sort(
+      (a, b) =>
+        ((a as any).createdAt ?? (a as any).updatedAt ?? 0) -
+        ((b as any).createdAt ?? (b as any).updatedAt ?? 0),
+    );
 
     const seen = new Set<string>();
     const chainIdsOrdered = chain
-      .map((x) => x.visitId)
+      .map((x) => (x as any).visitId as string)
       .filter((id) => {
         if (!id) return false;
         if (seen.has(id)) return false;
@@ -318,7 +387,7 @@ function VisitPrescriptionQuickLookDialog(props: {
   const selectedVisitOpdNo = useMemo(() => {
     const vUnknown: unknown = visitQuery.data;
     const v = isRecord(vUnknown) ? vUnknown : {};
-    const raw = v.opdNo ?? v.opdNumber ?? v.opdId ?? v.opd ?? v.opd_no ?? v.opd_no_str ?? undefined;
+    const raw = (v as any).opdNo ?? (v as any).opdNumber ?? (v as any).opdId ?? (v as any).opd;
     const s = raw == null ? '' : String(raw).trim();
     return s || undefined;
   }, [visitQuery.data]);
@@ -339,17 +408,19 @@ function VisitPrescriptionQuickLookDialog(props: {
             <div className="text-sm text-gray-500">Invalid visit.</div>
           ) : (
             <PrescriptionPreview
-              patientName={patientQuery.data?.name ?? patientName}
-              patientPhone={patientQuery.data?.phone ?? patientPhone}
+              patientName={(patientQuery.data as any)?.name ?? patientName}
+              patientPhone={(patientQuery.data as any)?.phone ?? patientPhone}
               patientAge={patientAge}
               patientSex={patientSex}
-              sdId={patientQuery.data?.sdId ?? patientSdId}
+              sdId={(patientQuery.data as any)?.sdId ?? patientSdId}
               opdNo={selectedVisitOpdNo ?? opdNo}
               doctorName={doctorName}
               doctorRegdLabel={doctorRegdLabel}
               visitDateLabel={visitDateLabelComputed}
+              regdDate={patientRegdDate} // ✅ NEW
               lines={currentLines as PreviewProps['lines']}
               toothDetails={currentToothDetails}
+              doctorNotes={currentDoctorNotesStr}
               currentVisitId={rxChain.currentVisitId}
               chainVisitIds={rxChain.visitIds}
               visitMetaMap={rxChain.meta}
@@ -383,35 +454,7 @@ function VisitXrayQuickLookDialog(props: {
 
 function anchorIdFromVisit(v: Visit): string | undefined {
   const rec: Record<string, unknown> = isRecord(v) ? (v as unknown as Record<string, unknown>) : {};
-  return getString(rec.anchorVisitId) ?? getString(rec.anchorId) ?? undefined;
-}
-
-function isZeroBilledVisit(v: Visit): boolean {
-  const rec: Record<string, unknown> = isRecord(v) ? (v as unknown as Record<string, unknown>) : {};
-  return Boolean(rec.zeroBilled);
-}
-
-function typeBadgeClass(kind: 'NEW' | 'FOLLOWUP') {
-  if (kind === 'NEW') return 'bg-sky-100 text-sky-700 border-sky-200';
-  return 'bg-violet-100 text-violet-700 border-violet-200';
-}
-
-function zeroBilledBadgeClass() {
-  return 'bg-rose-100 text-rose-700 border-rose-200';
-}
-
-function stageLabel(status?: Visit['status']) {
-  if (status === 'QUEUED') return 'Waiting';
-  if (status === 'IN_PROGRESS') return 'In Progress';
-  if (status === 'DONE') return 'Done';
-  return '—';
-}
-
-function stageBadgeClass(status?: Visit['status']) {
-  if (status === 'QUEUED') return 'bg-pink-100 text-pink-700 border-pink-200';
-  if (status === 'IN_PROGRESS') return 'bg-yellow-100 text-yellow-800 border-yellow-200';
-  if (status === 'DONE') return 'bg-green-100 text-green-700 border-green-200';
-  return 'bg-gray-100 text-gray-700 border-gray-200';
+  return getString((rec as any).anchorVisitId) ?? getString((rec as any).anchorId) ?? undefined;
 }
 
 export function PrescriptionWorkspace(props: Props) {
@@ -456,7 +499,7 @@ export function PrescriptionWorkspace(props: Props) {
 
   const visitCreatedAtDate = useMemo(() => {
     const vUnknown: unknown = visitQuery.data;
-    const createdAt = isRecord(vUnknown) ? vUnknown.createdAt : undefined;
+    const createdAt = isRecord(vUnknown) ? (vUnknown as any).createdAt : undefined;
     return safeParseDate(createdAt);
   }, [visitQuery.data]);
 
@@ -465,35 +508,47 @@ export function PrescriptionWorkspace(props: Props) {
     return visitDateLabelFromParent ?? '';
   }, [visitCreatedAtDate, visitDateLabelFromParent]);
 
+  // ✅ NEW: patient registration date (formatted) for PrescriptionPreview header
+  const patientRegdDate = useMemo(() => {
+    return formatPatientRegdDate(patientQuery.data);
+  }, [patientQuery.data]);
+
   const patientSex = useMemo(() => {
     const pUnknown: unknown = patientQuery.data;
     const rec: Record<string, unknown> = isRecord(pUnknown) ? pUnknown : {};
-    const raw = String(rec.sex ?? rec.gender ?? rec.patientSex ?? '')
-      .trim()
-      .toUpperCase();
-
-    if (raw === 'M' || raw === 'F' || raw === 'O' || raw === 'U') return raw as PatientSex;
-    if (raw === 'MALE') return 'M';
-    if (raw === 'FEMALE') return 'F';
-    if (raw === 'OTHER') return 'O';
-    return undefined;
+    const raw = (rec as any).sex ?? (rec as any).gender ?? (rec as any).patientSex ?? undefined;
+    return normalizeSex(raw);
   }, [patientQuery.data]);
 
+  // ✅ DOB preferred, fallback to stored age, computed at visit createdAt
   const patientAge = useMemo(() => {
     const pUnknown: unknown = patientQuery.data;
     const rec: Record<string, unknown> = isRecord(pUnknown) ? pUnknown : {};
-    const dobRaw = rec.dob ?? rec.dateOfBirth ?? rec.birthDate ?? rec.dobIso ?? null;
 
-    const dob = safeParseDate(dobRaw);
+    const dobRaw =
+      (rec as any).dob ??
+      (rec as any).dateOfBirth ??
+      (rec as any).birthDate ??
+      (rec as any).dobIso ??
+      null;
+    const dob = safeParseDobToDate(dobRaw);
+
     const at = visitCreatedAtDate ?? new Date();
-    if (!dob) return undefined;
-    return calcAgeYears(dob, at);
+
+    const ageFromDob = dob ? calculateAge(dob, at) : undefined;
+    const ageStored = getNumber((rec as any).age);
+
+    return ageFromDob ?? ageStored;
   }, [patientQuery.data, visitCreatedAtDate]);
 
   const [lines, setLines] = useState<RxLineType[]>([]);
   const [toothDetails, setToothDetails] = useState<ToothDetail[]>([]);
 
+  // ✅ printable notes (will print)
   const [doctorNotes, setDoctorNotes] = useState<string>('');
+
+  // ✅ non-printable internal notes (doctor -> reception)
+  const [doctorReceptionNotes, setDoctorReceptionNotes] = useState<string>('');
 
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
@@ -505,7 +560,8 @@ export function PrescriptionWorkspace(props: Props) {
 
   const rxQuery = useGetVisitRxQuery({ visitId }, { skip: !visitId });
   const [upsert] = useUpsertVisitRxMutation();
-  const [startRevision, startRevisionState] = useStartVisitRxRevisionMutation();
+
+  const [startRevision, startRevisionMutationState] = useStartVisitRxRevisionMutation();
 
   const [isRevisionMode, setIsRevisionMode] = useState(false);
   const isDone = resolvedVisitStatus === 'DONE';
@@ -529,27 +585,37 @@ export function PrescriptionWorkspace(props: Props) {
     const rx = rxQuery.data?.rx ?? null;
 
     const rxRec: Record<string, unknown> = isRecord(rx) ? rx : {};
-    const td = rxRec.toothDetails;
-    const dn = rxRec.doctorNotes;
+    const td = (rxRec as any).toothDetails;
+
+    const dn = (rxRec as any).doctorNotes; // ✅ printable
+    const drn = (rxRec as any).doctorReceptionNotes; // ✅ non-printable
 
     if (rx) {
-      setLines(rx.lines ?? []);
+      setLines((rx as any).lines ?? []);
       setToothDetails(Array.isArray(td) ? (td as ToothDetail[]) : []);
       setDoctorNotes(typeof dn === 'string' ? dn : '');
-      setActiveRxId(rx.rxId);
+      setDoctorReceptionNotes(typeof drn === 'string' ? drn : '');
+      setActiveRxId((rx as any).rxId);
 
       lastHash.current = JSON.stringify({
-        lines: rx.lines ?? [],
+        lines: (rx as any).lines ?? [],
         toothDetails: Array.isArray(td) ? td : [],
         doctorNotes: typeof dn === 'string' ? dn : '',
+        doctorReceptionNotes: typeof drn === 'string' ? drn : '',
       });
     } else {
       setLines([]);
       setToothDetails([]);
       setDoctorNotes('');
+      setDoctorReceptionNotes('');
       setActiveRxId(null);
 
-      lastHash.current = JSON.stringify({ lines: [], toothDetails: [], doctorNotes: '' });
+      lastHash.current = JSON.stringify({
+        lines: [],
+        toothDetails: [],
+        doctorNotes: '',
+        doctorReceptionNotes: '',
+      });
     }
 
     hydratedRef.current = true;
@@ -557,11 +623,16 @@ export function PrescriptionWorkspace(props: Props) {
   }, [rxQuery.isSuccess, rxQuery.data]);
 
   const hash = useMemo(
-    () => JSON.stringify({ lines, toothDetails, doctorNotes }),
-    [lines, toothDetails, doctorNotes],
+    () => JSON.stringify({ lines, toothDetails, doctorNotes, doctorReceptionNotes }),
+    [lines, toothDetails, doctorNotes, doctorReceptionNotes],
   );
 
-  const hasAnyRxData = lines.length > 0 || toothDetails.length > 0;
+  // ✅ Treat either notes field as meaningful content for saving too
+  const hasAnyRxData =
+    lines.length > 0 ||
+    toothDetails.length > 0 ||
+    !!doctorNotes.trim() ||
+    !!doctorReceptionNotes.trim();
 
   const canAutosave = canEdit && hydratedRef.current && hasAnyRxData && hash !== lastHash.current;
 
@@ -572,7 +643,13 @@ export function PrescriptionWorkspace(props: Props) {
     debounce.current = setTimeout(async () => {
       setState('saving');
       try {
-        const res = await upsert({ visitId, lines, toothDetails, doctorNotes }).unwrap();
+        const res = await upsert({
+          visitId,
+          lines,
+          toothDetails,
+          doctorNotes, // ✅ printable
+          doctorReceptionNotes, // ✅ non-printable
+        }).unwrap();
         setActiveRxId(res.rxId);
 
         lastHash.current = hash;
@@ -585,7 +662,18 @@ export function PrescriptionWorkspace(props: Props) {
     return () => {
       if (debounce.current) clearTimeout(debounce.current);
     };
-  }, [canAutosave, hash, lines, toothDetails, doctorNotes, visitId, upsert]);
+  }, [
+    canAutosave,
+    hash,
+    lines,
+    toothDetails,
+    doctorNotes,
+    doctorReceptionNotes,
+    visitId,
+    upsert,
+    canEdit,
+    hasAnyRxData,
+  ]);
 
   const statusText =
     state === 'saving'
@@ -598,15 +686,20 @@ export function PrescriptionWorkspace(props: Props) {
 
   const showStartRevision = isDone && !isRevisionMode;
 
-  const canManualSave =
-    canEdit && hydratedRef.current && (lines.length > 0 || toothDetails.length > 0);
+  const canManualSave = canEdit && hydratedRef.current && hasAnyRxData;
 
   const saveAndExit = async () => {
     if (!canManualSave) return;
 
     setState('saving');
     try {
-      const res = await upsert({ visitId, lines, toothDetails, doctorNotes }).unwrap();
+      const res = await upsert({
+        visitId,
+        lines,
+        toothDetails,
+        doctorNotes, // ✅ printable
+        doctorReceptionNotes, // ✅ non-printable
+      }).unwrap();
       setActiveRxId(res.rxId);
 
       lastHash.current = hash;
@@ -618,9 +711,9 @@ export function PrescriptionWorkspace(props: Props) {
     }
   };
 
+  // Used for printing chain metadata (PrescriptionPreview chain support)
   const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', { skip: !patientId });
   const allVisitsRaw = (visitsQuery.data?.items ?? []) as Visit[];
-
   const currentVisit = visitQuery.data as Visit | undefined;
 
   const printChain = useMemo(() => {
@@ -628,15 +721,14 @@ export function PrescriptionWorkspace(props: Props) {
       return { visitIds: [visitId], meta: new Map<string, Visit>(), currentVisitId: visitId };
 
     const meta = new Map<string, Visit>();
-
-    for (const v of allVisitsRaw) meta.set(v.visitId, v);
-    if (currentVisit) meta.set(currentVisit.visitId, currentVisit);
+    for (const v of allVisitsRaw) meta.set((v as any).visitId, v);
+    if (currentVisit) meta.set((currentVisit as any).visitId, currentVisit);
 
     const curRec: Record<string, unknown> = isRecord(currentVisit)
       ? (currentVisit as unknown as Record<string, unknown>)
       : {};
-    const tag = getString(curRec.tag);
-    const anchorVisitId = getString(curRec.anchorVisitId);
+    const tag = getString((curRec as any).tag);
+    const anchorVisitId = getString((curRec as any).anchorVisitId);
 
     const anchorId = tag === 'F' ? anchorVisitId : visitId;
 
@@ -653,21 +745,25 @@ export function PrescriptionWorkspace(props: Props) {
       const vRec: Record<string, unknown> = isRecord(v)
         ? (v as unknown as Record<string, unknown>)
         : {};
-      const aId = getString(vRec.anchorVisitId);
-      if (aId && aId === anchorId && v.visitId !== anchorId) chain.push(v);
+      const aId = getString((vRec as any).anchorVisitId);
+      if (aId && aId === anchorId && (v as any).visitId !== anchorId) chain.push(v);
     }
 
-    if (!chain.some((v) => v.visitId === visitId)) {
+    if (!chain.some((v) => (v as any).visitId === visitId)) {
       const cur = meta.get(visitId);
       if (cur) chain.push(cur);
       else chain.push({ visitId } as Visit);
     }
 
-    chain.sort((a, b) => (a.createdAt ?? a.updatedAt ?? 0) - (b.createdAt ?? b.updatedAt ?? 0));
+    chain.sort(
+      (a, b) =>
+        ((a as any).createdAt ?? (a as any).updatedAt ?? 0) -
+        ((b as any).createdAt ?? (b as any).updatedAt ?? 0),
+    );
 
     const seen = new Set<string>();
     const visitIds = chain
-      .map((v) => v.visitId)
+      .map((v) => (v as any).visitId as string)
       .filter((id) => {
         if (seen.has(id)) return false;
         seen.add(id);
@@ -676,86 +772,6 @@ export function PrescriptionWorkspace(props: Props) {
 
     return { visitIds, meta, currentVisitId: visitId };
   }, [patientId, visitId, allVisitsRaw, currentVisit]);
-
-  const allVisits = useMemo(() => {
-    return [...allVisitsRaw]
-      .filter((v) => v.status === 'DONE')
-      .sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0));
-  }, [allVisitsRaw]);
-
-  const [datePickerOpen, setDatePickerOpen] = useState(false);
-  const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
-
-  const selectedDateStr = useMemo(
-    () => (selectedDate ? clinicDateISO(selectedDate) : null),
-    [selectedDate],
-  );
-
-  const filteredVisits = useMemo(() => {
-    if (!selectedDateStr) return allVisits;
-    return allVisits.filter((v) => v.visitDate === selectedDateStr);
-  }, [allVisits, selectedDateStr]);
-
-  const visitById = useMemo(() => {
-    const map = new Map<string, Visit>();
-    for (const v of allVisits) map.set(v.visitId, v);
-    return map;
-  }, [allVisits]);
-
-  const groups = useMemo(() => {
-    type Group = { anchor: Visit; followups: Visit[] };
-
-    const anchorMap = new Map<string, Group>();
-    const orphanFollowups: Visit[] = [];
-
-    for (const v of filteredVisits) {
-      const aId = anchorIdFromVisit(v);
-      if (!aId) anchorMap.set(v.visitId, { anchor: v, followups: [] });
-    }
-
-    for (const v of filteredVisits) {
-      const aId = anchorIdFromVisit(v);
-      if (!aId) continue;
-
-      const g = anchorMap.get(aId);
-      if (g) g.followups.push(v);
-      else orphanFollowups.push(v);
-    }
-
-    for (const g of anchorMap.values()) {
-      g.followups.sort((a, b) => (a.createdAt ?? 0) - (b.createdAt ?? 0));
-    }
-
-    const anchorsOrdered = Array.from(anchorMap.values()).sort(
-      (a, b) =>
-        (b.anchor.updatedAt ?? b.anchor.createdAt ?? 0) -
-        (a.anchor.updatedAt ?? a.anchor.createdAt ?? 0),
-    );
-
-    const orphanGroups = orphanFollowups
-      .sort((a, b) => (b.updatedAt ?? b.createdAt ?? 0) - (a.updatedAt ?? a.createdAt ?? 0))
-      .map((followup) => ({ followup }));
-
-    return { anchorsOrdered, orphanGroups };
-  }, [filteredVisits, visitById]);
-
-  const PAGE_SIZE = 2;
-  const [page, setPage] = useState(1);
-  useEffect(() => setPage(1), [selectedDateStr, allVisitsRaw]);
-
-  const totalAnchorPages = Math.max(1, Math.ceil(groups.anchorsOrdered.length / PAGE_SIZE));
-  const pageSafe = Math.min(page, totalAnchorPages);
-
-  const pageAnchors = useMemo(() => {
-    const start = (pageSafe - 1) * PAGE_SIZE;
-    return groups.anchorsOrdered.slice(start, start + PAGE_SIZE);
-  }, [groups.anchorsOrdered, pageSafe]);
-
-  const dateLabel = selectedDateStr ?? 'Pick a date';
-
-  const openVisit = (v: Visit) => {
-    router.push(`/doctor/visits/${v.visitId}`);
-  };
 
   const [rxQuickOpen, setRxQuickOpen] = useState(false);
   const [xrayQuickOpen, setXrayQuickOpen] = useState(false);
@@ -771,50 +787,9 @@ export function PrescriptionWorkspace(props: Props) {
     setXrayQuickOpen(true);
   };
 
-  const renderReasonCell = (visit: Visit, opts: { kind: 'NEW' | 'FOLLOWUP'; anchor?: Visit }) => {
-    let followupCount = 0;
-    if (opts.kind === 'NEW') {
-      const anchorId = visit.visitId;
-      for (const v of allVisits) {
-        if (anchorIdFromVisit(v) === anchorId) followupCount += 1;
-      }
-    }
-
-    const followupOfText =
-      opts.kind === 'FOLLOWUP'
-        ? (() => {
-            const a =
-              opts.anchor ??
-              (anchorIdFromVisit(visit) ? visitById.get(anchorIdFromVisit(visit)!) : undefined);
-
-            const aReason = (a?.reason || '—').toString();
-            const aDate = a?.visitDate ? formatClinicDateShort(a.visitDate) : '—';
-            return `Follow-up of: ${aReason} • ${aDate}`;
-          })()
-        : null;
-
-    return (
-      <div className="min-w-0">
-        <div className="truncate text-sm font-semibold text-gray-900">
-          {visit.reason?.trim() ? visit.reason : '—'}
-        </div>
-
-        <div className="mt-0.5 text-[11px] text-gray-500">
-          {opts.kind === 'NEW' ? (
-            <span className="inline-flex items-center gap-2">
-              <span className="rounded-md bg-gray-50 px-2 py-0.5 text-gray-600 shadow-[0_0_0_1px_rgba(0,0,0,0.04)]">
-                {followupCount} follow-up{followupCount === 1 ? '' : 's'}
-              </span>
-            </span>
-          ) : (
-            <span className="truncate">{followupOfText}</span>
-          )}
-        </div>
-      </div>
-    );
+  const openVisitById = (vId: string) => {
+    router.push(`/doctor/visits/${vId}`);
   };
-
-  const hasRows = pageAnchors.length > 0 || groups.orphanGroups.length > 0;
 
   type PreviewProps = React.ComponentProps<typeof PrescriptionPreview>;
 
@@ -832,7 +807,7 @@ export function PrescriptionWorkspace(props: Props) {
                 <Button
                   variant="outline"
                   className="rounded-xl"
-                  disabled={startRevisionState.isLoading}
+                  disabled={startRevisionMutationState.isLoading}
                   onClick={async () => {
                     try {
                       const res = await startRevision({ visitId }).unwrap();
@@ -850,33 +825,18 @@ export function PrescriptionWorkspace(props: Props) {
 
               <Button
                 variant="outline"
-                className="rounded-xl"
+                className="rounded-xl cursor-pointer"
                 onClick={saveAndExit}
                 disabled={!canManualSave || state === 'saving'}
                 title={
                   !canManualSave
-                    ? 'Add medicines or tooth details to save'
-                    : 'Save prescription and return'
+                    ? 'Add medicines, tooth details, or notes to save'
+                    : 'Save and return'
                 }
               >
                 Save
               </Button>
             </div>
-          </div>
-
-          <div className="mt-4 rounded-2xl border bg-white p-4 ">
-            <div className="text-base font-semibold text-gray-900">Doctor Notes</div>
-            <div className="mt-1 text-sm text-gray-500">
-              Internal note from doctor for reception. This will NOT print.
-            </div>
-
-            <textarea
-              className="mt-3 w-full min-h-22.5 rounded-2xl border bg-gray-50 p-3 text-sm outline-none focus:bg-white"
-              placeholder="—"
-              value={doctorNotes}
-              onChange={(e) => setDoctorNotes(e.target.value)}
-              disabled={!canEdit}
-            />
           </div>
 
           <div className="mt-4 min-w-full overflow-x-hidden flex justify-center items-center">
@@ -890,11 +850,45 @@ export function PrescriptionWorkspace(props: Props) {
               doctorName={resolvedDoctorName}
               doctorRegdLabel={resolvedDoctorRegdLabel}
               visitDateLabel={computedVisitDateLabel}
+              regdDate={patientRegdDate} // ✅ NEW
               lines={lines as PreviewProps['lines']}
+              doctorNotes={doctorNotes}
               currentVisitId={printChain.currentVisitId}
               chainVisitIds={printChain.visitIds}
               visitMetaMap={printChain.meta}
               toothDetails={toothDetails}
+            />
+          </div>
+
+          {/* ✅ Printable doctor notes */}
+          <div className="mt-4 rounded-2xl border bg-white p-4">
+            <div className="text-base font-semibold text-gray-900">Doctor Notes (Printed)</div>
+            <div className="mt-1 text-sm text-gray-500">
+              This WILL print on the prescription under medicines.
+            </div>
+
+            <textarea
+              className="mt-3 w-full min-h-22.5 rounded-2xl border bg-gray-50 p-3 text-sm outline-none focus:bg-white"
+              placeholder="—"
+              value={doctorNotes}
+              onChange={(e) => setDoctorNotes(e.target.value)}
+              disabled={!canEdit}
+            />
+          </div>
+
+          {/* ✅ Non-printable doctor -> reception notes */}
+          <div className="mt-4 rounded-2xl border bg-white p-4">
+            <div className="text-base font-semibold text-gray-900">Doctor Reception Notes</div>
+            <div className="mt-1 text-sm text-gray-500">
+              Internal note from doctor for reception. This will NOT print.
+            </div>
+
+            <textarea
+              className="mt-3 w-full min-h-22.5 rounded-2xl border bg-gray-50 p-3 text-sm outline-none focus:bg-white"
+              placeholder="—"
+              value={doctorReceptionNotes}
+              onChange={(e) => setDoctorReceptionNotes(e.target.value)}
+              disabled={!canEdit}
             />
           </div>
         </div>
@@ -909,7 +903,7 @@ export function PrescriptionWorkspace(props: Props) {
               <Button
                 type="button"
                 variant="outline"
-                className="rounded-xl"
+                className="rounded-xl cursor-pointer"
                 disabled={!canEdit}
                 onClick={() => setImportOpen(true)}
               >
@@ -926,15 +920,15 @@ export function PrescriptionWorkspace(props: Props) {
             )}
           </div>
 
-          <div className="mt-4">
-            <ToothDetailsEditor
+          <div>
+            <MultiToothDetailsEditor
               value={toothDetails}
               onChange={setToothDetails}
               disabled={!canEdit}
             />
           </div>
 
-          <div className="mt-4 min-w-0">
+          <div className="min-w-0">
             {canEdit ? (
               <MedicinesEditor lines={lines} onChange={setLines} />
             ) : (
@@ -943,333 +937,17 @@ export function PrescriptionWorkspace(props: Props) {
           </div>
         </Card>
 
-        <Card className="w-full rounded-2xl border bg-white p-4 lg:col-span-10">
-          <div className="flex items-center justify-between gap-3">
-            <Popover open={datePickerOpen} onOpenChange={setDatePickerOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-55 justify-start gap-2 rounded-xl"
-                >
-                  <CalendarIcon className="h-4 w-4" />
-                  <span className={selectedDateStr ? 'text-gray-900' : 'text-gray-500'}>
-                    {dateLabel}
-                  </span>
-                </Button>
-              </PopoverTrigger>
-
-              <PopoverContent align="start" className="w-auto rounded-2xl p-2">
-                <Calendar
-                  mode="single"
-                  selected={selectedDate}
-                  onSelect={(d) => {
-                    setSelectedDate(d);
-                    setDatePickerOpen(false);
-                  }}
-                />
-                {selectedDateStr ? (
-                  <div className="px-2 pb-2 pt-1">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      className="h-8 rounded-xl text-xs"
-                      onClick={() => {
-                        setSelectedDate(undefined);
-                        setDatePickerOpen(false);
-                      }}
-                    >
-                      Clear
-                    </Button>
-                  </div>
-                ) : null}
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          <div className="mt-4 overflow-hidden rounded-2xl border">
-            <Table>
-              <TableHeader>
-                <TableRow className="bg-gray-50">
-                  <TableHead className="font-semibold text-gray-600">Visit Date</TableHead>
-                  <TableHead className="font-semibold text-gray-600">Reason</TableHead>
-                  <TableHead className="font-semibold text-gray-600">Type</TableHead>
-                  <TableHead className="font-semibold text-gray-600">Stage</TableHead>
-                  <TableHead className="text-right font-semibold text-gray-600">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-
-              <TableBody>
-                {!patientId ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-10 text-center text-sm text-gray-500">
-                      Loading patient context…
-                    </TableCell>
-                  </TableRow>
-                ) : visitsQuery.isLoading ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-10 text-center text-sm text-gray-500">
-                      Loading visits…
-                    </TableCell>
-                  </TableRow>
-                ) : !hasRows ? (
-                  <TableRow>
-                    <TableCell colSpan={5} className="py-10 text-center text-sm text-gray-500">
-                      No visits found{selectedDateStr ? ` for ${selectedDateStr}` : ''}.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  <>
-                    {pageAnchors.map((g) => {
-                      const anchor = g.anchor;
-                      const followups = g.followups;
-
-                      return (
-                        <React.Fragment key={anchor.visitId}>
-                          <TableRow className="hover:bg-gray-50/60">
-                            <TableCell className="px-6 py-4 align-top text-sm font-medium text-gray-900">
-                              {formatClinicDateShort(anchor.visitDate)}
-                            </TableCell>
-
-                            <TableCell className="px-6 py-4 align-top">
-                              {renderReasonCell(anchor, { kind: 'NEW' })}
-                            </TableCell>
-
-                            <TableCell className="px-6 py-4 align-top">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <Badge
-                                  variant="outline"
-                                  className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass('NEW')}`}
-                                >
-                                  NEW
-                                </Badge>
-
-                                {isZeroBilledVisit(anchor) ? (
-                                  <Badge
-                                    variant="outline"
-                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
-                                  >
-                                    ZERO BILLED
-                                  </Badge>
-                                ) : null}
-                              </div>
-                            </TableCell>
-
-                            <TableCell className="px-6 py-4 align-top">
-                              <Badge
-                                variant="outline"
-                                className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(anchor.status)}`}
-                              >
-                                {stageLabel(anchor.status)}
-                              </Badge>
-                            </TableCell>
-
-                            <TableCell className="px-6 py-4 align-top text-right">
-                              <div className="flex justify-end gap-2">
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  className="h-8 rounded-xl px-3 text-xs"
-                                  onClick={() => openRxQuick(anchor.visitId)}
-                                >
-                                  View Rx
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  className="h-8 rounded-xl px-3 text-xs"
-                                  onClick={() => openXrayQuick(anchor.visitId)}
-                                >
-                                  X-rays
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  className="h-8 rounded-xl px-3 text-xs"
-                                  onClick={() => openVisit(anchor)}
-                                >
-                                  View
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-
-                          {followups.map((f) => (
-                            <TableRow key={f.visitId} className="hover:bg-gray-50/60">
-                              <TableCell className="px-6 py-2 align-top">
-                                <div className="flex items-center gap-3">
-                                  <div className="ml-1 h-7 w-0.5 rounded-full bg-gray-200" />
-                                  <div className="text-sm text-gray-900">
-                                    {formatClinicDateShort(f.visitDate)}
-                                  </div>
-                                </div>
-                              </TableCell>
-
-                              <TableCell className="px-6 py-2 align-top">
-                                <div className="flex items-start gap-3">
-                                  <div className="ml-1 h-7 w-0.5 rounded-full bg-gray-200" />
-                                  <div className="min-w-0 flex-1">
-                                    {renderReasonCell(f, { kind: 'FOLLOWUP', anchor })}
-                                  </div>
-                                </div>
-                              </TableCell>
-
-                              <TableCell className="px-6 py-2 align-top">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <Badge
-                                    variant="outline"
-                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass('FOLLOWUP')}`}
-                                  >
-                                    FOLLOW UP
-                                  </Badge>
-
-                                  {isZeroBilledVisit(f) ? (
-                                    <Badge
-                                      variant="outline"
-                                      className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
-                                    >
-                                      ZERO BILLED
-                                    </Badge>
-                                  ) : null}
-                                </div>
-                              </TableCell>
-
-                              <TableCell className="px-6 py-2 align-top">
-                                <Badge
-                                  variant="outline"
-                                  className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(f.status)}`}
-                                >
-                                  {stageLabel(f.status)}
-                                </Badge>
-                              </TableCell>
-
-                              <TableCell className="px-6 py-2 align-top text-right">
-                                <div className="flex justify-end gap-2">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-8 rounded-xl px-3 text-xs"
-                                    onClick={() => openRxQuick(f.visitId)}
-                                  >
-                                    View Rx
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-8 rounded-xl px-3 text-xs"
-                                    onClick={() => openXrayQuick(f.visitId)}
-                                  >
-                                    X-rays
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-8 rounded-xl px-3 text-xs"
-                                    onClick={() => openVisit(f)}
-                                  >
-                                    View
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </React.Fragment>
-                      );
-                    })}
-
-                    {groups.orphanGroups.length
-                      ? groups.orphanGroups.map(({ followup }) => {
-                          const aId = anchorIdFromVisit(followup);
-                          const a = aId ? visitById.get(aId) : undefined;
-
-                          return (
-                            <TableRow key={followup.visitId} className="hover:bg-gray-50/60">
-                              <TableCell className="px-6 py-3 align-top text-sm text-gray-900">
-                                {formatClinicDateShort(followup.visitDate)}
-                              </TableCell>
-
-                              <TableCell className="px-6 py-3 align-top">
-                                {renderReasonCell(followup, { kind: 'FOLLOWUP', anchor: a })}
-                              </TableCell>
-
-                              <TableCell className="px-6 py-3 align-top">
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <Badge
-                                    variant="outline"
-                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass('FOLLOWUP')}`}
-                                  >
-                                    FOLLOW UP
-                                  </Badge>
-
-                                  {isZeroBilledVisit(followup) ? (
-                                    <Badge
-                                      variant="outline"
-                                      className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
-                                    >
-                                      ZERO BILLED
-                                    </Badge>
-                                  ) : null}
-                                </div>
-                              </TableCell>
-
-                              <TableCell className="px-6 py-3 align-top">
-                                <Badge
-                                  variant="outline"
-                                  className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(followup.status)}`}
-                                >
-                                  {stageLabel(followup.status)}
-                                </Badge>
-                              </TableCell>
-
-                              <TableCell className="px-6 py-3 align-top text-right">
-                                <div className="flex justify-end gap-2">
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-8 rounded-xl px-3 text-xs"
-                                    onClick={() => openRxQuick(followup.visitId)}
-                                  >
-                                    View Rx
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-8 rounded-xl px-3 text-xs"
-                                    onClick={() => openXrayQuick(followup.visitId)}
-                                  >
-                                    X-rays
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    className="h-8 rounded-xl px-3 text-xs"
-                                    onClick={() => openVisit(followup)}
-                                  >
-                                    View
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })
-                      : null}
-                  </>
-                )}
-              </TableBody>
-            </Table>
-
-            {groups.anchorsOrdered.length > PAGE_SIZE ? (
-              <div className="border-t bg-white px-3 py-2">
-                <PaginationControl
-                  page={pageSafe}
-                  pageSize={PAGE_SIZE}
-                  totalItems={groups.anchorsOrdered.length}
-                  onPageChange={setPage}
-                />
-              </div>
-            ) : null}
-          </div>
-        </Card>
+        {/* ✅ Reuse shared Visit History component instead of duplicating table logic */}
+        <div className="lg:col-span-10">
+          {!patientId ? null : (
+            <DoctorVisitHistoryPanel
+              patientId={patientId}
+              onOpenVisit={openVisitById}
+              onOpenRxQuick={openRxQuick}
+              onOpenXrayQuick={openXrayQuick}
+            />
+          )}
+        </div>
       </div>
 
       <RxPresetImportDialog

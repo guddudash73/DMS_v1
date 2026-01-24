@@ -100,6 +100,17 @@ function normalizeSexFromPatientGender(raw?: string): PatientSex | undefined {
   return undefined;
 }
 
+function genderLabel(raw?: string): string {
+  const s = String(raw ?? '')
+    .trim()
+    .toUpperCase();
+  if (s === 'MALE') return 'Male';
+  if (s === 'FEMALE') return 'Female';
+  if (s === 'OTHER') return 'Other';
+  if (s === 'UNKNOWN') return 'Unknown';
+  return '—';
+}
+
 function SimplePagination(props: {
   page: number;
   totalPages: number;
@@ -320,9 +331,32 @@ export default function PatientDetailPage() {
 
   const followupLabel = summary?.nextFollowUpDate ?? 'No Follow Up Scheduled';
 
+  // ✅ Patient can store either dob OR age
   const patientDob = safeParseDobToDate(patient?.dob);
-  const patientAge = patientDob ? calculateAge(patientDob, new Date()) : undefined;
+  const computedAgeFromDob = patientDob ? calculateAge(patientDob, new Date()) : undefined;
+  const patientAgeForPrint =
+    typeof computedAgeFromDob === 'number'
+      ? computedAgeFromDob
+      : typeof patient?.age === 'number'
+        ? patient.age
+        : undefined;
+
   const patientSex = normalizeSexFromPatientGender(patient?.gender);
+
+  const dobOrAgeLabel = React.useMemo(() => {
+    if (!patient) return '—';
+
+    if (patient.dob?.trim()) return patient.dob.trim();
+    if (typeof patient.age === 'number' && Number.isFinite(patient.age)) return `${patient.age}`;
+    return '—';
+  }, [patient]);
+
+  const dobOrAgeModeLabel = React.useMemo(() => {
+    if (!patient) return 'DOB/Age';
+    if (patient.dob?.trim()) return 'DOB';
+    if (typeof patient.age === 'number' && Number.isFinite(patient.age)) return 'Age';
+    return 'DOB/Age';
+  }, [patient]);
 
   const doctorName = me?.doctorProfile?.fullName?.trim()
     ? me.doctorProfile.fullName.trim()
@@ -332,7 +366,8 @@ export default function PatientDetailPage() {
     ? `B.D.S Regd. - ${me.doctorProfile.registrationNumber}`
     : undefined;
 
-  const visitDateLabel = `Visit: ${clinicDateISO()}`;
+  // ✅ safer: pass Date explicitly
+  const visitDateLabel = `Visit: ${clinicDateISO(new Date())}`;
 
   const printBlankRx = () => {
     if (!patient) return;
@@ -462,12 +497,15 @@ export default function PatientDetailPage() {
                   <dt className="w-28 shrink-0 text-gray-600">Name</dt>
                   <dd className="text-gray-900">: {patient.name}</dd>
                 </div>
+
+                {/* ✅ show DOB or Age depending on what is stored */}
                 <div className="flex gap-3">
-                  <dt className="w-28 shrink-0 text-gray-600">DOB/Sex</dt>
+                  <dt className="w-28 shrink-0 text-gray-600">{dobOrAgeModeLabel}/Sex</dt>
                   <dd className="text-gray-900">
-                    : {patient.dob ?? '—'} / {patient.gender ?? '—'}
+                    : {dobOrAgeLabel} / {genderLabel(patient.gender)}
                   </dd>
                 </div>
+
                 <div className="flex gap-3">
                   <dt className="w-28 shrink-0 text-gray-600">Contact No.</dt>
                   <dd className="text-gray-900">: {patient.phone ?? '—'}</dd>
@@ -879,7 +917,7 @@ export default function PatientDetailPage() {
         <PrescriptionPrintSheet
           patientName={patient?.name}
           patientPhone={patient?.phone}
-          patientAge={patientAge}
+          patientAge={patientAgeForPrint}
           patientSex={patientSex}
           sdId={patient?.sdId}
           opdNo={undefined}

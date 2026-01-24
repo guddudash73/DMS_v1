@@ -33,6 +33,19 @@ function getNumber(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }
 
+function getProp(obj: unknown, key: string): unknown {
+  if (!isRecord(obj)) return undefined;
+  return obj[key];
+}
+
+function getPropString(obj: unknown, key: string): string | undefined {
+  return getString(getProp(obj, key));
+}
+
+function getPropNumber(obj: unknown, key: string): number | undefined {
+  return getNumber(getProp(obj, key));
+}
+
 function toLocalISODate(d: Date): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -40,6 +53,9 @@ function toLocalISODate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/* ------------------------------------------------------------------ */
+/* backend-aligned: DOB preferred; fallback to stored age              */
+/* ------------------------------------------------------------------ */
 function safeParseDobToDate(dob: unknown): Date | null {
   if (!dob) return null;
 
@@ -99,12 +115,12 @@ function looksLikeDoctorIdLabel(name?: string) {
 
 function isToothDetail(v: unknown): v is ToothDetail {
   if (!isRecord(v)) return false;
-  const pos = v.position;
-  const nums = v.toothNumbers;
+  const pos = (v as any).position;
+  const nums = (v as any).toothNumbers;
 
   const posOk = pos === 'UL' || pos === 'UR' || pos === 'LL' || pos === 'LR';
   const numsOk = Array.isArray(nums) && nums.every((n) => typeof n === 'string');
-  const notesOk = v.notes === undefined || typeof v.notes === 'string';
+  const notesOk = (v as any).notes === undefined || typeof (v as any).notes === 'string';
 
   return posOk && numsOk && notesOk;
 }
@@ -112,6 +128,34 @@ function isToothDetail(v: unknown): v is ToothDetail {
 function toToothDetails(input: unknown): ToothDetail[] {
   if (!Array.isArray(input)) return [];
   return input.filter(isToothDetail);
+}
+
+/** ✅ NEW: patient registration date formatter (same idea as PatientDetailPage) */
+function formatPatientRegdDate(patientData: unknown): string {
+  // prefer numeric ms timestamps
+  const createdAtNum =
+    getPropNumber(patientData, 'createdAt') ??
+    getPropNumber(patientData, 'created_at') ??
+    getPropNumber(patientData, 'registeredAt') ??
+    getPropNumber(patientData, 'regdAt');
+
+  if (typeof createdAtNum === 'number' && Number.isFinite(createdAtNum) && createdAtNum > 0) {
+    return new Date(createdAtNum).toLocaleDateString('en-GB');
+  }
+
+  // fallback: string dates
+  const createdAtStr =
+    getPropString(patientData, 'createdAt') ??
+    getPropString(patientData, 'created_at') ??
+    getPropString(patientData, 'registeredAt') ??
+    getPropString(patientData, 'regdAt');
+
+  if (createdAtStr) {
+    const d = new Date(createdAtStr);
+    if (Number.isFinite(d.getTime())) return d.toLocaleDateString('en-GB');
+  }
+
+  return '—';
 }
 
 export default function PrescriptionPrintPreviewPage() {
@@ -150,15 +194,30 @@ export default function PrescriptionPrintPreviewPage() {
     undefined;
 
   const patientDobRaw =
-    patientRec.dob ?? patientRec.dateOfBirth ?? patientRec.birthDate ?? patientRec.dobIso ?? null;
+    (patientRec as any).dob ??
+    (patientRec as any).dateOfBirth ??
+    (patientRec as any).birthDate ??
+    (patientRec as any).dobIso ??
+    null;
 
-  const patientSexRaw = patientRec.sex ?? patientRec.gender ?? patientRec.patientSex ?? null;
+  const patientSexRaw =
+    (patientRec as any).sex ?? (patientRec as any).gender ?? (patientRec as any).patientSex ?? null;
 
   const patientDob = safeParseDobToDate(patientDobRaw);
 
   const visitCreatedAtMs = getNumber(visitRec.createdAt) ?? Date.now();
-  const patientAge = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
+
+  // ✅ UPDATED (backend-aligned): compute from DOB if present; else fallback to stored age
+  const ageFromDob = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
+  const ageStored = getNumber((patientRec as any).age);
+  const patientAge = ageFromDob ?? ageStored;
+
   const patientSex = normalizeSex(patientSexRaw);
+
+  // ✅ NEW: fetch/compute patient registration date (formatted)
+  const patientRegdDate = React.useMemo(() => {
+    return formatPatientRegdDate(patientQuery.data);
+  }, [patientQuery.data]);
 
   const doctorId = getString(visitRec.doctorId);
 
@@ -177,12 +236,12 @@ export default function PrescriptionPrintPreviewPage() {
   const doctorRec: Record<string, unknown> = isRecord(doctorFromList) ? doctorFromList : {};
 
   const doctorNameResolved =
-    getString(doctorRec.fullName) ??
-    getString(doctorRec.name) ??
-    getString(doctorRec.displayName) ??
+    getString((doctorRec as any).fullName) ??
+    getString((doctorRec as any).name) ??
+    getString((doctorRec as any).displayName) ??
     undefined;
 
-  const doctorRegNoResolved = getString(doctorRec.registrationNumber) ?? undefined;
+  const doctorRegNoResolved = getString((doctorRec as any).registrationNumber) ?? undefined;
 
   const resolvedDoctorName = React.useMemo(() => {
     if (doctorNameResolved && !looksLikeDoctorIdLabel(doctorNameResolved))
@@ -256,10 +315,16 @@ export default function PrescriptionPrintPreviewPage() {
     const rec: Record<string, unknown> = isRecord(rx)
       ? (rx as unknown as Record<string, unknown>)
       : {};
-    return toToothDetails(rec.toothDetails);
+    return toToothDetails((rec as any).toothDetails);
   }, [rx]);
 
-  const hasLines = (rx?.lines?.length ?? 0) > 0;
+  // ✅ doctor notes from Rx JSON
+  const doctorNotes = React.useMemo(() => {
+    if (!rx || !isRecord(rx)) return '';
+    return String((rx as any).doctorNotes ?? '');
+  }, [rx]);
+
+  const hasLines = (rx as any)?.lines?.length ? ((rx as any).lines.length as number) > 0 : false;
   const hasTeeth = currentToothDetails.length > 0;
   const canPrint = hasLines || hasTeeth;
 
@@ -337,12 +402,14 @@ export default function PrescriptionPrintPreviewPage() {
             doctorName={resolvedDoctorName}
             doctorRegdLabel={resolvedDoctorRegdLabel}
             visitDateLabel={visitCreatedDateLabel}
-            lines={rx?.lines ?? []}
+            regdDate={patientRegdDate} // ✅ NEW
+            lines={(rx as any)?.lines ?? []}
             currentVisitId={printChain.currentVisitId}
             chainVisitIds={printChain.visitIds}
             visitMetaMap={printChain.meta}
             toothDetails={currentToothDetails}
-            receptionNotes={previewCurrentOnly ? undefined : (rx?.receptionNotes ?? '')}
+            receptionNotes={previewCurrentOnly ? undefined : ((rx as any)?.receptionNotes ?? '')}
+            doctorNotes={doctorNotes}
             currentOnly={previewCurrentOnly}
           />
         </div>
@@ -358,8 +425,10 @@ export default function PrescriptionPrintPreviewPage() {
         doctorName={resolvedDoctorName}
         doctorRegdLabel={resolvedDoctorRegdLabel}
         visitDateLabel={visitCreatedDateLabel}
-        lines={rx?.lines ?? []}
-        receptionNotes={rx?.receptionNotes ?? ''}
+        regdDate={patientRegdDate} // ✅ NEW
+        lines={(rx as any)?.lines ?? []}
+        receptionNotes={(rx as any)?.receptionNotes ?? ''}
+        doctorNotes={doctorNotes}
         currentVisitId={printChain.currentVisitId}
         chainVisitIds={printChain.visitIds}
         visitMetaMap={printChain.meta}

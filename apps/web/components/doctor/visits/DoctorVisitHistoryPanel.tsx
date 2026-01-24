@@ -17,6 +17,8 @@ import {
 } from '@/components/ui/table';
 
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { PaginationControl } from '@/components/ui/pagination-control';
+
 import { useGetPatientVisitsQuery } from '@/src/store/api';
 import { clinicDateISO, formatClinicDateShort } from '@/src/lib/clinicTime';
 
@@ -133,10 +135,16 @@ export function DoctorVisitHistoryPanel(props: {
   }, [allDoneVisits]);
 
   const groups = React.useMemo(() => {
-    if (!expanded) return { anchorsOrdered: [] as Array<{ anchor: Visit; followups: Visit[] }> };
+    if (!expanded)
+      return {
+        anchorsOrdered: [] as Array<{ anchor: Visit; followups: Visit[] }>,
+        orphanGroups: [] as Array<{ followup: Visit }>,
+      };
 
     type Group = { anchor: Visit; followups: Visit[] };
+
     const anchorMap = new Map<string, Group>();
+    const orphanFollowups: Visit[] = [];
 
     // anchors = DONE visits without anchorId
     for (const v of filteredVisits) {
@@ -144,12 +152,13 @@ export function DoctorVisitHistoryPanel(props: {
       if (!aId) anchorMap.set(v.visitId, { anchor: v, followups: [] });
     }
 
-    // attach followups
+    // attach followups; collect orphans
     for (const v of filteredVisits) {
       const aId = anchorIdFromVisit(v);
       if (!aId) continue;
       const g = anchorMap.get(aId);
       if (g) g.followups.push(v);
+      else orphanFollowups.push(v);
     }
 
     for (const g of anchorMap.values()) {
@@ -164,10 +173,77 @@ export function DoctorVisitHistoryPanel(props: {
         (getPropNumber(a.anchor, 'updatedAt') ?? getPropNumber(a.anchor, 'createdAt') ?? 0),
     );
 
-    return { anchorsOrdered };
+    const orphanGroups = orphanFollowups
+      .sort(
+        (a, b) =>
+          (getPropNumber(b, 'updatedAt') ?? getPropNumber(b, 'createdAt') ?? 0) -
+          (getPropNumber(a, 'updatedAt') ?? getPropNumber(a, 'createdAt') ?? 0),
+      )
+      .map((followup) => ({ followup }));
+
+    return { anchorsOrdered, orphanGroups };
   }, [expanded, filteredVisits]);
 
+  // pagination (anchors only) — matches PrescriptionWorkspace behavior
+  const PAGE_SIZE = 2;
+  const [page, setPage] = React.useState(1);
+  React.useEffect(() => setPage(1), [selectedDateStr, allVisitsRaw, expanded]);
+
+  const totalAnchorPages = Math.max(1, Math.ceil(groups.anchorsOrdered.length / PAGE_SIZE));
+  const pageSafe = Math.min(page, totalAnchorPages);
+
+  const pageAnchors = React.useMemo(() => {
+    const start = (pageSafe - 1) * PAGE_SIZE;
+    return groups.anchorsOrdered.slice(start, start + PAGE_SIZE);
+  }, [groups.anchorsOrdered, pageSafe]);
+
   const dateLabel = selectedDateStr ?? 'Pick a date';
+
+  const renderReasonCell = (visit: Visit, opts: { kind: 'NEW' | 'FOLLOWUP'; anchor?: Visit }) => {
+    let followupCount = 0;
+    if (opts.kind === 'NEW') {
+      const anchorId = visit.visitId;
+      for (const v of allDoneVisits) {
+        if (anchorIdFromVisit(v) === anchorId) followupCount += 1;
+      }
+    }
+
+    const followupOfText =
+      opts.kind === 'FOLLOWUP'
+        ? (() => {
+            const a =
+              opts.anchor ??
+              (anchorIdFromVisit(visit) ? visitById.get(anchorIdFromVisit(visit)!) : undefined);
+
+            const aReason = String(getProp(a, 'reason') ?? '—');
+            const aDateRaw = getPropString(a, 'visitDate');
+            const aDate = aDateRaw ? formatClinicDateShort(aDateRaw) : '—';
+            return `Follow-up of: ${aReason} • ${aDate}`;
+          })()
+        : null;
+
+    return (
+      <div className="min-w-0">
+        <div className="truncate text-sm font-semibold text-gray-900">
+          {String(getProp(visit, 'reason') ?? '—')}
+        </div>
+
+        <div className="mt-0.5 text-[11px] text-gray-500">
+          {opts.kind === 'NEW' ? (
+            <span className="inline-flex items-center gap-2">
+              <span className="rounded-md bg-gray-50 px-2 py-0.5 text-gray-600 shadow-[0_0_0_1px_rgba(0,0,0,0.04)]">
+                {followupCount} follow-up{followupCount === 1 ? '' : 's'}
+              </span>
+            </span>
+          ) : (
+            <span className="truncate">{followupOfText}</span>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const hasRows = pageAnchors.length > 0 || groups.orphanGroups.length > 0;
 
   return (
     <Card className="mt-4 w-full rounded-2xl border bg-white p-4">
@@ -180,7 +256,7 @@ export function DoctorVisitHistoryPanel(props: {
               <Button
                 type="button"
                 variant="outline"
-                className="w-55 justify-start gap-2 rounded-xl"
+                className="w-55 justify-start gap-2 rounded-xl cursor-pointer"
                 disabled={!expanded}
                 title={!expanded ? 'Expand to filter by date' : undefined}
               >
@@ -253,125 +329,41 @@ export function DoctorVisitHistoryPanel(props: {
                     Loading visits…
                   </TableCell>
                 </TableRow>
-              ) : groups.anchorsOrdered.length === 0 ? (
+              ) : !hasRows ? (
                 <TableRow>
                   <TableCell colSpan={5} className="py-10 text-center text-sm text-gray-500">
                     No visits found{selectedDateStr ? ` for ${selectedDateStr}` : ''}.
                   </TableCell>
                 </TableRow>
               ) : (
-                groups.anchorsOrdered.map((g) => {
-                  const anchor = g.anchor;
-                  const followups = g.followups;
+                <>
+                  {pageAnchors.map((g) => {
+                    const anchor = g.anchor;
+                    const followups = g.followups;
 
-                  return (
-                    <React.Fragment key={anchor.visitId}>
-                      <TableRow className="hover:bg-gray-50/60">
-                        <TableCell className="px-6 py-4 align-top text-sm font-medium text-gray-900">
-                          {formatClinicDateShort(String(getProp(anchor, 'visitDate') ?? ''))}
-                        </TableCell>
-
-                        <TableCell className="px-6 py-4 align-top">
-                          <div className="truncate text-sm font-semibold text-gray-900">
-                            {String(getProp(anchor, 'reason') ?? '—')}
-                          </div>
-                        </TableCell>
-
-                        <TableCell className="px-6 py-4 align-top">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge
-                              variant="outline"
-                              className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass('NEW')}`}
-                            >
-                              NEW
-                            </Badge>
-
-                            {isZeroBilledVisit(anchor) ? (
-                              <Badge
-                                variant="outline"
-                                className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
-                              >
-                                ZERO BILLED
-                              </Badge>
-                            ) : null}
-
-                            {isOfflineVisit(anchor) ? (
-                              <Badge
-                                variant="outline"
-                                className={`rounded-full px-3 py-0.5 text-[10px] font-semibold ${offlineBadgeClass()}`}
-                              >
-                                OFFLINE
-                              </Badge>
-                            ) : null}
-                          </div>
-                        </TableCell>
-
-                        <TableCell className="px-6 py-4 align-top">
-                          <Badge
-                            variant="outline"
-                            className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
-                              getProp(anchor, 'status') as Visit['status'] | undefined,
-                            )}`}
-                          >
-                            {stageLabel(getProp(anchor, 'status') as Visit['status'] | undefined)}
-                          </Badge>
-                        </TableCell>
-
-                        <TableCell className="px-6 py-4 align-top text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="h-8 rounded-xl px-3 text-xs cursor-pointer"
-                              onClick={() => onOpenRxQuick(anchor.visitId)}
-                            >
-                              View Rx
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="h-8 rounded-xl px-3 text-xs cursor-pointer"
-                              onClick={() => onOpenXrayQuick(anchor.visitId)}
-                            >
-                              X-rays
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              className="h-8 rounded-xl px-3 text-xs cursor-pointer"
-                              onClick={() => onOpenVisit(anchor.visitId)}
-                            >
-                              View
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-
-                      {followups.map((f) => (
-                        <TableRow key={f.visitId} className="hover:bg-gray-50/60">
-                          <TableCell className="px-6 py-2 align-top">
-                            {formatClinicDateShort(String(getProp(f, 'visitDate') ?? ''))}
+                    return (
+                      <React.Fragment key={anchor.visitId}>
+                        <TableRow className="hover:bg-gray-50/60">
+                          <TableCell className="px-6 py-4 align-top text-sm font-medium text-gray-900">
+                            {formatClinicDateShort(String(getProp(anchor, 'visitDate') ?? ''))}
                           </TableCell>
 
-                          <TableCell className="px-6 py-2 align-top">
-                            <div className="truncate text-sm font-semibold text-gray-900">
-                              {String(getProp(f, 'reason') ?? '—')}
-                            </div>
-                            <div className="mt-0.5 text-[11px] text-gray-500">
-                              Follow-up of: {String(getProp(anchor, 'reason') ?? '—')}
-                            </div>
+                          <TableCell className="px-6 py-4 align-top">
+                            {renderReasonCell(anchor, { kind: 'NEW' })}
                           </TableCell>
 
-                          <TableCell className="px-6 py-2 align-top">
+                          <TableCell className="px-6 py-4 align-top">
                             <div className="flex flex-wrap items-center gap-2">
                               <Badge
                                 variant="outline"
-                                className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass('FOLLOWUP')}`}
+                                className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
+                                  'NEW',
+                                )}`}
                               >
-                                FOLLOW UP
+                                NEW
                               </Badge>
 
-                              {isZeroBilledVisit(f) ? (
+                              {isZeroBilledVisit(anchor) ? (
                                 <Badge
                                   variant="outline"
                                   className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
@@ -380,7 +372,7 @@ export function DoctorVisitHistoryPanel(props: {
                                 </Badge>
                               ) : null}
 
-                              {isOfflineVisit(f) ? (
+                              {isOfflineVisit(anchor) ? (
                                 <Badge
                                   variant="outline"
                                   className={`rounded-full px-3 py-0.5 text-[10px] font-semibold ${offlineBadgeClass()}`}
@@ -391,53 +383,249 @@ export function DoctorVisitHistoryPanel(props: {
                             </div>
                           </TableCell>
 
-                          <TableCell className="px-6 py-2 align-top">
+                          <TableCell className="px-6 py-4 align-top">
                             <Badge
                               variant="outline"
                               className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
-                                getProp(f, 'status') as Visit['status'] | undefined,
+                                getProp(anchor, 'status') as Visit['status'] | undefined,
                               )}`}
                             >
-                              {stageLabel(getProp(f, 'status') as Visit['status'] | undefined)}
+                              {stageLabel(getProp(anchor, 'status') as Visit['status'] | undefined)}
                             </Badge>
                           </TableCell>
 
-                          <TableCell className="px-6 py-2 align-top text-right">
+                          <TableCell className="px-6 py-4 align-top text-right">
                             <div className="flex justify-end gap-2">
                               <Button
                                 type="button"
                                 variant="outline"
-                                className="h-8 rounded-xl px-3 text-xs"
-                                onClick={() => onOpenRxQuick(f.visitId)}
+                                className="h-8 rounded-xl px-3 text-xs cursor-pointer"
+                                onClick={() => onOpenRxQuick(anchor.visitId)}
                               >
                                 View Rx
                               </Button>
                               <Button
                                 type="button"
                                 variant="outline"
-                                className="h-8 rounded-xl px-3 text-xs"
-                                onClick={() => onOpenXrayQuick(f.visitId)}
+                                className="h-8 rounded-xl px-3 text-xs cursor-pointer"
+                                onClick={() => onOpenXrayQuick(anchor.visitId)}
                               >
                                 X-rays
                               </Button>
                               <Button
                                 type="button"
                                 variant="outline"
-                                className="h-8 rounded-xl px-3 text-xs"
-                                onClick={() => onOpenVisit(f.visitId)}
+                                className="h-8 rounded-xl px-3 text-xs cursor-pointer"
+                                onClick={() => onOpenVisit(anchor.visitId)}
                               >
                                 View
                               </Button>
                             </div>
                           </TableCell>
                         </TableRow>
-                      ))}
-                    </React.Fragment>
-                  );
-                })
+
+                        {followups.map((f) => (
+                          <TableRow key={f.visitId} className="hover:bg-gray-50/60">
+                            <TableCell className="px-6 py-2 align-top">
+                              <div className="flex items-center gap-3">
+                                <div className="ml-1 h-7 w-0.5 rounded-full bg-gray-200" />
+                                <div className="text-sm text-gray-900">
+                                  {formatClinicDateShort(String(getProp(f, 'visitDate') ?? ''))}
+                                </div>
+                              </div>
+                            </TableCell>
+
+                            <TableCell className="px-6 py-2 align-top">
+                              <div className="flex items-start gap-3">
+                                <div className="ml-1 h-7 w-0.5 rounded-full bg-gray-200" />
+                                <div className="min-w-0 flex-1">
+                                  {renderReasonCell(f, { kind: 'FOLLOWUP', anchor })}
+                                </div>
+                              </div>
+                            </TableCell>
+
+                            <TableCell className="px-6 py-2 align-top">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge
+                                  variant="outline"
+                                  className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
+                                    'FOLLOWUP',
+                                  )}`}
+                                >
+                                  FOLLOW UP
+                                </Badge>
+
+                                {isZeroBilledVisit(f) ? (
+                                  <Badge
+                                    variant="outline"
+                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
+                                  >
+                                    ZERO BILLED
+                                  </Badge>
+                                ) : null}
+
+                                {isOfflineVisit(f) ? (
+                                  <Badge
+                                    variant="outline"
+                                    className={`rounded-full px-3 py-0.5 text-[10px] font-semibold ${offlineBadgeClass()}`}
+                                  >
+                                    OFFLINE
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            </TableCell>
+
+                            <TableCell className="px-6 py-2 align-top">
+                              <Badge
+                                variant="outline"
+                                className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
+                                  getProp(f, 'status') as Visit['status'] | undefined,
+                                )}`}
+                              >
+                                {stageLabel(getProp(f, 'status') as Visit['status'] | undefined)}
+                              </Badge>
+                            </TableCell>
+
+                            <TableCell className="px-6 py-2 align-top text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-8 rounded-xl px-3 text-xs cursor-pointer"
+                                  onClick={() => onOpenRxQuick(f.visitId)}
+                                >
+                                  View Rx
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-8 rounded-xl px-3 text-xs cursor-pointer"
+                                  onClick={() => onOpenXrayQuick(f.visitId)}
+                                >
+                                  X-rays
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-8 rounded-xl px-3 text-xs cursor-pointer"
+                                  onClick={() => onOpenVisit(f.visitId)}
+                                >
+                                  View
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </React.Fragment>
+                    );
+                  })}
+
+                  {groups.orphanGroups.length
+                    ? groups.orphanGroups.map(({ followup }) => {
+                        const aId = anchorIdFromVisit(followup);
+                        const a = aId ? visitById.get(aId) : undefined;
+
+                        return (
+                          <TableRow key={followup.visitId} className="hover:bg-gray-50/60">
+                            <TableCell className="px-6 py-3 align-top text-sm text-gray-900">
+                              {formatClinicDateShort(String(getProp(followup, 'visitDate') ?? ''))}
+                            </TableCell>
+
+                            <TableCell className="px-6 py-3 align-top">
+                              {renderReasonCell(followup, { kind: 'FOLLOWUP', anchor: a })}
+                            </TableCell>
+
+                            <TableCell className="px-6 py-3 align-top">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <Badge
+                                  variant="outline"
+                                  className={`rounded-full px-4 py-1 text-[11px] font-semibold ${typeBadgeClass(
+                                    'FOLLOWUP',
+                                  )}`}
+                                >
+                                  FOLLOW UP
+                                </Badge>
+
+                                {isZeroBilledVisit(followup) ? (
+                                  <Badge
+                                    variant="outline"
+                                    className={`rounded-full px-4 py-1 text-[11px] font-semibold ${zeroBilledBadgeClass()}`}
+                                  >
+                                    ZERO BILLED
+                                  </Badge>
+                                ) : null}
+
+                                {isOfflineVisit(followup) ? (
+                                  <Badge
+                                    variant="outline"
+                                    className={`rounded-full px-3 py-0.5 text-[10px] font-semibold ${offlineBadgeClass()}`}
+                                  >
+                                    OFFLINE
+                                  </Badge>
+                                ) : null}
+                              </div>
+                            </TableCell>
+
+                            <TableCell className="px-6 py-3 align-top">
+                              <Badge
+                                variant="outline"
+                                className={`rounded-full px-4 py-1 text-xs font-semibold ${stageBadgeClass(
+                                  getProp(followup, 'status') as Visit['status'] | undefined,
+                                )}`}
+                              >
+                                {stageLabel(
+                                  getProp(followup, 'status') as Visit['status'] | undefined,
+                                )}
+                              </Badge>
+                            </TableCell>
+
+                            <TableCell className="px-6 py-3 align-top text-right">
+                              <div className="flex justify-end gap-2">
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-8 rounded-xl px-3 text-xs cursor-pointer"
+                                  onClick={() => onOpenRxQuick(followup.visitId)}
+                                >
+                                  View Rx
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-8 rounded-xl px-3 text-xs cursor-pointer"
+                                  onClick={() => onOpenXrayQuick(followup.visitId)}
+                                >
+                                  X-rays
+                                </Button>
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  className="h-8 rounded-xl px-3 text-xs cursor-pointer"
+                                  onClick={() => onOpenVisit(followup.visitId)}
+                                >
+                                  View
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
+                    : null}
+                </>
               )}
             </TableBody>
           </Table>
+
+          {groups.anchorsOrdered.length > PAGE_SIZE ? (
+            <div className="border-t bg-white px-3 py-2">
+              <PaginationControl
+                page={pageSafe}
+                pageSize={PAGE_SIZE}
+                totalItems={groups.anchorsOrdered.length}
+                onPageChange={setPage}
+              />
+            </div>
+          ) : null}
         </div>
       )}
     </Card>

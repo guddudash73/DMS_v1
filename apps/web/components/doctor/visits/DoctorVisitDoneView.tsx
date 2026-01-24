@@ -50,6 +50,10 @@ const VisitXrayQuickLookDialog = dynamic(
   { ssr: false },
 );
 
+/* ------------------------------------------------------------------ */
+/* utils */
+/* ------------------------------------------------------------------ */
+
 type UnknownRecord = Record<string, unknown>;
 function isRecord(v: unknown): v is UnknownRecord {
   return typeof v === 'object' && v !== null;
@@ -74,6 +78,72 @@ function getPropNumber(obj: unknown, key: string): number | undefined {
 function anchorIdFromVisit(v: Visit): string | undefined {
   return getPropString(v as unknown, 'anchorVisitId') ?? getPropString(v as unknown, 'anchorId');
 }
+
+/** ✅ NEW: format patient registration date (same logic style as PatientDetailPage) */
+function formatPatientRegdDate(patient: unknown): string {
+  // prefer ms timestamps
+  const createdAtNum =
+    getPropNumber(patient, 'createdAt') ??
+    getPropNumber(patient, 'created_at') ??
+    getPropNumber(patient, 'registeredAt') ??
+    getPropNumber(patient, 'regdAt');
+
+  if (typeof createdAtNum === 'number' && Number.isFinite(createdAtNum) && createdAtNum > 0) {
+    return new Date(createdAtNum).toLocaleDateString('en-GB');
+  }
+
+  // fallback: string
+  const createdAtStr =
+    getPropString(patient, 'createdAt') ??
+    getPropString(patient, 'created_at') ??
+    getPropString(patient, 'registeredAt') ??
+    getPropString(patient, 'regdAt');
+
+  if (createdAtStr) {
+    const d = new Date(createdAtStr);
+    if (Number.isFinite(d.getTime())) return d.toLocaleDateString('en-GB');
+  }
+
+  return '—';
+}
+
+/* ------------------------------------------------------------------ */
+/* patient helpers (backend-aligned) */
+/* ------------------------------------------------------------------ */
+
+function safeParseDobToDate(dob: unknown): Date | null {
+  if (typeof dob !== 'string') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dob.trim());
+  if (!m) return null;
+
+  const y = Number(m[1]);
+  const mo = Number(m[2]) - 1;
+  const d = Number(m[3]);
+  const date = new Date(y, mo, d);
+  return Number.isFinite(date.getTime()) ? date : null;
+}
+
+function calculateAge(dob: Date, at: Date): number {
+  let age = at.getFullYear() - dob.getFullYear();
+  const m = at.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && at.getDate() < dob.getDate())) age -= 1;
+  return age < 0 ? 0 : age;
+}
+
+type PatientSex = 'M' | 'F' | 'O' | 'U';
+function normalizeSex(raw: unknown): PatientSex | undefined {
+  if (!raw) return undefined;
+  const s = String(raw).trim().toUpperCase();
+  if (s === 'MALE' || s === 'M') return 'M';
+  if (s === 'FEMALE' || s === 'F') return 'F';
+  if (s === 'OTHER' || s === 'O') return 'O';
+  if (s === 'UNKNOWN' || s === 'U') return 'U';
+  return undefined;
+}
+
+/* ------------------------------------------------------------------ */
+/* component */
+/* ------------------------------------------------------------------ */
 
 export function DoctorVisitDoneView(props: {
   visitId: string;
@@ -101,10 +171,10 @@ export function DoctorVisitDoneView(props: {
     rxLatest,
   } = props;
 
-  // ✅ Toggle ONLY for prescription chain history (same pattern as Clinic page)
+  /* ---------------- history toggle ---------------- */
+
   const [showHistory, setShowHistory] = React.useState(false);
 
-  // ✅ IMPORTANT: do NOT fetch visit history unless toggle is ON
   const visitsQuery = useGetPatientVisitsQuery(patientId ?? '', {
     skip: !patientId || !showHistory,
     refetchOnMountOrArgChange: true,
@@ -116,7 +186,8 @@ export function DoctorVisitDoneView(props: {
     return Array.isArray(items) ? (items as Visit[]) : [];
   }, [visitsQuery.data, showHistory]);
 
-  // Rx (still fetch current visit RX)
+  /* ---------------- rx ---------------- */
+
   const rxQuery = useGetVisitRxQuery({ visitId });
   const rxToShow = rxQuery.data?.rx ?? (isRecord(rxLatest) ? rxLatest : null);
 
@@ -127,7 +198,33 @@ export function DoctorVisitDoneView(props: {
     ? (getProp(rxToShow, 'toothDetails') as any[])
     : [];
 
-  // ✅ Build chain only when toggle is ON; otherwise keep it light (current visit only)
+  // ✅ doctorNotes should be displayed/printed in prescription
+  const doctorNotes =
+    isRecord(rxToShow) && typeof getProp(rxToShow, 'doctorNotes') !== 'undefined'
+      ? String(getProp(rxToShow, 'doctorNotes') ?? '')
+      : '';
+
+  /* ---------------- patient age / sex FIX ---------------- */
+
+  const patientDobRaw = getProp(patient, 'dob');
+  const patientAgeRaw = getProp(patient, 'age');
+  const patientSexRaw = getProp(patient, 'gender');
+
+  const visitAt = new Date(getPropNumber(visit, 'createdAt') ?? Date.now());
+
+  const dob = safeParseDobToDate(patientDobRaw);
+  const ageFromDob = dob ? calculateAge(dob, visitAt) : undefined;
+  const ageStored =
+    typeof patientAgeRaw === 'number' && Number.isFinite(patientAgeRaw) ? patientAgeRaw : undefined;
+
+  const patientAge = ageFromDob ?? ageStored;
+  const patientSex = normalizeSex(patientSexRaw);
+
+  // ✅ NEW: patient registration date (formatted) for prescription header
+  const patientRegdDate = React.useMemo(() => formatPatientRegdDate(patient), [patient]);
+
+  /* ---------------- rx chain ---------------- */
+
   const rxChain = React.useMemo(() => {
     const meta = new Map<string, Visit>();
     if (visit?.visitId) meta.set(visit.visitId, visit);
@@ -143,8 +240,6 @@ export function DoctorVisitDoneView(props: {
 
     const tag = getPropString(visit as unknown, 'tag');
     const anchorVisitId = getPropString(visit as unknown, 'anchorVisitId');
-
-    // If followup tag 'F', anchor is anchorVisitId; else current visit
     const anchorId = tag === 'F' ? anchorVisitId : visitId;
     if (!anchorId) return { visitIds: [visitId], meta, currentVisitId: visitId };
 
@@ -152,62 +247,22 @@ export function DoctorVisitDoneView(props: {
     const chain: Visit[] = [];
     if (anchor) chain.push(anchor);
 
-    const followups: Visit[] = [];
     for (const v of meta.values()) {
       const aId = anchorIdFromVisit(v);
-      if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
+      if (aId && aId === anchorId && v.visitId !== anchorId) chain.push(v);
     }
-
-    followups.sort(
-      (a, b) =>
-        (getPropNumber(a, 'createdAt') ?? getPropNumber(a, 'updatedAt') ?? 0) -
-        (getPropNumber(b, 'createdAt') ?? getPropNumber(b, 'updatedAt') ?? 0),
-    );
-    chain.push(...followups);
-
-    if (!chain.some((v) => v.visitId === visitId)) {
-      const cur = meta.get(visitId);
-      chain.push(cur ?? ({ visitId } as Visit));
-    }
-
-    chain.sort(
-      (a, b) =>
-        (getPropNumber(a, 'createdAt') ?? getPropNumber(a, 'updatedAt') ?? 0) -
-        (getPropNumber(b, 'createdAt') ?? getPropNumber(b, 'updatedAt') ?? 0),
-    );
 
     const seen = new Set<string>();
-    const chainIdsOrdered = chain
-      .map((v) => v.visitId)
-      .filter((id) => {
-        if (!id) return false;
-        if (seen.has(id)) return false;
-        seen.add(id);
-        return true;
-      });
+    const ids = chain.map((v) => v.visitId).filter((id) => id && !seen.has(id) && seen.add(id));
 
-    // Limit chain up to current visit (inclusive)
-    const idx = chainIdsOrdered.indexOf(visitId);
-    const limitedIds = idx >= 0 ? chainIdsOrdered.slice(0, idx + 1) : [visitId];
-
-    return { visitIds: limitedIds, meta, currentVisitId: visitId };
+    return { visitIds: ids, meta, currentVisitId: visitId };
   }, [allVisitsRaw, showHistory, visit, visitId]);
 
-  const historyLoading = showHistory && (visitsQuery.isLoading || visitsQuery.isFetching);
+  /* ---------------- quick look dialogs ---------------- */
 
-  // Quick look dialogs (opened from history panel)
   const [rxQuickOpen, setRxQuickOpen] = React.useState(false);
   const [xrayQuickOpen, setXrayQuickOpen] = React.useState(false);
   const [quickVisitId, setQuickVisitId] = React.useState<string | null>(null);
-
-  const openRxQuick = (id: string) => {
-    setQuickVisitId(id);
-    setRxQuickOpen(true);
-  };
-  const openXrayQuick = (id: string) => {
-    setQuickVisitId(id);
-    setXrayQuickOpen(true);
-  };
 
   return (
     <>
@@ -219,81 +274,68 @@ export function DoctorVisitDoneView(props: {
                 <ClipboardList className="h-4 w-4 text-gray-700" />
                 <div className="text-sm font-semibold text-gray-900">Prescription</div>
               </div>
-
-              <div className="text-xs text-gray-500">{visitDate ? visitDate.trim() : ''}</div>
+              <div className="text-xs text-gray-500">{visitDate?.trim() ?? ''}</div>
             </div>
 
-            {showHistory ? (
-              <div className="rounded-x pl-1 text-[11px] text-gray-600">
-                {historyLoading
-                  ? 'Loading visit history…'
-                  : `Showing visit history (${rxChain.visitIds.length} visit${
-                      rxChain.visitIds.length === 1 ? '' : 's'
-                    }).`}
-              </div>
-            ) : null}
-
-            {/* ✅ Toggle added here, minimal UI impact */}
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto">
               <button
                 type="button"
                 className={[
-                  'rounded-full px-3 py-1 text-[11px] font-medium transition cursor-pointer',
+                  'rounded-full px-3 py-1 text-[11px] font-medium cursor-pointer',
                   showHistory
-                    ? 'bg-black text-white hover:bg-black/90'
+                    ? 'bg-black text-white'
                     : 'bg-gray-100 text-gray-800 hover:bg-gray-200',
                 ].join(' ')}
                 onClick={() => setShowHistory((v) => !v)}
-                title="Toggle previous visit history in prescription"
               >
                 {showHistory ? 'Hide history' : 'Show history'}
               </button>
             </div>
           </div>
 
-          <div className="min-w-0 overflow-x-hidden">
-            <PrescriptionPreview
-              patientName={getProp(patient, 'name') as any}
-              patientPhone={getProp(patient, 'phone') as any}
-              patientAge={undefined}
-              patientSex={undefined}
-              sdId={getProp(patient, 'sdId') as any}
-              opdNo={opdNo}
-              doctorName={doctorName}
-              doctorRegdLabel={doctorRegdLabel}
-              visitDateLabel={visitDateLabel}
-              lines={lines as any}
-              receptionNotes={
-                isRecord(rxToShow) ? String(getProp(rxToShow, 'receptionNotes') ?? '') : ''
-              }
-              toothDetails={toothDetails as any}
-              // ✅ ONLY pass chain props when toggle is ON
-              currentVisitId={showHistory ? rxChain.currentVisitId : undefined}
-              chainVisitIds={showHistory ? rxChain.visitIds : undefined}
-              visitMetaMap={showHistory ? rxChain.meta : undefined}
-            />
-          </div>
+          <PrescriptionPreview
+            patientName={getProp(patient, 'name') as any}
+            patientPhone={getProp(patient, 'phone') as any}
+            patientAge={patientAge}
+            patientSex={patientSex}
+            sdId={getProp(patient, 'sdId') as any}
+            opdNo={opdNo}
+            doctorName={doctorName}
+            doctorRegdLabel={doctorRegdLabel}
+            visitDateLabel={visitDateLabel}
+            regdDate={patientRegdDate} // ✅ NEW: patient registration date
+            lines={lines as any}
+            doctorNotes={doctorNotes}
+            receptionNotes={
+              isRecord(rxToShow) ? String(getProp(rxToShow, 'receptionNotes') ?? '') : ''
+            }
+            toothDetails={toothDetails as any}
+            currentVisitId={showHistory ? rxChain.currentVisitId : undefined}
+            chainVisitIds={showHistory ? rxChain.visitIds : undefined}
+            visitMetaMap={showHistory ? rxChain.meta : undefined}
+          />
         </Card>
 
         <Card className="lg:col-span-6 rounded-2xl border bg-white p-4">
           <div className="mb-3 flex items-center gap-2">
             <ImageIcon className="h-4 w-4 text-gray-700" />
             <div className="text-sm font-semibold text-gray-900">X-rays</div>
-            <div className="ml-auto text-xs text-gray-500">All images for this visit</div>
           </div>
-
-          <div className="min-h-60">
-            <XrayTrayReadOnly visitId={visitId} />
-          </div>
+          <XrayTrayReadOnly visitId={visitId} />
         </Card>
       </div>
 
-      {/* History panel remains as-is (no UI change requested) */}
       <DoctorVisitHistoryPanel
         patientId={patientId}
         onOpenVisit={(vId) => router.push(`/doctor/visits/${vId}`)}
-        onOpenRxQuick={openRxQuick}
-        onOpenXrayQuick={openXrayQuick}
+        onOpenRxQuick={(id) => {
+          setQuickVisitId(id);
+          setRxQuickOpen(true);
+        }}
+        onOpenXrayQuick={(id) => {
+          setQuickVisitId(id);
+          setXrayQuickOpen(true);
+        }}
       />
 
       <VisitPrescriptionQuickLookDialog
@@ -301,24 +343,6 @@ export function DoctorVisitDoneView(props: {
         onOpenChange={setRxQuickOpen}
         visitId={quickVisitId}
         patientId={patientId}
-        patientName={
-          typeof getProp(patient, 'name') === 'string'
-            ? (getProp(patient, 'name') as string)
-            : undefined
-        }
-        patientPhone={
-          typeof getProp(patient, 'phone') === 'string'
-            ? (getProp(patient, 'phone') as string)
-            : undefined
-        }
-        patientSdId={
-          typeof getProp(patient, 'sdId') === 'string'
-            ? (getProp(patient, 'sdId') as string)
-            : undefined
-        }
-        opdNo={opdNo}
-        doctorName={doctorName}
-        doctorRegdLabel={doctorRegdLabel}
       />
 
       <VisitXrayQuickLookDialog

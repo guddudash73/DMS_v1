@@ -42,7 +42,7 @@ type RxIdParam = z.infer<typeof RxIdParam>;
 
 const RxUpdateBody = z
   .object({
-    lines: z.array(RxLine).optional().default([]),
+    lines: z.array(RxLine).optional(),
     jsonKey: z.string().min(1).optional(),
     toothDetails: z.array(ToothDetail).optional(),
     doctorNotes: z.string().max(2000).optional(),

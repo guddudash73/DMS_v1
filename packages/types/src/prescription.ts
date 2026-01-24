@@ -1,3 +1,4 @@
+// packages/types/src/prescription.ts
 import { z } from 'zod';
 import { VisitId } from './visit';
 
@@ -11,9 +12,11 @@ export const ToothNumber = z.string().min(1).max(20);
 export type ToothNumber = z.infer<typeof ToothNumber>;
 
 export const ToothDetail = z.object({
+  blockId: z.string().min(1).max(64).optional(), // ✅ add
   position: ToothPosition,
   toothNumbers: z.array(ToothNumber).min(1).max(8),
-  notes: z.string().max(500).optional(),
+  advice: z.string().max(500).optional(),
+  procedure: z.string().max(500).optional(),
 });
 export type ToothDetail = z.infer<typeof ToothDetail>;
 
@@ -38,6 +41,7 @@ export const Prescription = z.object({
   jsonKey: z.string().min(1),
   toothDetails: z.array(ToothDetail).optional(),
   doctorNotes: z.string().max(2000).optional(),
+  doctorReceptionNotes: z.string().max(2000).optional(),
   receptionNotes: z.string().max(2000).optional(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
