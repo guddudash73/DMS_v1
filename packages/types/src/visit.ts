@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PatientId } from './patient';
+import { AssistantId } from './assistant';
 
 export const VisitId = z.string().min(1);
 export type VisitId = z.infer<typeof VisitId>;
@@ -19,7 +20,6 @@ export const Visit = z.object({
   visitDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
 
   opdNo: z.string().min(1).optional(),
-
   dailyPatientNumber: z.number().int().min(1).optional(),
 
   checkedOut: z.boolean().optional(),
@@ -29,22 +29,26 @@ export const Visit = z.object({
   updatedAt: z.number().int().nonnegative(),
 
   billingAmount: z.number().nonnegative().optional(),
-
   tag: VisitTag.optional(),
-
   zeroBilled: z.boolean().optional(),
-
   anchorVisitId: VisitId.optional(),
-
   isOffline: z.boolean().optional(),
-
   receivedOnline: z.boolean().optional(),
   receivedOffline: z.boolean().optional(),
 
   currentRxId: z.string().min(1).optional(),
   currentRxVersion: z.number().int().min(1).optional(),
+
+  // ✅ assistant snapshot stored per visit (optional)
+  assistantId: AssistantId.optional(),
+  assistantName: z.string().min(1).max(64).optional(),
 });
 export type Visit = z.infer<typeof Visit>;
+
+export const VisitAssistantUpdate = z.object({
+  assistantId: AssistantId.nullable(), // null => clear
+});
+export type VisitAssistantUpdate = z.infer<typeof VisitAssistantUpdate>;
 
 export const PatientQueueItem = Visit.extend({
   patientName: z.string().min(1).optional(),
@@ -82,8 +86,15 @@ export const VisitCreate = z
   });
 export type VisitCreate = z.infer<typeof VisitCreate>;
 
+/**
+ * ✅ Status update can optionally carry assistantId.
+ * - undefined => do not change assistant on visit
+ * - null => clear assistant
+ * - string => set assistant snapshot (backend will validate)
+ */
 export const VisitStatusUpdate = z.object({
   status: VisitStatus,
+  assistantId: AssistantId.nullable().optional(),
 });
 export type VisitStatusUpdate = z.infer<typeof VisitStatusUpdate>;
 

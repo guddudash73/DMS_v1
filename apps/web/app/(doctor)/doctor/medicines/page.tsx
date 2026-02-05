@@ -16,9 +16,9 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 
-import { Pencil, Trash2, Plus, Search, Loader2, Lock } from 'lucide-react';
+import { Pencil, Trash2, Plus, Search, Loader2, Lock, Check, ChevronsUpDown } from 'lucide-react';
 
-import type { MedicinePreset, MedicineForm } from '@dcm/types';
+import type { MedicinePreset } from '@dcm/types';
 
 import {
   useGetMeQuery,
@@ -28,26 +28,52 @@ import {
   useDoctorDeleteMedicineMutation,
 } from '@/src/store/api';
 
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import { cn } from '@/lib/utils';
+
 const FREQUENCIES = ['QD', 'BID', 'TID', 'QID', 'HS', 'PRN'] as const;
 type Frequency = (typeof FREQUENCIES)[number];
 
-const MEDICINE_FORMS: MedicineForm[] = [
-  'TABLET',
-  'CAPSULE',
-  'SYRUP',
-  'INJECTION',
-  'OINTMENT',
-  'GEL',
-  'MOUTHWASH',
-  'OTHER',
-];
+/**
+ * ✅ medicineType is a free string in backend (z.string().min(1).max(64)),
+ * but UI uses a common dropdown + allows "Use typed".
+ * Keep consistent with MedicinesEditor.tsx.
+ */
+const COMMON_MEDICINE_TYPES = [
+  'Antibiotic',
+  'Painkiller',
+  'Paracetamol',
+  'Anti-inflammatory',
+  'Antacid',
+  'Antihistamine',
+  'Decongestant',
+  'Cough Suppressant',
+  'Expectorant',
+  'Bronchodilator',
+  'Steroid',
+  'Antifungal',
+  'Antiviral',
+  'Deworming',
+  'Antiseptic',
+  'Vitamin',
+  'Mouthwash',
+  'Local Anesthetic',
+] as const;
 
 type FormState = {
   displayName: string;
   defaultDose?: string;
   defaultFrequency?: Frequency | '';
   defaultDuration?: number;
-  form?: MedicineForm | '';
+  medicineType?: string;
 };
 
 const emptyForm = (): FormState => ({
@@ -55,7 +81,7 @@ const emptyForm = (): FormState => ({
   defaultDose: '',
   defaultFrequency: '',
   defaultDuration: undefined,
-  form: '',
+  medicineType: '',
 });
 
 const toNumberOrUndef = (v: string) => {
@@ -66,10 +92,7 @@ const toNumberOrUndef = (v: string) => {
 };
 
 const isFrequency = (v: unknown): v is Frequency =>
-  typeof v === 'string' && (FREQUENCIES as readonly string[]).includes(v);
-
-const isMedicineForm = (v: unknown): v is MedicineForm =>
-  typeof v === 'string' && (MEDICINE_FORMS as readonly string[]).includes(v);
+  typeof v === 'string' && (FREQUENCIES as readonly string[]).includes(v as Frequency);
 
 function SelectLike({
   value,
@@ -95,10 +118,11 @@ function SelectLike({
 }
 
 const formatDefaults = (m: MedicinePreset) => {
+  const type = m.medicineType?.trim() ? m.medicineType : '—';
   const dose = m.defaultDose?.trim() ? m.defaultDose : '—';
   const freq = m.defaultFrequency?.trim() ? m.defaultFrequency : '—';
   const dur = typeof m.defaultDuration === 'number' ? `${m.defaultDuration}d` : '—';
-  return { dose, freq, dur };
+  return { type, dose, freq, dur };
 };
 
 type MedicinesCatalogListArgs = {
@@ -106,6 +130,118 @@ type MedicinesCatalogListArgs = {
   limit: number;
   cursor?: string;
 };
+
+/**
+ * ✅ MedicineType combobox:
+ * - dropdown of common categories
+ * - searchable
+ * - allow "Use typed"
+ */
+function MedicineTypeCombobox({
+  value,
+  onChange,
+  placeholder = 'Type —',
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState(value);
+
+  const display = value.trim();
+  const q = query.trim();
+  const qLower = q.toLowerCase();
+
+  const filtered = COMMON_MEDICINE_TYPES.filter((t) => t.toLowerCase().includes(qLower));
+
+  const exactMatch =
+    q.length > 0 ? COMMON_MEDICINE_TYPES.some((t) => t.toLowerCase() === qLower) : false;
+  const canUseTyped = q.length > 0 && !exactMatch;
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (nextOpen) setQuery(display);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          className="h-10 w-full justify-between rounded-xl"
+        >
+          <span className={cn('truncate text-left', display ? 'text-gray-900' : 'text-gray-500')}>
+            {display || placeholder}
+          </span>
+          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command>
+          <CommandInput
+            placeholder="Search / type medicine type…"
+            value={query}
+            onValueChange={setQuery}
+          />
+          <CommandList>
+            <CommandEmpty>No matches.</CommandEmpty>
+
+            <CommandGroup heading="Common types">
+              {filtered.map((t) => (
+                <CommandItem
+                  key={t}
+                  value={t}
+                  onSelect={() => {
+                    onChange(t);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn('mr-2 h-4 w-4', display === t ? 'opacity-100' : 'opacity-0')}
+                  />
+                  <span className="truncate">{t}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+
+            {canUseTyped ? (
+              <CommandGroup heading="Use typed">
+                <CommandItem
+                  value={`use:${q}`}
+                  onSelect={() => {
+                    onChange(q);
+                    setOpen(false);
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Use “{q}”
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
+
+            {display ? (
+              <CommandGroup heading="Actions">
+                <CommandItem
+                  value="clear"
+                  onSelect={() => {
+                    onChange('');
+                    setOpen(false);
+                  }}
+                >
+                  Clear
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export default function DoctorMedicinesPage() {
   const meQ = useGetMeQuery();
@@ -154,7 +290,7 @@ export default function DoctorMedicinesPage() {
     setCursor(nextCursor);
   };
 
-  const [quickAdd] = useQuickAddMedicineMutation();
+  const [quickAdd, quickAddState] = useQuickAddMedicineMutation();
   const [doctorUpdate, updateState] = useDoctorUpdateMedicineMutation();
   const [doctorDelete, deleteState] = useDoctorDeleteMedicineMutation();
 
@@ -165,7 +301,8 @@ export default function DoctorMedicinesPage() {
   const [editForm, setEditForm] = React.useState<FormState>(() => emptyForm());
   const [editTarget, setEditTarget] = React.useState<MedicinePreset | null>(null);
 
-  const busy = listQ.isLoading || updateState.isLoading || deleteState.isLoading;
+  const busy =
+    listQ.isLoading || quickAddState.isLoading || updateState.isLoading || deleteState.isLoading;
 
   const canMutate = (m: MedicinePreset) =>
     !!myUserId && m.createdByUserId === myUserId && m.source === 'INLINE_DOCTOR';
@@ -175,15 +312,15 @@ export default function DoctorMedicinesPage() {
 
     const freq =
       m.defaultFrequency && isFrequency(m.defaultFrequency) ? m.defaultFrequency : ('' as const);
-    const form = m.form && isMedicineForm(m.form) ? m.form : ('' as const);
 
     setEditForm({
       displayName: m.displayName ?? '',
       defaultDose: m.defaultDose ?? '',
       defaultFrequency: freq,
       defaultDuration: m.defaultDuration,
-      form,
+      medicineType: m.medicineType ?? '',
     });
+
     setEditOpen(true);
   };
 
@@ -191,12 +328,14 @@ export default function DoctorMedicinesPage() {
     const name = addForm.displayName.trim();
     if (!name) return;
 
+    const mt = (addForm.medicineType ?? '').trim();
+
     await quickAdd({
       displayName: name,
       defaultDose: addForm.defaultDose?.trim() || undefined,
       defaultFrequency: addForm.defaultFrequency?.trim() || undefined,
       defaultDuration: addForm.defaultDuration,
-      form: addForm.form && isMedicineForm(addForm.form) ? addForm.form : undefined,
+      medicineType: mt ? mt : undefined,
     }).unwrap();
 
     setAddOpen(false);
@@ -210,6 +349,8 @@ export default function DoctorMedicinesPage() {
     const name = editForm.displayName.trim();
     if (!name) return;
 
+    const mt = (editForm.medicineType ?? '').trim();
+
     await doctorUpdate({
       id: editTarget.id,
       patch: {
@@ -217,7 +358,7 @@ export default function DoctorMedicinesPage() {
         defaultDose: editForm.defaultDose?.trim() || undefined,
         defaultFrequency: editForm.defaultFrequency?.trim() || undefined,
         defaultDuration: editForm.defaultDuration,
-        form: editForm.form && isMedicineForm(editForm.form) ? editForm.form : undefined,
+        medicineType: mt ? mt : undefined,
       },
     }).unwrap();
 
@@ -307,12 +448,20 @@ export default function DoctorMedicinesPage() {
                     <td className="px-5 py-4">
                       <div className="font-semibold text-gray-900">{m.displayName}</div>
                       <div className="mt-0.5 text-[11px] text-gray-500">ID: {m.id}</div>
+                      {m.medicineType?.trim() ? (
+                        <div className="mt-1">
+                          <Badge variant="secondary" className="rounded-full text-[10px]">
+                            {m.medicineType}
+                          </Badge>
+                        </div>
+                      ) : null}
                       {mine ? (
                         <div className="mt-1 text-[11px] font-medium text-emerald-700">Yours</div>
                       ) : null}
                     </td>
 
                     <td className="px-5 py-4 text-[11px] text-gray-700">
+                      <div>Type: {d.type}</div>
                       <div>Dose: {d.dose}</div>
                       <div>Freq: {d.freq}</div>
                       <div>Dur: {d.dur}</div>
@@ -385,6 +534,7 @@ export default function DoctorMedicinesPage() {
         </div>
       </Card>
 
+      {/* ADD */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-xl rounded-2xl">
           <DialogHeader>
@@ -403,12 +553,22 @@ export default function DoctorMedicinesPage() {
               />
             </div>
 
+            <div className="grid gap-2">
+              <Label className="text-xs">Type (medicineType)</Label>
+              <MedicineTypeCombobox
+                value={addForm.medicineType ?? ''}
+                onChange={(v) => setAddForm((p) => ({ ...p, medicineType: v }))}
+                placeholder="Type —"
+              />
+              <div className="text-[11px] text-gray-500">Optional.</div>
+            </div>
+
             <div className="grid grid-cols-3 gap-3">
               <div className="grid gap-2">
                 <Label className="text-xs">Dose</Label>
                 <Input
                   className="rounded-xl"
-                  placeholder="e.g., 1 tab"
+                  placeholder="e.g., 500mg"
                   value={addForm.defaultDose ?? ''}
                   onChange={(e) => setAddForm((p) => ({ ...p, defaultDose: e.target.value }))}
                 />
@@ -448,34 +608,25 @@ export default function DoctorMedicinesPage() {
                 />
               </div>
             </div>
-
-            <div className="grid gap-2">
-              <Label className="text-xs">Form (optional)</Label>
-              <SelectLike
-                value={addForm.form ?? ''}
-                onChange={(v) => setAddForm((p) => ({ ...p, form: isMedicineForm(v) ? v : '' }))}
-                placeholder="Select…"
-              >
-                {MEDICINE_FORMS.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </SelectLike>
-            </div>
           </div>
 
           <DialogFooter className="gap-2">
             <Button variant="secondary" className="rounded-xl" onClick={() => setAddOpen(false)}>
               Cancel
             </Button>
-            <Button className="rounded-xl" onClick={onAdd} disabled={!addForm.displayName.trim()}>
+            <Button
+              className="rounded-xl"
+              onClick={onAdd}
+              disabled={quickAddState.isLoading || !addForm.displayName.trim()}
+            >
+              {quickAddState.isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Add
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
+      {/* EDIT */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-xl rounded-2xl">
           <DialogHeader>
@@ -491,6 +642,16 @@ export default function DoctorMedicinesPage() {
                 value={editForm.displayName}
                 onChange={(e) => setEditForm((p) => ({ ...p, displayName: e.target.value }))}
               />
+            </div>
+
+            <div className="grid gap-2">
+              <Label className="text-xs">Type (medicineType)</Label>
+              <MedicineTypeCombobox
+                value={editForm.medicineType ?? ''}
+                onChange={(v) => setEditForm((p) => ({ ...p, medicineType: v }))}
+                placeholder="Type —"
+              />
+              <div className="text-[11px] text-gray-500">Optional.</div>
             </div>
 
             <div className="grid grid-cols-3 gap-3">
@@ -536,21 +697,6 @@ export default function DoctorMedicinesPage() {
                 />
               </div>
             </div>
-
-            <div className="grid gap-2">
-              <Label className="text-xs">Form (optional)</Label>
-              <SelectLike
-                value={editForm.form ?? ''}
-                onChange={(v) => setEditForm((p) => ({ ...p, form: isMedicineForm(v) ? v : '' }))}
-                placeholder="Select…"
-              >
-                {MEDICINE_FORMS.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </SelectLike>
-            </div>
           </div>
 
           <DialogFooter className="gap-2">
@@ -565,7 +711,12 @@ export default function DoctorMedicinesPage() {
               Cancel
             </Button>
 
-            <Button className="rounded-xl" onClick={onEdit} disabled={!editForm.displayName.trim()}>
+            <Button
+              className="rounded-xl"
+              onClick={onEdit}
+              disabled={updateState.isLoading || !editForm.displayName.trim()}
+            >
+              {updateState.isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Save changes
             </Button>
           </DialogFooter>

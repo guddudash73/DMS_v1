@@ -8,26 +8,27 @@ export const NormalizedMedicineName = z.string().min(1);
 export const MedicineSource = z.enum(['ADMIN_IMPORT', 'INLINE_DOCTOR']);
 export type MedicineSource = z.infer<typeof MedicineSource>;
 
-export const MedicineForm = z.enum([
-  'TABLET',
-  'CAPSULE',
-  'SYRUP',
-  'INJECTION',
-  'OINTMENT',
-  'GEL',
-  'MOUTHWASH',
-  'OTHER',
-]);
-export type MedicineForm = z.infer<typeof MedicineForm>;
+/**
+ * ✅ Medicine type:
+ * - Allows dropdown usage in UI (known list)
+ * - Also allows manual entry if not listed
+ */
+export const MedicineType = z.string().min(1).max(64);
+export type MedicineType = z.infer<typeof MedicineType>;
 
 export const MedicinePreset = z.object({
   id: MedicinePresetId,
   displayName: z.string().min(1),
   normalizedName: NormalizedMedicineName,
+
+  // defaults used to populate Rx editor on selection
   defaultDose: z.string().min(1).optional(),
   defaultFrequency: z.string().min(1).optional(),
   defaultDuration: z.number().int().min(1).max(365).optional(),
-  form: MedicineForm.optional(),
+
+  // ✅ new
+  medicineType: MedicineType.optional(),
+
   tags: z.array(z.string().min(1)).optional(),
   createdAt: z.number().int().nonnegative(),
   createdByUserId: z.string().min(1),
@@ -47,16 +48,24 @@ export const QuickAddMedicineInput = z.object({
   defaultDose: z.string().min(1).optional(),
   defaultFrequency: z.string().min(1).optional(),
   defaultDuration: z.number().int().min(1).max(365).optional(),
-  form: MedicineForm.optional(),
+
+  // ✅ new
+  medicineType: MedicineType.optional(),
 });
 export type QuickAddMedicineInput = z.infer<typeof QuickAddMedicineInput>;
 
+/**
+ * ✅ Typeahead item MUST include defaults so UI can populate on selection.
+ */
 export const MedicineTypeaheadItem = z.object({
   id: MedicinePresetId,
   displayName: z.string().min(1),
+  defaultDose: z.string().min(1).optional(),
   defaultFrequency: z.string().min(1).optional(),
   defaultDuration: z.number().int().min(1).max(365).optional(),
-  form: MedicineForm.optional(),
+
+  // ✅ new
+  medicineType: MedicineType.optional(),
 });
 export type MedicineTypeaheadItem = z.infer<typeof MedicineTypeaheadItem>;
 
@@ -78,7 +87,9 @@ export const DoctorUpdateMedicineRequest = z.object({
   defaultDose: z.string().min(1).optional(),
   defaultFrequency: z.string().min(1).optional(),
   defaultDuration: z.number().int().min(1).max(365).optional(),
-  form: MedicineForm.optional(),
+
+  // ✅ new
+  medicineType: MedicineType.optional(),
 });
 export type DoctorUpdateMedicineRequest = z.infer<typeof DoctorUpdateMedicineRequest>;
 
@@ -105,7 +116,10 @@ export const AdminUpdateMedicineRequest = z.object({
   defaultDose: z.string().min(1).optional(),
   defaultFrequency: z.string().min(1).optional(),
   defaultDuration: z.number().int().min(1).max(365).optional(),
-  form: MedicineForm.optional(),
+
+  // ✅ new
+  medicineType: MedicineType.optional(),
+
   tags: z.array(z.string().min(1)).optional(),
   verified: z.boolean().optional(),
 });

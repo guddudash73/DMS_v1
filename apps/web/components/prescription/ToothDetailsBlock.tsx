@@ -4,6 +4,12 @@ import type { ToothDetail, ToothPosition } from '@dcm/types';
 
 type ToothDetailAny = ToothDetail & {
   blockId?: string;
+
+  // ✅ new fields
+  notes?: string;
+  diagnosis?: string;
+
+  // existing
   advice?: string;
   procedure?: string;
 };
@@ -69,6 +75,11 @@ function cleanDetails(input: ToothDetail[]): ToothDetailAny[] {
       toothNumbers: ((anyD as any).toothNumbers ?? [])
         .map((x: any) => String(x).trim())
         .filter(Boolean),
+
+      // ✅ new
+      notes: (anyD as any).notes?.trim() || undefined,
+      diagnosis: (anyD as any).diagnosis?.trim() || undefined,
+
       advice: (anyD as any).advice?.trim() || undefined,
       procedure: (anyD as any).procedure?.trim() || undefined,
       blockId: (anyD as any).blockId ? String((anyD as any).blockId) : undefined,
@@ -98,20 +109,43 @@ function splitByBlockId(details: ToothDetailAny[]) {
   return ids.map((id) => ({ id, items: map.get(id) ?? [] }));
 }
 
+function LabeledLines(props: { label: string; lines: string[] }) {
+  const { label, lines } = props;
+  if (!lines.length) return null;
+
+  return lines.length === 1 ? (
+    <div className="min-w-0 whitespace-normal text-[12px] font-semibold text-gray-900">
+      <span className="text-gray-700">{label}:</span> {lines[0]}
+    </div>
+  ) : (
+    <div className="space-y-1">
+      {lines.map((t, i) => (
+        <div key={`${label}-${i}`} className="truncate text-[12px] font-semibold text-gray-900">
+          <span className="text-gray-700">{label}:</span> {t}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SingleBlockView({ items, className }: { items: ToothDetailAny[]; className?: string }) {
   const hasAnyTeeth = items.some((d) => ((d as any).toothNumbers?.length ?? 0) > 0);
+
+  // ✅ collect unique per-field (block-level)
+  const uniqueNotes = uniqStrings(items.map((d) => (d as any).notes));
+  const uniqueDiagnosis = uniqStrings(items.map((d) => (d as any).diagnosis));
   const uniqueAdvice = uniqStrings(items.map((d) => (d as any).advice));
   const uniqueProcedure = uniqStrings(items.map((d) => (d as any).procedure));
 
-  const hasAnyAdvice = uniqueAdvice.length > 0;
-  const hasAnyProcedure = uniqueProcedure.length > 0;
+  const hasAnyText =
+    uniqueNotes.length > 0 ||
+    uniqueDiagnosis.length > 0 ||
+    uniqueAdvice.length > 0 ||
+    uniqueProcedure.length > 0;
 
-  if (!hasAnyTeeth && !hasAnyAdvice && !hasAnyProcedure) return null;
+  if (!hasAnyTeeth && !hasAnyText) return null;
 
   const byPos = groupTeeth(items);
-
-  const adviceText = uniqueAdvice.length === 1 ? uniqueAdvice[0] : null;
-  const procedureText = uniqueProcedure.length === 1 ? uniqueProcedure[0] : null;
 
   if (DEBUG_TEETH && typeof window !== 'undefined') {
     globalThis.console.log('[ToothDetailsBlock] items:', items);
@@ -126,27 +160,27 @@ function SingleBlockView({ items, className }: { items: ToothDetailAny[]; classN
   return (
     <div className={['flex items-start gap-3', className ?? ''].join(' ')}>
       <div className="relative shrink-0">
-        <div className="grid h-11 w-20.5 grid-cols-2 overflow-hidden rounded-md bg-white">
-          <div className="flex items-center justify-center border-b border-r border-gray-700 px-1">
-            <div className="line-clamp-1 text-[12px] font-semibold text-gray-900">
+        <div className="grid w-20.5 grid-cols-2 rounded-md bg-white">
+          <div className="flex min-w-0 items-center justify-center border-b border-r border-gray-700 px-1">
+            <div className="whitespace-normal text-[12px] font-semibold text-gray-900">
               {(byPos.get('UL') ?? []).join(', ') || '—'}
             </div>
           </div>
 
           <div className="flex items-center justify-center border-b border-gray-700 px-1">
-            <div className="line-clamp-1 text-[12px] font-semibold text-gray-900">
+            <div className="whitespace-normal text-[12px] font-semibold text-gray-900">
               {(byPos.get('UR') ?? []).join(', ') || '—'}
             </div>
           </div>
 
           <div className="flex items-center justify-center border-r border-gray-700 px-1">
-            <div className="line-clamp-1 text-[12px] font-semibold text-gray-900">
+            <div className="whitespace-normal text-[12px] font-semibold text-gray-900">
               {(byPos.get('LL') ?? []).join(', ') || '—'}
             </div>
           </div>
 
           <div className="flex items-center justify-center px-1">
-            <div className="line-clamp-1 text-[12px] font-semibold text-gray-900">
+            <div className="whitespace-normal text-[12px] font-semibold text-gray-900">
               {(byPos.get('LR') ?? []).join(', ') || '—'}
             </div>
           </div>
@@ -154,37 +188,13 @@ function SingleBlockView({ items, className }: { items: ToothDetailAny[]; classN
       </div>
 
       <div className="min-w-0 flex-1 space-y-1">
-        {adviceText ? (
-          <div className="truncate text-[12px] font-semibold text-gray-900">
-            <span className="text-gray-700">Advice:</span> {adviceText}
-          </div>
-        ) : uniqueAdvice.length ? (
-          <div className="space-y-1">
-            {uniqueAdvice.map((n, i) => (
-              <div key={`a-${i}`} className="truncate text-[12px] font-semibold text-gray-900">
-                <span className="text-gray-700">Advice:</span> {n}
-              </div>
-            ))}
-          </div>
-        ) : null}
+        {/* ✅ Required order */}
+        <LabeledLines label="Notes" lines={uniqueNotes} />
+        <LabeledLines label="Diagnosis" lines={uniqueDiagnosis} />
+        <LabeledLines label="Advice" lines={uniqueAdvice} />
+        <LabeledLines label="Procedure" lines={uniqueProcedure} />
 
-        {procedureText ? (
-          <div className="truncate text-[12px] font-semibold text-gray-900">
-            <span className="text-gray-700">Procedure:</span> {procedureText}
-          </div>
-        ) : uniqueProcedure.length ? (
-          <div className="space-y-1">
-            {uniqueProcedure.map((n, i) => (
-              <div key={`p-${i}`} className="truncate text-[12px] font-semibold text-gray-900">
-                <span className="text-gray-700">Procedure:</span> {n}
-              </div>
-            ))}
-          </div>
-        ) : null}
-
-        {!uniqueAdvice.length && !uniqueProcedure.length ? (
-          <div className="text-[12px] text-gray-500">—</div>
-        ) : null}
+        {!hasAnyText ? <div className="text-[12px] text-gray-500">—</div> : null}
       </div>
     </div>
   );
@@ -197,9 +207,13 @@ export function ToothDetailsBlock({ toothDetails, className }: Props) {
   // If everything is empty, show nothing
   const anyContent = blocks.some((b) => {
     const hasAnyTeeth = b.items.some((d) => ((d as any).toothNumbers?.length ?? 0) > 0);
+
+    const hasAnyNotes = b.items.some((d) => !!(d as any).notes);
+    const hasAnyDiagnosis = b.items.some((d) => !!(d as any).diagnosis);
     const hasAnyAdvice = b.items.some((d) => !!(d as any).advice);
     const hasAnyProcedure = b.items.some((d) => !!(d as any).procedure);
-    return hasAnyTeeth || hasAnyAdvice || hasAnyProcedure;
+
+    return hasAnyTeeth || hasAnyNotes || hasAnyDiagnosis || hasAnyAdvice || hasAnyProcedure;
   });
 
   if (!anyContent) return null;
@@ -207,7 +221,7 @@ export function ToothDetailsBlock({ toothDetails, className }: Props) {
   return (
     <div className={className ?? ''}>
       <div className="space-y-3">
-        {blocks.map((b, idx) => (
+        {blocks.map((b) => (
           <div key={b.id}>
             <SingleBlockView items={b.items} />
           </div>

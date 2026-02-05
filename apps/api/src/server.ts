@@ -1,3 +1,4 @@
+// apps\api\src\server.ts
 import express from 'express';
 import cookieParser from 'cookie-parser';
 import { randomUUID } from 'node:crypto';
@@ -19,6 +20,8 @@ import doctorsRouter from './routes/doctors';
 import meRouter from './routes/me';
 import followupsRouter from './routes/followups';
 import adminUsersRouter from './routes/admin-users';
+import assistantsRouter from './routes/assistants'; // ✅ ADD
+import estimationsRouter from './routes/estimations';
 
 import { authMiddleware, requireRole } from './middlewares/auth';
 import { genericSensitiveRateLimiter } from './middlewares/rateLimit';
@@ -32,15 +35,12 @@ const env = parseEnv(process.env);
 export const createApp = () => {
   const app = express();
 
-  // If CloudFront / Router adds proxy headers, keep this.
   app.set('trust proxy', 1);
 
-  // Global middleware (applies to both / and /api)
   app.use(createSecurityMiddleware(env));
   app.use(express.json({ limit: '1mb' }));
   app.use(cookieParser());
 
-  // Request logging
   app.use((req, res, next) => {
     const headerReqId = req.header('x-request-id');
     const reqId = headerReqId && headerReqId.trim().length > 0 ? headerReqId : randomUUID();
@@ -65,13 +65,6 @@ export const createApp = () => {
     next();
   });
 
-  /**
-   * IMPORTANT:
-   * Some setups forward requests to Lambda *with* "/api" still present (your case),
-   * while others strip it before reaching Express.
-   *
-   * So we mount the same router at BOTH "/" and "/api".
-   */
   const routes = express.Router();
 
   routes.get('/health', (_req, res) => {
@@ -195,13 +188,23 @@ export const createApp = () => {
     followupsRouter,
   );
 
+  routes.use(
+    '/patients',
+    authMiddleware,
+    genericSensitiveRateLimiter,
+    requireRole('RECEPTION', 'DOCTOR', 'ADMIN'),
+    estimationsRouter,
+    patientRoutes,
+  );
+
+  // ✅ ADD: assistants endpoints (list/create/update/delete)
+  routes.use('/assistants', authMiddleware, genericSensitiveRateLimiter, assistantsRouter);
+
   routes.use('/qz', qzRoutes);
 
-  // Mount routes at BOTH base paths
   app.use(routes);
   app.use('/api', routes);
 
-  // Error handler last
   app.use(errorHandler);
 
   return app;

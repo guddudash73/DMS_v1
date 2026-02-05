@@ -23,6 +23,7 @@ export const TokenPrintPayload = z.object({
     .string()
     .regex(/^\d{4}-\d{2}-\d{2}$/)
     .optional(),
+  patientAge: z.number().int().min(0).max(130).optional(),
   patientGender: PatientGender.optional(),
   isOffline: z.boolean().optional(),
 });

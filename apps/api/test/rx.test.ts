@@ -1,3 +1,4 @@
+// apps/api/test/rx.test.ts
 import { beforeAll, afterEach, describe, it, expect } from 'vitest';
 import request from 'supertest';
 import { createApp } from '../src/server';
@@ -84,7 +85,7 @@ async function findRxJsonUrlEndpoint(rxId: string) {
 }
 
 describe('Prescription API (Option 2: stable draft + single revision)', () => {
-  it('creates a first prescription version for a visit and persists metadata', async () => {
+  it('creates a first prescription version for a visit and persists metadata (incl. toothDetails notes/diagnosis)', async () => {
     const patientId = await createPatient('Rx Test Patient 1', '+910000000201');
     const visit = await createVisit(patientId, 'DOCTOR#RX1', 'Rx test visit 1');
 
@@ -93,6 +94,17 @@ describe('Prescription API (Option 2: stable draft + single revision)', () => {
       .set('Authorization', asDoctor())
       .send({
         lines: [{ medicine: 'Amoxicillin 500mg', dose: '500mg', frequency: 'BID', duration: 5 }],
+        toothDetails: [
+          {
+            blockId: 'td-1',
+            position: 'UR',
+            toothNumbers: ['12'],
+            notes: 'Patient reports intermittent sensitivity.',
+            diagnosis: 'Deep caries suspected.',
+            advice: 'Avoid cold drinks for 48 hours.',
+            procedure: 'RCT planned.',
+          },
+        ],
       })
       .expect(201);
 
@@ -102,10 +114,43 @@ describe('Prescription API (Option 2: stable draft + single revision)', () => {
 
     const rxId = createRes.body.rxId as string;
 
+    // ✅ repository persisted
     const meta = await prescriptionRepository.getById(rxId as any);
     expect(meta).not.toBeNull();
     expect(meta!.visitId).toBe(visit.visitId);
     expect(meta!.version).toBe(1);
+
+    expect(Array.isArray(meta!.toothDetails)).toBe(true);
+    expect(meta!.toothDetails!.length).toBe(1);
+    expect(meta!.toothDetails![0]).toMatchObject({
+      blockId: 'td-1',
+      position: 'UR',
+      toothNumbers: ['12'],
+      notes: 'Patient reports intermittent sensitivity.',
+      diagnosis: 'Deep caries suspected.',
+      advice: 'Avoid cold drinks for 48 hours.',
+      procedure: 'RCT planned.',
+    });
+
+    // ✅ GET endpoint returns the same fields
+    const getRes = await request(app)
+      .get(`/visits/${visit.visitId}/rx`)
+      .set('Authorization', asDoctor())
+      .expect(200);
+
+    expect(getRes.body).toHaveProperty('rx');
+    const rx = getRes.body.rx as Prescription | null;
+    expect(rx).not.toBeNull();
+
+    expect(rx!.toothDetails?.[0]).toMatchObject({
+      blockId: 'td-1',
+      position: 'UR',
+      toothNumbers: ['12'],
+      notes: 'Patient reports intermittent sensitivity.',
+      diagnosis: 'Deep caries suspected.',
+      advice: 'Avoid cold drinks for 48 hours.',
+      procedure: 'RCT planned.',
+    });
   });
 
   it('overwrites draft (v1) before DONE; creates exactly one revision (v2) after DONE', async () => {

@@ -25,6 +25,12 @@ type Props = {
   inputRef?: React.RefObject<HTMLInputElement | null>;
   triggerRef?: React.RefObject<HTMLButtonElement | null>;
   onEnterPicked?: () => void;
+
+  /**
+   * ✅ Optional: extra fields to send during quick-add (e.g. medicineType)
+   * This gets merged into the QuickAddMedicineInput.
+   */
+  quickAddPatch?: Partial<Omit<QuickAddMedicineInput, 'displayName'>>;
 };
 
 function LoadingRow({ label = 'Searching…' }: { label?: string }) {
@@ -45,6 +51,7 @@ export function MedicineCombobox({
   inputRef,
   triggerRef,
   onEnterPicked,
+  quickAddPatch,
 }: Props) {
   const [open, setOpen] = React.useState(false);
   const [query, setQuery] = React.useState(value);
@@ -64,27 +71,18 @@ export function MedicineCombobox({
   }, [open, query, triggerSearch]);
 
   const items = search.data?.items ?? [];
-
   const isSearching = Boolean(open && (search.isFetching || search.isLoading));
 
   const canQuickAdd =
     query.trim().length >= 2 && !items.some((i) => i.displayName === query.trim());
 
   const totalOptions = items.length + (canQuickAdd ? 1 : 0);
-
   const [activeIndex, setActiveIndex] = React.useState(0);
 
   React.useEffect(() => {
     if (!open) return;
 
-    if (items.length > 0) {
-      setActiveIndex(0);
-      return;
-    }
-    if (canQuickAdd) {
-      setActiveIndex(0);
-      return;
-    }
+    // reset selection when results change
     setActiveIndex(0);
   }, [open, items.length, canQuickAdd, query]);
 
@@ -92,7 +90,11 @@ export function MedicineCombobox({
     const trimmed = query.trim();
     if (trimmed.length < 2) return;
 
-    const payload: QuickAddMedicineInput = { displayName: trimmed };
+    const payload: QuickAddMedicineInput = {
+      displayName: trimmed,
+      ...(quickAddPatch ?? {}),
+    };
+
     const created = await quickAdd(payload).unwrap();
     onPick(created);
     setOpen(false);
@@ -115,9 +117,7 @@ export function MedicineCombobox({
       return;
     }
 
-    if (canQuickAdd) {
-      void doQuickAdd();
-    }
+    if (canQuickAdd) void doQuickAdd();
   };
 
   const moveActive = (delta: number) => {
@@ -186,7 +186,6 @@ export function MedicineCombobox({
           <CommandList>
             {isSearching ? (
               <CommandGroup heading="Searching">
-                {/* Using a plain div keeps it simple and reliable inside shadcn CommandList */}
                 <LoadingRow label="Fetching medicines…" />
               </CommandGroup>
             ) : null}

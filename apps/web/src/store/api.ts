@@ -32,7 +32,6 @@ import type {
   AdminRxPresetListResponse,
   AdminRxPresetSearchQuery,
   MedicinePreset,
-  MedicineForm,
   AdminUserListItem,
   AdminCreateUserRequest,
   AdminUpdateUserRequest,
@@ -48,6 +47,13 @@ import type {
   RecentCompletedResponse,
   ToothDetail,
   PatientUpdate,
+  Assistant,
+  AssistantsListResponse,
+  AssistantCreate,
+  AssistantUpdate,
+  Estimation,
+  EstimationCreateRequest,
+  PatientEstimationsListResponse,
 } from '@dcm/types';
 
 import { createClinicQueueWebSocket, type RealtimeMessage } from '@/lib/realtime';
@@ -82,6 +88,7 @@ export const TAG_TYPES = [
   'Xrays',
   'Medicines',
   'Rx',
+  'RxVersions',
   'Visit',
   'Billing',
 
@@ -98,6 +105,9 @@ export const TAG_TYPES = [
   'MedicinesCatalog',
   'RecentCompleted',
   'DailyPaymentsBreakdown',
+
+  'Assistants',
+  'Estimations',
 ] as const;
 
 export type AdminMedicinesStatus = 'PENDING' | 'VERIFIED';
@@ -314,7 +324,7 @@ const lastQueueInvalidateAt = new Map<string, number>();
 function invalidateQueueOnly(dispatch: AppDispatch, dateIso: string) {
   const now = Date.now();
   const prev = lastQueueInvalidateAt.get(dateIso) ?? 0;
-  if (now - prev < 200) return;
+  if (now - prev < 1000) return;
   lastQueueInvalidateAt.set(dateIso, now);
 
   dispatch(apiSlice.util.invalidateTags([{ type: 'ClinicQueue' as const, id: dateIso }]));
@@ -360,11 +370,22 @@ async function refreshAccessTokenShared(args: {
 }): Promise<string | null> {
   if (!refreshInFlight) {
     refreshInFlight = (async () => {
-      const refreshResult = await rawBaseQuery(
+      let refreshResult = await rawBaseQuery(
         { url: '/auth/refresh', method: 'POST' },
         { dispatch: args.dispatch, getState: args.getState } as any,
         {} as any,
       );
+
+      if (isFetchBaseQueryError(refreshResult.error) && refreshResult.error.status === 429) {
+        const ms = getRetryAfterMs(refreshResult.error) ?? 1500;
+        await sleep(ms);
+
+        refreshResult = await rawBaseQuery(
+          { url: '/auth/refresh', method: 'POST' },
+          { dispatch: args.dispatch, getState: args.getState } as any,
+          {} as any,
+        );
+      }
 
       if (refreshResult.data) {
         args.dispatch(setTokensFromRefresh(refreshResult.data as RefreshResponse));
@@ -863,12 +884,22 @@ export const apiSlice = createApi({
 
     updateVisitStatus: builder.mutation<
       Visit,
-      { visitId: string; status: 'IN_PROGRESS' | 'DONE'; date?: string }
+      {
+        visitId: string;
+        status: 'IN_PROGRESS' | 'DONE';
+        date?: string;
+
+        // ✅ allow optional assistant snapshot during status transition
+        assistantId?: string | null;
+      }
     >({
-      query: ({ visitId, status }) => ({
+      query: ({ visitId, status, assistantId }) => ({
         url: `/visits/${visitId}/status`,
         method: 'PATCH',
-        body: { status },
+        body: {
+          status,
+          ...(assistantId !== undefined ? { assistantId } : {}), // ✅ only send when provided
+        },
       }),
       invalidatesTags: (_result, _error, arg) => [
         { type: 'Visit' as const, id: arg.visitId },
@@ -1055,6 +1086,8 @@ export const apiSlice = createApi({
       providesTags: (_r, _e, arg) => [{ type: 'Medicines' as const, id: arg.query }],
     }),
 
+    // NOTE: backend returns full MedicinePreset; typing as MedicineTypeaheadItem is ok (narrower),
+    // since it includes the fields UI needs (incl. medicineType now).
     quickAddMedicine: builder.mutation<MedicineTypeaheadItem, QuickAddMedicineInput>({
       query: (body) => ({
         url: '/medicines/quick-add',
@@ -1086,7 +1119,9 @@ export const apiSlice = createApi({
         defaultDose?: string;
         defaultFrequency?: string;
         defaultDuration?: number;
-        form?: MedicineForm;
+
+        // ✅ new
+        medicineType?: string;
       }
     >({
       query: (body) => ({
@@ -1277,8 +1312,15 @@ export const apiSlice = createApi({
         method: 'GET',
         params: typeof version === 'number' ? { version } : undefined,
       }),
+
+      // ✅ ensures cache entries differ for different versions
+      serializeQueryArgs: ({ queryArgs }) => ({
+        visitId: queryArgs.visitId,
+        version: typeof queryArgs.version === 'number' ? queryArgs.version : 'latest',
+      }),
+
       providesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
-      keepUnusedDataFor: 60 * 10, // ✅ 10 mins
+      keepUnusedDataFor: 60 * 60,
     }),
 
     getVisitRxVersions: builder.query<{ versions: number[] }, { visitId: string }>({
@@ -1286,7 +1328,8 @@ export const apiSlice = createApi({
         url: `/visits/${visitId}/rx/versions`,
         method: 'GET',
       }),
-      providesTags: (_r, _e, arg) => [{ type: 'Rx' as const, id: arg.visitId }],
+      providesTags: (_r, _e, arg) => [{ type: 'RxVersions' as const, id: arg.visitId }],
+      keepUnusedDataFor: 60 * 60, // ✅ 1 hour (history screen should not spam)
     }),
 
     updateVisitRxReceptionNotes: builder.mutation<
@@ -1543,6 +1586,137 @@ export const apiSlice = createApi({
         { type: 'Patients' as const, id: 'LIST' },
       ],
     }),
+
+    getAssistants: builder.query<AssistantsListResponse, void>({
+      query: () => ({
+        url: '/assistants',
+        method: 'GET',
+      }),
+      providesTags: (result) => [
+        ...(result?.items?.map((a) => ({ type: 'Assistants' as const, id: a.assistantId })) ?? []),
+        { type: 'Assistants' as const, id: 'LIST' },
+      ],
+      keepUnusedDataFor: 60 * 10,
+    }),
+
+    updateVisitAssistant: builder.mutation<
+      Visit,
+      { visitId: string; assistantId: string | null; date?: string }
+    >({
+      query: ({ visitId, assistantId }) => ({
+        url: `/visits/${visitId}/assistant`,
+        method: 'PATCH',
+        body: { assistantId },
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: 'Visit' as const, id: arg.visitId },
+        { type: 'ClinicQueue' as const, id: arg.date ?? clinicDateISO(new Date()) },
+      ],
+    }),
+
+    createAssistant: builder.mutation<Assistant, AssistantCreate>({
+      query: (body) => ({
+        url: '/assistants',
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: [{ type: 'Assistants' as const, id: 'LIST' }],
+    }),
+
+    updateAssistant: builder.mutation<Assistant, { assistantId: string; patch: AssistantUpdate }>({
+      query: ({ assistantId, patch }) => ({
+        url: `/assistants/${assistantId}`,
+        method: 'PATCH',
+        body: patch,
+      }),
+      invalidatesTags: [{ type: 'Assistants' as const, id: 'LIST' }],
+    }),
+
+    deleteAssistant: builder.mutation<{ ok: true }, { assistantId: string }>({
+      query: ({ assistantId }) => ({
+        url: `/assistants/${assistantId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: [{ type: 'Assistants' as const, id: 'LIST' }],
+    }),
+
+    getPatientEstimations: builder.query<
+      PatientEstimationsListResponse,
+      { patientId: string; limit?: number; cursor?: string } | string
+    >({
+      query: (arg) => {
+        const patientId = typeof arg === 'string' ? arg : arg.patientId;
+        const limit = typeof arg === 'string' ? undefined : arg.limit;
+        const cursor = typeof arg === 'string' ? undefined : arg.cursor;
+
+        return {
+          url: `/patients/${patientId}/estimations`,
+          method: 'GET',
+          params: {
+            ...(typeof limit === 'number' ? { limit } : {}),
+            ...(cursor ? { cursor } : {}),
+          },
+        };
+      },
+      providesTags: (result, _e, arg) => {
+        const patientId = typeof arg === 'string' ? arg : arg.patientId;
+        return [
+          ...(result?.items?.map((e) => ({ type: 'Estimations' as const, id: e.estimationId })) ??
+            []),
+          { type: 'Estimations' as const, id: `PATIENT#${patientId}` },
+        ];
+      },
+      keepUnusedDataFor: 60 * 5,
+    }),
+
+    getEstimationById: builder.query<Estimation, { patientId: string; estimationId: string }>({
+      query: ({ patientId, estimationId }) => ({
+        url: `/patients/${patientId}/estimations/${estimationId}`,
+        method: 'GET',
+      }),
+      providesTags: (_r, _e, arg) => [{ type: 'Estimations' as const, id: arg.estimationId }],
+      keepUnusedDataFor: 60 * 10,
+    }),
+
+    createEstimation: builder.mutation<
+      Estimation,
+      { patientId: string; body: EstimationCreateRequest }
+    >({
+      query: ({ patientId, body }) => ({
+        url: `/patients/${patientId}/estimations`,
+        method: 'POST',
+        body,
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: 'Estimations' as const, id: `PATIENT#${arg.patientId}` },
+      ],
+    }),
+
+    updateEstimation: builder.mutation<
+      Estimation,
+      { patientId: string; estimationId: string; patch: Partial<EstimationCreateRequest> }
+    >({
+      query: ({ patientId, estimationId, patch }) => ({
+        url: `/patients/${patientId}/estimations/${estimationId}`,
+        method: 'PATCH',
+        body: patch,
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: 'Estimations' as const, id: arg.estimationId },
+        { type: 'Estimations' as const, id: `PATIENT#${arg.patientId}` },
+      ],
+    }),
+
+    deleteEstimation: builder.mutation<{ ok: true }, { patientId: string; estimationId: string }>({
+      query: ({ patientId, estimationId }) => ({
+        url: `/patients/${patientId}/estimations/${estimationId}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: (_r, _e, arg) => [
+        { type: 'Estimations' as const, id: arg.estimationId },
+        { type: 'Estimations' as const, id: `PATIENT#${arg.patientId}` },
+      ],
+    }),
   }),
 });
 
@@ -1638,6 +1812,18 @@ export const {
   useDoctorDeleteMedicineMutation,
   useAdminResetUserPasswordMutation,
   useGetRecentCompletedQuery,
+
+  useGetAssistantsQuery,
+  useCreateAssistantMutation,
+  useUpdateAssistantMutation,
+  useDeleteAssistantMutation,
+  useUpdateVisitAssistantMutation,
+
+  useGetPatientEstimationsQuery,
+  useGetEstimationByIdQuery,
+  useCreateEstimationMutation,
+  useUpdateEstimationMutation,
+  useDeleteEstimationMutation,
 } = apiSlice;
 
 export const api = apiSlice;

@@ -28,7 +28,9 @@ export const buildPrescriptionSummary = (lines: RxLineType[]): PrescriptionSumma
 
   for (const line of lines) {
     const key = line.medicine.trim().toLowerCase();
-    const duration = line.duration;
+
+    // ✅ duration now optional
+    const duration = line.duration ?? 0;
 
     if (!map.has(key)) {
       map.set(key, {

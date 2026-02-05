@@ -1,3 +1,4 @@
+// apps/api/src/repositories/visitRepository.ts
 import { randomUUID, createHash } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
@@ -98,20 +99,27 @@ function tagLabel(tag: VisitTag | undefined): string {
   return 'SDNEW';
 }
 
+/**
+ * ✅ OPD format update:
+ * Was: YY/MM/DD/...
+ * Now: DD/MM/YYYY/...
+ *
+ * visitDate is expected to be "YYYY-MM-DD".
+ */
 function formatOpdNo(
   visitDate: string,
   dailySeq: number,
   tag: VisitTag | undefined,
   tagSeq: number,
 ) {
-  const yy = visitDate.slice(2, 4);
+  const yyyy = visitDate.slice(0, 4);
   const mm = visitDate.slice(5, 7);
   const dd = visitDate.slice(8, 10);
 
   const a = String(dailySeq).padStart(3, '0');
   const b = String(tagSeq).padStart(3, '0');
 
-  return `${yy}/${mm}/${dd}/${a}/${tagLabel(tag)}/${b}`;
+  return `${dd}/${mm}/${yyyy}/${a}/${tagLabel(tag)}/${b}`;
 }
 
 export interface VisitRepository {
@@ -121,12 +129,32 @@ export interface VisitRepository {
   updateStatus(visitId: string, nextStatus: VisitStatus): Promise<Visit | null>;
   getPatientQueue(params: VisitQueueQuery): Promise<Visit[]>;
   listByDate(date: string): Promise<Visit[]>;
+
   setCurrentRxPointer(params: {
     visitId: string;
     patientId: string;
     rxId: string;
     version: number;
   }): Promise<void>;
+
+  setVisitAssistant(params: {
+    visitId: string;
+    assistantId: string | null;
+    assistantName: string | null;
+  }): Promise<Visit | null>;
+
+  /**
+   * ✅ NEW: Atomic update for status + assistant snapshot (all-or-nothing).
+   * - assistantId undefined => don't change assistant fields
+   * - assistantId null => clear assistant fields
+   * - assistantId string => set assistant fields (caller should validate)
+   */
+  updateStatusWithAssistant(params: {
+    visitId: string;
+    nextStatus: VisitStatus;
+    assistantId?: string | null;
+    assistantName?: string | null;
+  }): Promise<Visit | null>;
 }
 
 export class DynamoDBVisitRepository implements VisitRepository {
@@ -493,6 +521,153 @@ export class DynamoDBVisitRepository implements VisitRepository {
       // keep existing behavior: ignore contention, do not throw
       return;
     }
+  }
+
+  async setVisitAssistant(params: {
+    visitId: string;
+    assistantId: string | null;
+    assistantName: string | null;
+  }): Promise<Visit | null> {
+    const current = await this.getById(params.visitId);
+    if (!current) return null;
+
+    const now = Date.now();
+
+    const names = {
+      '#assistantId': 'assistantId',
+      '#assistantName': 'assistantName',
+      '#updatedAt': 'updatedAt',
+    };
+
+    const values: Record<string, unknown> = {
+      ':updatedAt': now,
+      ':assistantId': params.assistantId,
+      ':assistantName': params.assistantName,
+    };
+
+    const metaUpdate =
+      params.assistantId === null
+        ? 'REMOVE #assistantId, #assistantName SET #updatedAt = :updatedAt'
+        : 'SET #assistantId = :assistantId, #assistantName = :assistantName, #updatedAt = :updatedAt';
+
+    const { Attributes } = await docClient.send(
+      new UpdateCommand({
+        TableName: TABLE_NAME,
+        Key: buildVisitMetaKeys(params.visitId),
+        UpdateExpression: metaUpdate,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ConditionExpression: 'attribute_exists(PK)',
+        ReturnValues: 'ALL_NEW',
+      }),
+    );
+
+    await docClient.send(
+      new UpdateCommand({
+        TableName: TABLE_NAME,
+        Key: buildPatientVisitKeys(current.patientId, params.visitId),
+        UpdateExpression: metaUpdate,
+        ExpressionAttributeNames: names,
+        ExpressionAttributeValues: values,
+        ConditionExpression: 'attribute_exists(PK)',
+      }),
+    );
+
+    return (Attributes ?? null) as Visit | null;
+  }
+
+  async updateStatusWithAssistant(params: {
+    visitId: string;
+    nextStatus: VisitStatus;
+    assistantId?: string | null;
+    assistantName?: string | null;
+  }): Promise<Visit | null> {
+    const current = await this.getById(params.visitId);
+    if (!current) return null;
+
+    type VisitWithOffline = Visit & { isOffline?: boolean };
+    const isOffline = (current as VisitWithOffline).isOffline === true;
+
+    if (!this.isValidTransition(current.status, params.nextStatus, isOffline)) {
+      throw new InvalidStatusTransitionError(
+        `Invalid status transition ${current.status} -> ${params.nextStatus}`,
+      );
+    }
+
+    const now = Date.now();
+
+    const metaKey = buildVisitMetaKeys(params.visitId);
+    const patientKey = buildPatientVisitKeys(current.patientId, params.visitId);
+
+    const hasAssistantKey = Object.prototype.hasOwnProperty.call(params, 'assistantId');
+
+    const shouldClearAssistant = hasAssistantKey && params.assistantId === null;
+    const shouldSetAssistant = hasAssistantKey && typeof params.assistantId === 'string';
+
+    const names: Record<string, string> = {
+      '#status': 'status',
+      '#updatedAt': 'updatedAt',
+      ...(hasAssistantKey
+        ? {
+            '#assistantId': 'assistantId',
+            '#assistantName': 'assistantName',
+          }
+        : {}),
+    };
+
+    const values: Record<string, unknown> = {
+      ':status': params.nextStatus,
+      ':now': now,
+      ':expectedStatus': current.status,
+      ...(shouldSetAssistant
+        ? {
+            ':assistantId': params.assistantId,
+            ':assistantName': params.assistantName ?? null,
+          }
+        : {}),
+    };
+
+    let metaUpdate = 'SET #status = :status, #updatedAt = :now';
+    let patientUpdate = 'SET #status = :status, #updatedAt = :now';
+
+    if (shouldClearAssistant) {
+      metaUpdate = `${metaUpdate} REMOVE #assistantId, #assistantName`;
+      patientUpdate = `${patientUpdate} REMOVE #assistantId, #assistantName`;
+    } else if (shouldSetAssistant) {
+      metaUpdate =
+        'SET #status = :status, #assistantId = :assistantId, #assistantName = :assistantName, #updatedAt = :now';
+      patientUpdate =
+        'SET #status = :status, #assistantId = :assistantId, #assistantName = :assistantName, #updatedAt = :now';
+    }
+
+    await docClient.send(
+      new TransactWriteCommand({
+        TransactItems: [
+          {
+            Update: {
+              TableName: TABLE_NAME,
+              Key: metaKey,
+              UpdateExpression: metaUpdate,
+              ExpressionAttributeNames: names,
+              ExpressionAttributeValues: values,
+              ConditionExpression: 'attribute_exists(PK) AND #status = :expectedStatus',
+            },
+          },
+          {
+            Update: {
+              TableName: TABLE_NAME,
+              Key: patientKey,
+              UpdateExpression: patientUpdate,
+              ExpressionAttributeNames: names,
+              ExpressionAttributeValues: values,
+              ConditionExpression: 'attribute_exists(PK) AND #status = :expectedStatus',
+            },
+          },
+        ],
+      }),
+    );
+
+    return await this.getById(params.visitId);
   }
 }
 

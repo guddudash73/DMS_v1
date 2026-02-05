@@ -1,3 +1,4 @@
+// apps/api/src/repositories/medicinePresetRepository.ts
 import { randomUUID } from 'node:crypto';
 import {
   DynamoDBDocumentClient,
@@ -74,6 +75,7 @@ const canDoctorMutate = (m: MedicinePreset, userId: string) =>
 
 export interface MedicinePresetRepository {
   search(params: { query?: string; limit: number }): Promise<MedicineTypeaheadItem[]>;
+
   quickAdd(params: {
     input: QuickAddMedicineInput;
     createdByUserId: string;
@@ -98,12 +100,19 @@ export interface MedicinePresetRepository {
   adminList(
     params: AdminMedicineSearchQuery,
   ): Promise<{ items: MedicinePreset[]; total: number; nextCursor: string | null }>;
+
   getById(id: string): Promise<MedicinePreset | null>;
+
   adminUpdate(id: string, patch: AdminUpdateMedicineRequest): Promise<MedicinePreset | null>;
+
   adminDelete(id: string): Promise<boolean>;
 }
 
 export class DynamoDBMedicinePresetRepository implements MedicinePresetRepository {
+  /**
+   * ✅ Used by prescription medicine combobox/typeahead
+   * Must include defaults so the frontend can auto-populate fields on selection.
+   */
   async search(params: { query?: string; limit: number }): Promise<MedicineTypeaheadItem[]> {
     const { query, limit } = params;
 
@@ -138,9 +147,10 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     return parsed.map((p) => ({
       id: p.id,
       displayName: p.displayName,
+      defaultDose: p.defaultDose,
       defaultFrequency: p.defaultFrequency,
       defaultDuration: p.defaultDuration,
-      form: p.form,
+      medicineType: p.medicineType,
     }));
   }
 
@@ -165,6 +175,7 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
       exprValues[':skPrefix'] = `NAME#${normalizedQuery}`;
     }
 
+    // Viewer can see: verified OR createdByMe
     const filterExpression = 'verified = :verifiedTrue OR createdByUserId = :me';
 
     const { Items, LastEvaluatedKey } = await docClient.send(
@@ -209,6 +220,7 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     if (status === 'VERIFIED') exprValues[':verified'] = true;
     if (status === 'PENDING') exprValues[':verified'] = false;
 
+    // total count (paged)
     let total = 0;
     let countKey: DynamoCursor | undefined = undefined;
 
@@ -319,7 +331,7 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
         applyOptional('defaultDose', patch.defaultDose);
         applyOptional('defaultFrequency', patch.defaultFrequency);
         applyOptional('defaultDuration', patch.defaultDuration);
-        applyOptional('form', patch.form);
+        applyOptional('medicineType', patch.medicineType);
         applyOptional('tags', patch.tags);
         applyOptional('verified', patch.verified);
 
@@ -381,7 +393,7 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     applyOptional('defaultDose', patch.defaultDose);
     applyOptional('defaultFrequency', patch.defaultFrequency);
     applyOptional('defaultDuration', patch.defaultDuration);
-    applyOptional('form', patch.form);
+    applyOptional('medicineType', patch.medicineType);
     applyOptional('tags', patch.tags);
     applyOptional('verified', patch.verified);
 
@@ -481,7 +493,7 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
         applyOptional('defaultDose', patch.defaultDose);
         applyOptional('defaultFrequency', patch.defaultFrequency);
         applyOptional('defaultDuration', patch.defaultDuration);
-        applyOptional('form', patch.form);
+        applyOptional('medicineType', patch.medicineType);
 
         const newNameIndexItem = {
           ...buildMedicineNameIndexKey(newNormalized),
@@ -541,7 +553,7 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     applyOptional('defaultDose', patch.defaultDose);
     applyOptional('defaultFrequency', patch.defaultFrequency);
     applyOptional('defaultDuration', patch.defaultDuration);
-    applyOptional('form', patch.form);
+    applyOptional('medicineType', patch.medicineType);
 
     await docClient.send(
       new UpdateCommand({
@@ -628,7 +640,7 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
       defaultDose: input.defaultDose,
       defaultFrequency: input.defaultFrequency,
       defaultDuration: input.defaultDuration,
-      form: input.form,
+      medicineType: input.medicineType,
       tags: undefined,
       createdAt: now,
       createdByUserId,

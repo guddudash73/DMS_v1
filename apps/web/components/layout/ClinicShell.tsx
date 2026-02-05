@@ -63,6 +63,9 @@ const mainNav: NavItem[] = [
   { label: 'Daily Report', href: '/reports', icon: FileText },
   { label: 'WBC/Reminder Call', href: '/reminders', icon: Headphones },
   { label: 'Preset Print', href: '/preset-print', icon: Printer },
+
+  // ✅ NEW: Assistants
+  { label: 'Assistants', href: '/assistants', icon: Users },
 ];
 
 const moreNav: NavItem[] = [{ label: 'Settings', href: '/settings', icon: Settings }];
@@ -92,6 +95,10 @@ const deriveTitleFromPath = (pathname: string): string => {
   if (pathname.startsWith('/reports')) return 'Daily Report';
   if (pathname.startsWith('/reminders')) return 'WBC/Reminder Call';
   if (pathname.startsWith('/preset-print')) return 'Preset Print';
+
+  // ✅ NEW:
+  if (pathname.startsWith('/assistants')) return 'Assistants';
+
   if (pathname.startsWith('/settings')) return 'Settings';
   return 'Dashboard';
 };
@@ -325,10 +332,16 @@ export default function ClinicShell({ children }: ClinicShellProps) {
     if (next === 'ADMIN') router.replace('/admin');
   };
 
+  // ✅ NEW: filter nav items (Assistants is ADMIN-only)
   const nav: NavItem[] = [
-    ...mainNav.map((i) =>
-      i.href === '/patients/new' ? { ...i, onClick: () => setIsNewPatientOpen(true) } : i,
-    ),
+    ...mainNav
+      .filter((i) => {
+        if (i.href !== '/assistants') return true;
+        return auth.status === 'authenticated' && auth.role === 'ADMIN';
+      })
+      .map((i) =>
+        i.href === '/patients/new' ? { ...i, onClick: () => setIsNewPatientOpen(true) } : i,
+      ),
   ];
 
   return (
@@ -383,7 +396,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
             {dropdownOpen && (
               <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-2xl border bg-white shadow-lg">
                 <div ref={resultsContainerRef} className="max-h-64 overflow-y-auto rounded-2xl">
-                  {/* Show searching whenever current term is still fetching */}
                   {isSearching && patients.length === 0 && (
                     <div className="px-3 py-2 text-xs text-gray-500">Searching…</div>
                   )}
@@ -392,7 +404,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
                     <div className="px-3 py-2 text-xs text-red-600">{searchErrorMessage}</div>
                   )}
 
-                  {/* Only show empty-state AFTER the current term has settled */}
                   {!searchErrorMessage &&
                     !isSearching &&
                     patients.length === 0 &&
@@ -407,7 +418,6 @@ export default function ClinicShell({ children }: ClinicShellProps) {
                       </div>
                     )}
 
-                  {/* Helper text when user hasn’t typed anything */}
                   {!debouncedTerm && (
                     <div className="px-3 py-2 text-xs text-gray-500">
                       Type to search patients by phone or name.

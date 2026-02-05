@@ -1,7 +1,9 @@
 'use client';
 
+import * as React from 'react';
 import { useMemo, useRef, useState } from 'react';
 import type { RxLineType } from '@dcm/types';
+
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -13,21 +15,64 @@ import {
 } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Textarea } from '@/components/ui/textarea';
+
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import { cn } from '@/lib/utils';
+
 import { MedicineCombobox } from './MedicineCombobox';
-import { Plus, Trash2, Pencil } from 'lucide-react';
+import { Plus, Trash2, Pencil, Check, ChevronsUpDown } from 'lucide-react';
 
 type Props = {
   lines: RxLineType[];
   onChange: (next: RxLineType[]) => void;
 };
 
-type Frequency = RxLineType['frequency'];
+// ✅ FIX: predicate must narrow to NON-undefined
+type FrequencyValue = NonNullable<RxLineType['frequency']>;
 type TimingBackend = NonNullable<RxLineType['timing']>;
 type TimingUI = 'BE_MEAL' | 'AF_MEAL' | 'ANY';
 
-const FREQUENCY = ['QD', 'BID', 'TID', 'QID', 'HS', 'PRN'] as const satisfies readonly Frequency[];
-
+const FREQUENCY = [
+  'QD',
+  'BID',
+  'TID',
+  'QID',
+  'HS',
+  'PRN',
+] as const satisfies readonly FrequencyValue[];
 const TIMING_UI = ['BE_MEAL', 'AF_MEAL', 'ANY'] as const satisfies readonly TimingUI[];
+
+/**
+ * ✅ "medicineType" here = category/classification (not dosage form)
+ * Tune this list anytime.
+ */
+const COMMON_MEDICINE_TYPES = [
+  'Antibiotic',
+  'Painkiller',
+  'Paracetamol',
+  'Anti-inflammatory',
+  'Antacid',
+  'Antihistamine',
+  'Decongestant',
+  'Cough Suppressant',
+  'Expectorant',
+  'Bronchodilator',
+  'Steroid',
+  'Antifungal',
+  'Antiviral',
+  'Deworming',
+  'Antiseptic',
+  'Vitamin',
+  'Mouthwash',
+  'Local Anesthetic',
+] as const;
 
 const timingToUi = (t?: TimingBackend): TimingUI | undefined => {
   if (!t) return undefined;
@@ -43,7 +88,7 @@ const timingToBackend = (t?: TimingUI): TimingBackend | undefined => {
   return 'ANY';
 };
 
-function isFrequency(v: string): v is Frequency {
+function isFrequency(v: string): v is FrequencyValue {
   return (FREQUENCY as readonly string[]).includes(v);
 }
 function isTimingUi(v: string): v is TimingUI {
@@ -54,12 +99,145 @@ function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
 }
 
+function getString(v: unknown): string | undefined {
+  return typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined;
+}
+
+function getNumber(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+  if (typeof v === 'string' && v.trim().length > 0) {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+/**
+ * ✅ MedicineType combobox:
+ * - Dropdown of common categories
+ * - Search by typing
+ * - If not found, user can "Use <typed>"
+ */
+function MedicineTypeCombobox({
+  value,
+  onChange,
+  triggerRef,
+  placeholder = 'Type —',
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  triggerRef?: React.RefObject<HTMLButtonElement | null>;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState(value);
+
+  const display = value.trim();
+  const q = query.trim();
+  const qLower = q.toLowerCase();
+
+  const filtered = COMMON_MEDICINE_TYPES.filter((t) => t.toLowerCase().includes(qLower));
+
+  const exactMatch =
+    q.length > 0 ? COMMON_MEDICINE_TYPES.some((t) => t.toLowerCase() === qLower) : false;
+  const canUseTyped = q.length > 0 && !exactMatch;
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (nextOpen) setQuery(display);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          ref={triggerRef}
+          variant="outline"
+          role="combobox"
+          className="w-full justify-between rounded-xl cursor-pointer"
+        >
+          <span className={cn('truncate text-left', display ? 'text-gray-900' : 'text-gray-500')}>
+            {display || placeholder}
+          </span>
+          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command>
+          <CommandInput
+            placeholder="Search / type medicine type…"
+            value={query}
+            onValueChange={setQuery}
+          />
+          <CommandList>
+            <CommandEmpty>No matches.</CommandEmpty>
+
+            <CommandGroup heading="Common types">
+              {filtered.map((t) => (
+                <CommandItem
+                  key={t}
+                  value={t}
+                  onSelect={() => {
+                    onChange(t);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn('mr-2 h-4 w-4', display === t ? 'opacity-100' : 'opacity-0')}
+                  />
+                  <span className="truncate">{t}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+
+            {canUseTyped ? (
+              <CommandGroup heading="Use typed">
+                <CommandItem
+                  value={`use:${q}`}
+                  onSelect={() => {
+                    onChange(q);
+                    setOpen(false);
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Use “{q}”
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
+
+            {display ? (
+              <CommandGroup heading="Actions">
+                <CommandItem
+                  value="clear"
+                  onSelect={() => {
+                    onChange('');
+                    setOpen(false);
+                  }}
+                >
+                  Clear
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 export function MedicinesEditor({ lines, onChange }: Props) {
   const [medicine, setMedicine] = useState('');
-  const [dose, setDose] = useState('');
-  const [frequency, setFrequency] = useState<Frequency | undefined>(undefined);
-  const [durationDays, setDurationDays] = useState('');
+  const [medicineType, setMedicineType] = useState(''); // ✅ stored in RxLine now
+  const [dose, setDose] = useState(''); // optional
+  const [amountPerDose, setAmountPerDose] = useState(''); // ✅ NEW: "1 tab / 5ml / 2 tsp" etc.
+
+  // moved to 2nd row:
+  const [frequency, setFrequency] = useState<FrequencyValue | undefined>(undefined);
   const [timingUi, setTimingUi] = useState<TimingUI | undefined>(undefined);
+
+  const [durationDays, setDurationDays] = useState('');
 
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState('');
@@ -69,10 +247,14 @@ export function MedicinesEditor({ lines, onChange }: Props) {
 
   const medInputRef = useRef<HTMLInputElement | null>(null);
   const medTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const typeTriggerRef = useRef<HTMLButtonElement | null>(null);
+
   const doseRef = useRef<HTMLInputElement | null>(null);
+  const amountRef = useRef<HTMLInputElement | null>(null);
   const freqTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const durationRef = useRef<HTMLInputElement | null>(null);
   const timingTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const durationRef = useRef<HTMLInputElement | null>(null);
+
   const notesBtnRef = useRef<HTMLButtonElement | null>(null);
   const notesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const addBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -84,93 +266,119 @@ export function MedicinesEditor({ lines, onChange }: Props) {
   const applyMedicineDefaults = (picked: unknown) => {
     if (!isRecord(picked)) return;
 
-    const defaultsRaw = picked.defaults ?? picked.default ?? picked.presetDefaults;
+    const dd = getString((picked as any).defaultDose);
+    if (dd) setDose(dd);
+
+    const df = getString((picked as any).defaultFrequency);
+    if (df && isFrequency(df)) setFrequency(df);
+
+    const dur = getNumber((picked as any).defaultDuration);
+    if (typeof dur === 'number' && dur > 0) setDurationDays(String(Math.trunc(dur)));
+
+    const mt = getString((picked as any).medicineType);
+    if (mt) setMedicineType(mt);
+
+    // optional future default (won't break if absent)
+    const apd = getString((picked as any).defaultAmountPerDose);
+    if (apd) setAmountPerDose(apd);
+
+    // legacy nested defaults (fallback)
+    const defaultsRaw =
+      (picked as any).defaults ?? (picked as any).default ?? (picked as any).presetDefaults;
     if (!isRecord(defaultsRaw)) return;
 
     const d =
-      defaultsRaw.dose ??
-      defaultsRaw.doseText ??
-      defaultsRaw.dosage ??
-      defaultsRaw.strength ??
-      defaultsRaw.defaultDose;
+      (defaultsRaw as any).dose ??
+      (defaultsRaw as any).doseText ??
+      (defaultsRaw as any).dosage ??
+      (defaultsRaw as any).strength ??
+      (defaultsRaw as any).defaultDose;
+    const dStr = getString(d);
+    if (dStr) setDose(dStr);
 
-    if (typeof d === 'string' && d.trim()) setDose(d.trim());
+    const f =
+      (defaultsRaw as any).frequency ??
+      (defaultsRaw as any).freq ??
+      (defaultsRaw as any).defaultFrequency;
+    const fStr = getString(f);
+    if (fStr && isFrequency(fStr)) setFrequency(fStr);
 
-    const f = defaultsRaw.frequency ?? defaultsRaw.freq ?? defaultsRaw.defaultFrequency;
-    if (typeof f === 'string' && isFrequency(f)) setFrequency(f);
+    const legacyDur =
+      (defaultsRaw as any).duration ??
+      (defaultsRaw as any).dur ??
+      (defaultsRaw as any).days ??
+      (defaultsRaw as any).durationDays ??
+      (defaultsRaw as any).defaultDuration;
+    const legacyDurNum = getNumber(legacyDur);
+    if (typeof legacyDurNum === 'number' && legacyDurNum > 0)
+      setDurationDays(String(Math.trunc(legacyDurNum)));
 
-    const dur =
-      defaultsRaw.duration ??
-      defaultsRaw.dur ??
-      defaultsRaw.days ??
-      defaultsRaw.durationDays ??
-      defaultsRaw.defaultDuration;
-
-    if (typeof dur === 'number' && Number.isFinite(dur) && dur > 0) setDurationDays(String(dur));
-    if (typeof dur === 'string' && dur.trim() && Number.isFinite(Number(dur))) {
-      const n = Number(dur);
-      if (n > 0) setDurationDays(String(n));
+    const t =
+      (defaultsRaw as any).timing ??
+      (defaultsRaw as any).time ??
+      (defaultsRaw as any).defaultTiming;
+    const tStr = getString(t);
+    if (tStr) {
+      if (tStr === 'BEFORE_MEAL') setTimingUi('BE_MEAL');
+      else if (tStr === 'AFTER_MEAL') setTimingUi('AF_MEAL');
+      else if (tStr === 'ANY') setTimingUi('ANY');
     }
 
-    const t = defaultsRaw.timing ?? defaultsRaw.time ?? defaultsRaw.defaultTiming;
-    if (typeof t === 'string') {
-      if (t === 'BEFORE_MEAL') setTimingUi('BE_MEAL');
-      else if (t === 'AFTER_MEAL') setTimingUi('AF_MEAL');
-      else if (t === 'ANY') setTimingUi('ANY');
-    }
-
-    const n = defaultsRaw.notes ?? defaultsRaw.note;
-    if (typeof n === 'string' && n.trim()) {
-      setNotes(n.trim());
+    const n = (defaultsRaw as any).notes ?? (defaultsRaw as any).note;
+    const nStr = getString(n);
+    if (nStr) {
+      setNotes(nStr);
       setNotesOpen(true);
     }
   };
 
-  const canAdd = useMemo(() => {
-    if (!medicine.trim()) return false;
-    if (!dose.trim()) return false;
-    if (!frequency) return false;
-    const d = Number(durationDays);
-    if (!Number.isFinite(d) || d < 1) return false;
-    return true;
-  }, [medicine, dose, frequency, durationDays]);
+  // ✅ only medicine required
+  const canAdd = useMemo(() => medicine.trim().length > 0, [medicine]);
 
   const add = () => {
     const med = medicine.trim();
-    const d = dose.trim();
-    const freq = frequency;
-    const durNum = Number(durationDays);
-
     if (!med) return;
-    if (!d) return;
-    if (!freq) return;
-    if (!Number.isFinite(durNum) || durNum < 1) return;
 
+    const mt = medicineType.trim();
+    const d = dose.trim();
+    const apd = amountPerDose.trim();
+
+    const freq = frequency;
     const timing = timingToBackend(timingUi);
+
+    const durTrim = durationDays.trim();
+    const durNum = durTrim ? Number(durTrim) : undefined;
+    const duration =
+      typeof durNum === 'number' && Number.isFinite(durNum) && durNum > 0
+        ? Math.trunc(durNum)
+        : undefined;
+
+    const n = notes.trim();
 
     const next: RxLineType = {
       medicine: med,
-      dose: d,
-      frequency: freq,
-      duration: durNum,
+      ...(mt ? { medicineType: mt } : {}),
+      ...(d ? { dose: d } : {}),
+      ...(apd ? { amountPerDose: apd } : {}),
+      ...(freq ? { frequency: freq } : {}),
+      ...(duration ? { duration } : {}),
       ...(timing ? { timing } : {}),
-      ...(notes.trim() ? { notes: notes.trim() } : {}),
+      ...(n ? { notes: n } : {}),
     };
 
     onChange([...lines, next]);
 
     setMedicine('');
+    setMedicineType('');
     setDose('');
+    setAmountPerDose('');
     setFrequency(undefined);
-    setDurationDays('');
     setTimingUi(undefined);
-
+    setDurationDays('');
     setNotes('');
     setNotesOpen(false);
 
-    requestAnimationFrame(() => {
-      medTriggerRef.current?.focus();
-    });
+    requestAnimationFrame(() => medTriggerRef.current?.focus());
   };
 
   const remove = (idx: number) => {
@@ -184,25 +392,26 @@ export function MedicinesEditor({ lines, onChange }: Props) {
   };
 
   const edit = (idx: number) => {
-    const row = lines[idx];
-    setMedicine(row.medicine ?? '');
-    setDose(row.dose ?? '');
-    setFrequency(row.frequency);
-    setDurationDays(String(row.duration ?? ''));
-    setTimingUi(timingToUi(row.timing ?? undefined));
-    setNotes(row.notes ?? '');
-    setNotesOpen(Boolean(row.notes?.trim()));
-    remove(idx);
+    const row = lines[idx] as any;
+    setMedicine(row?.medicine ?? '');
+    setMedicineType(row?.medicineType ?? '');
+    setDose(row?.dose ?? '');
+    setAmountPerDose(row?.amountPerDose ?? '');
 
-    requestAnimationFrame(() => {
-      medTriggerRef.current?.focus();
-    });
+    setFrequency(row?.frequency ?? undefined);
+    setDurationDays(typeof row?.duration === 'number' ? String(row.duration) : '');
+    setTimingUi(timingToUi(row?.timing ?? undefined));
+    setNotes(row?.notes ?? '');
+    setNotesOpen(Boolean(row?.notes?.trim()));
+
+    remove(idx);
+    requestAnimationFrame(() => medTriggerRef.current?.focus());
   };
 
   const saveRowNotes = () => {
     if (rowNotesIndex == null) return;
 
-    const next = lines.slice();
+    const next = lines.slice() as any[];
     const trimmed = rowNotesDraft.trim();
 
     next[rowNotesIndex] = {
@@ -210,7 +419,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
       ...(trimmed ? { notes: trimmed } : { notes: undefined }),
     };
 
-    onChange(next);
+    onChange(next as RxLineType[]);
     setRowNotesIndex(null);
     setRowNotesDraft('');
   };
@@ -227,37 +436,76 @@ export function MedicinesEditor({ lines, onChange }: Props) {
 
   const shouldScroll = lines.length > 4;
 
-  const timingLabel = (t?: TimingBackend) => {
-    const ui = timingToUi(t);
-    return ui ?? '—';
-  };
+  const timingLabel = (t?: TimingBackend) => timingToUi(t) ?? '—';
+  const freqLabel = (f?: RxLineType['frequency']) => f ?? '—';
+  const durLabel = (d?: number) => (typeof d === 'number' ? String(d) : '—');
+  const typeLabel = (t?: string) => (t && t.trim() ? t.trim() : '—');
+  const amountLabel = (a?: string) => (a && a.trim() ? a.trim() : '—');
 
   return (
-    <div className=" w-full overflow-hidden rounded-xl border bg-white">
+    <div className="w-full overflow-hidden rounded-xl border bg-white">
       <div className="border-b bg-white px-3 py-3">
+        {/* ROW 1: Medicine + Type + Duration + Notes + Add */}
         <div className="flex items-center gap-2">
           <div className="w-[25%]">
             <MedicineCombobox
               value={medicine}
-              onPick={(m) => {
-                setMedicine(m.displayName);
-
-                applyMedicineDefaults(m);
-
-                if (m.defaultFrequency && isFrequency(m.defaultFrequency)) {
-                  setFrequency(m.defaultFrequency);
-                }
-
-                if (typeof m.defaultDuration === 'number') {
-                  setDurationDays(String(m.defaultDuration));
-                }
-
-                goNext(doseRef.current);
-              }}
               placeholder="Medicine name"
               inputRef={medInputRef}
               triggerRef={medTriggerRef}
-              onEnterPicked={() => goNext(doseRef.current)}
+              onPick={(m: any) => {
+                setMedicine(m.displayName);
+
+                if (typeof m.medicineType === 'string' && m.medicineType.trim()) {
+                  setMedicineType(m.medicineType.trim());
+                }
+
+                applyMedicineDefaults(m);
+                goNext(typeTriggerRef.current);
+              }}
+              onEnterPicked={() => goNext(typeTriggerRef.current)}
+            />
+          </div>
+
+          <div className="w-[30%]">
+            <Input
+              ref={doseRef}
+              className="h-9 rounded-xl"
+              value={dose}
+              onChange={(e) => setDose(e.target.value)}
+              placeholder="Dose (optional)"
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                goNext(amountRef.current);
+              }}
+            />
+          </div>
+
+          <div className="w-[20%]">
+            <MedicineTypeCombobox
+              value={medicineType}
+              onChange={(next) => {
+                setMedicineType(next);
+                goNext(durationRef.current);
+              }}
+              triggerRef={typeTriggerRef}
+              placeholder="Type —"
+            />
+          </div>
+
+          <div className="w-[20%]">
+            <Input
+              ref={amountRef}
+              className="h-9 rounded-xl"
+              value={amountPerDose}
+              onChange={(e) => setAmountPerDose(e.target.value)}
+              placeholder="Qty/Time (e.g., 1 tab)"
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                goNext(freqTriggerRef.current);
+              }}
             />
           </div>
 
@@ -266,7 +514,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
               value={frequency ?? ''}
               onValueChange={(v) => {
                 setFrequency(isFrequency(v) ? v : undefined);
-                goNext(durationRef.current);
+                goNext(timingTriggerRef.current);
               }}
             >
               <SelectTrigger
@@ -274,10 +522,8 @@ export function MedicinesEditor({ lines, onChange }: Props) {
                 className="h-10 rounded-xl w-full cursor-pointer"
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter') return;
-                  if (frequency) {
-                    e.preventDefault();
-                    goNext(durationRef.current);
-                  }
+                  e.preventDefault();
+                  goNext(timingTriggerRef.current);
                 }}
               >
                 <SelectValue placeholder="Freq" />
@@ -291,8 +537,11 @@ export function MedicinesEditor({ lines, onChange }: Props) {
               </SelectContent>
             </Select>
           </div>
+        </div>
 
-          <div className="w-[16.666%]">
+        {/* ROW 2: Dose + Qty/Time + Freq + Timing */}
+        <div className="mt-2 flex items-center gap-2">
+          <div className="w-[20.666%]">
             <Input
               ref={durationRef}
               className="h-9 rounded-xl"
@@ -303,17 +552,16 @@ export function MedicinesEditor({ lines, onChange }: Props) {
               onKeyDown={(e) => {
                 if (e.key !== 'Enter') return;
                 e.preventDefault();
-                goNext(timingTriggerRef.current);
+                goNext(notesBtnRef.current);
               }}
             />
           </div>
 
-          <div className="w-[16.666%] pl-1">
+          <div className="w-[16.666%]">
             <Select
               value={timingUi ?? ''}
               onValueChange={(v) => {
                 setTimingUi(isTimingUi(v) ? v : undefined);
-                goNext(notesBtnRef.current);
               }}
             >
               <SelectTrigger
@@ -321,10 +569,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
                 className="h-10 rounded-xl cursor-pointer"
                 onKeyDown={(e) => {
                   if (e.key !== 'Enter') return;
-                  if (timingUi) {
-                    e.preventDefault();
-                    goNext(notesBtnRef.current);
-                  }
+                  e.preventDefault();
                 }}
               >
                 <SelectValue placeholder="Timing" />
@@ -339,7 +584,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
             </Select>
           </div>
 
-          <div className="w-[16.666%] pl-2">
+          <div className="w-[16.666%]">
             <Popover
               open={notesOpen}
               onOpenChange={(open) => {
@@ -400,12 +645,12 @@ export function MedicinesEditor({ lines, onChange }: Props) {
             </Popover>
           </div>
 
-          <div className="w-[8.333%] pr-4">
+          <div className="w-full">
             <div className="flex justify-end">
               <Button
                 ref={addBtnRef}
                 type="button"
-                className="h-10 w-10 rounded-xl cursor-pointer"
+                className="h-10 w-34 rounded-xl cursor-pointer"
                 disabled={!canAdd}
                 onClick={add}
                 aria-label="Add medicine"
@@ -416,39 +661,26 @@ export function MedicinesEditor({ lines, onChange }: Props) {
                 }}
               >
                 <Plus className="h-5 w-5" />
+                <div>Add Medicine</div>
               </Button>
             </div>
           </div>
         </div>
-
-        <div className="mt-2 flex items-center gap-2">
-          <div className="w-[24%]">
-            <Input
-              ref={doseRef}
-              className="h-9 rounded-xl"
-              value={dose}
-              onChange={(e) => setDose(e.target.value)}
-              placeholder="Dose"
-              onKeyDown={(e) => {
-                if (e.key !== 'Enter') return;
-                e.preventDefault();
-                goNext(freqTriggerRef.current);
-              }}
-            />
-          </div>
-          <div className="flex-1" />
-        </div>
       </div>
 
+      {/* HEADER */}
       <div className="flex items-center gap-2 border-b bg-gray-50 px-3 py-2 text-[11px] font-semibold text-gray-600">
-        <div className="w-[25%]">Medicine</div>
-        <div className="w-[16.666%]">Frequency</div>
-        <div className="w-[16.666%]">Duration</div>
-        <div className="w-[16.666%] pl-2">Timing</div>
-        <div className="w-[16.666%] pl-5">Notes</div>
-        <div className="w-[8.333%]">Actions</div>
+        <div className="w-[22%]">Medicine</div>
+        <div className="w-[14%]">Type</div>
+        <div className="w-[12%]">Qty/Time</div>
+        <div className="w-[14%]">Frequency</div>
+        <div className="w-[12%]">Duration</div>
+        <div className="w-[12%] pl-2">Timing</div>
+        <div className="w-[14%] pl-5">Notes</div>
+        <div className="w-[8%]">Actions</div>
       </div>
 
+      {/* LIST */}
       <div
         className={[
           'divide-y',
@@ -459,18 +691,24 @@ export function MedicinesEditor({ lines, onChange }: Props) {
         {lines.length === 0 ? (
           <div className="px-3 py-6 text-sm text-gray-500">No medicines added yet.</div>
         ) : (
-          lines.map((l, idx) => (
+          lines.map((l: any, idx) => (
             <div key={idx} className="flex items-start gap-2 px-3 py-1 text-sm">
-              <div className="w-[25%]">
+              <div className="w-[22%]">
                 <div className="font-medium text-gray-900">{l.medicine}</div>
-                <div className="text-[12px] text-gray-500">{l.dose}</div>
+                {l.dose ? <div className="text-[12px] text-gray-500">{l.dose}</div> : null}
               </div>
 
-              <div className="w-[16.666%] pl-3 text-gray-800">{l.frequency}</div>
-              <div className="w-[16.666%] text-gray- pl-3">{l.duration}</div>
-              <div className="w-[16.666%] pl-2 text-gray-800">{timingLabel(l.timing)}</div>
+              <div className="w-[14%] text-gray-800">{typeLabel(l.medicineType)}</div>
 
-              <div className="w-[16.666%]">
+              <div className="w-[12%] text-gray-800">{amountLabel(l.amountPerDose)}</div>
+
+              <div className="w-[14%] pl-1 text-gray-800">{freqLabel(l.frequency)}</div>
+
+              <div className="w-[12%] pl-1 text-gray-800">{durLabel(l.duration)}</div>
+
+              <div className="w-[12%] pl-2 text-gray-800">{timingLabel(l.timing)}</div>
+
+              <div className="w-[14%]">
                 <Popover
                   open={rowNotesIndex === idx}
                   onOpenChange={(open) => {
@@ -489,7 +727,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
                       variant="link"
                       className="h-auto p-0 pl-6 text-xs font-semibold text-gray-800 underline decoration-gray-200 underline-offset-2 hover:decoration-gray-400"
                     >
-                      View
+                      {l.notes?.trim() ? 'View' : 'Add'}
                     </Button>
                   </PopoverTrigger>
 
@@ -525,7 +763,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
                 </Popover>
               </div>
 
-              <div className="w-[8.333%]">
+              <div className="w-[8%]">
                 <div className="flex justify-end">
                   <Button
                     type="button"

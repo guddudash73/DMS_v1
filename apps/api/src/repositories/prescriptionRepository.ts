@@ -5,6 +5,7 @@ import {
   QueryCommand,
   TransactWriteCommand,
 } from '@aws-sdk/lib-dynamodb';
+import { z } from 'zod';
 import { dynamoClient, TABLE_NAME } from '../config/aws';
 import {
   Prescription as PrescriptionSchema,
@@ -12,6 +13,7 @@ import {
   type Prescription,
   type RxId,
   type RxLineType,
+  ToothDetail,
 } from '@dcm/types';
 
 const docClient = DynamoDBDocumentClient.from(dynamoClient, {
@@ -42,6 +44,84 @@ const getNumberProp = (v: unknown, key: string): number | undefined =>
   isObject(v) && typeof v[key] === 'number' ? (v[key] as number) : undefined;
 
 const rxIdFor = (visitId: string, version: 1 | 2) => `${visitId}#v${version}` as RxId;
+
+/**
+ * ✅ Allow toothDetails without position/toothNumbers (per latest types),
+ * but prevent saving a completely empty tooth detail object.
+ */
+const ToothDetailLoose = ToothDetail.superRefine((d, ctx) => {
+  const hasToothNumbers = (d.toothNumbers?.length ?? 0) > 0;
+  const hasText =
+    !!d.notes?.trim() || !!d.diagnosis?.trim() || !!d.advice?.trim() || !!d.procedure?.trim();
+
+  if (!hasToothNumbers && !hasText) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Tooth detail must include tooth numbers or notes/diagnosis/advice/procedure.',
+      path: ['toothNumbers'],
+    });
+  }
+});
+
+const ToothDetailsArrayLoose = z.array(ToothDetailLoose);
+
+function normalizeToothDetails(
+  input: Prescription['toothDetails'] | undefined,
+): Prescription['toothDetails'] | undefined {
+  if (input === undefined) return undefined;
+  if (!Array.isArray(input)) return undefined;
+
+  // Normalize + drop fully-empty rows (and trim strings)
+  const cleaned = input
+    .map((raw) => {
+      const d: any = raw ?? {};
+
+      const toothNumbers = Array.isArray(d.toothNumbers)
+        ? d.toothNumbers.map((x: any) => String(x).trim()).filter(Boolean)
+        : undefined;
+
+      const notes = typeof d.notes === 'string' ? d.notes.trim() : undefined;
+      const diagnosis = typeof d.diagnosis === 'string' ? d.diagnosis.trim() : undefined;
+      const advice = typeof d.advice === 'string' ? d.advice.trim() : undefined;
+      const procedure = typeof d.procedure === 'string' ? d.procedure.trim() : undefined;
+
+      // position is optional now, but if provided, keep it
+      const position = typeof d.position === 'string' && d.position.trim() ? d.position : undefined;
+
+      const blockId =
+        typeof d.blockId === 'string' && d.blockId.trim() ? d.blockId.trim() : undefined;
+
+      const hasToothNumbers = (toothNumbers?.length ?? 0) > 0;
+      const hasText = !!notes || !!diagnosis || !!advice || !!procedure;
+
+      if (!hasToothNumbers && !hasText) return null;
+
+      return {
+        ...(blockId ? { blockId } : {}),
+        ...(position ? { position } : {}),
+        ...(hasToothNumbers ? { toothNumbers } : {}),
+        ...(notes ? { notes } : {}),
+        ...(diagnosis ? { diagnosis } : {}),
+        ...(advice ? { advice } : {}),
+        ...(procedure ? { procedure } : {}),
+      } as any;
+    })
+    .filter(Boolean);
+
+  if (cleaned.length === 0) return [];
+
+  // Validate shape according to latest zod schema (+ our non-empty rule)
+  const parsed = ToothDetailsArrayLoose.safeParse(cleaned);
+  if (!parsed.success) {
+    // If you prefer hard-fail instead of silently dropping invalid rows,
+    // throw with details to surface bug quickly.
+    throw new Error(
+      `Invalid toothDetails payload: ${parsed.error.issues.map((i) => i.message).join(' | ')}`,
+    );
+  }
+
+  return parsed.data as any;
+}
 
 export interface PrescriptionRepository {
   upsertDraftForVisit(params: {
@@ -149,7 +229,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
   async getCurrentForVisit(visitId: string): Promise<Prescription | null> {
     const { currentRxId } = await this.getCurrentMetaForVisit(visitId);
     if (!currentRxId) return null;
-    return this.getById(currentRxId);
+    return this.getById(currentRxId as RxId);
   }
 
   async upsertDraftForVisit(params: {
@@ -157,17 +237,16 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     lines: RxLineType[];
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
-
-    // ✅ printable
     doctorNotes?: Prescription['doctorNotes'];
-
-    // ✅ non-printable
     doctorReceptionNotes?: Prescription['doctorReceptionNotes'];
   }): Promise<Prescription> {
-    const { visit, lines, jsonKey, toothDetails, doctorNotes, doctorReceptionNotes } = params;
+    const { visit, lines, jsonKey, doctorNotes, doctorReceptionNotes } = params;
 
     const rxId = rxIdFor(visit.visitId, 1);
     const existing = await this.getById(rxId);
+
+    // ✅ normalize tooth details (allow missing position/toothNumbers)
+    const toothDetails = normalizeToothDetails(params.toothDetails);
 
     if (existing) {
       const updated = await this.updateById({
@@ -191,14 +270,8 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
       version,
       jsonKey,
       ...(toothDetails !== undefined ? { toothDetails } : {}),
-
-      // ✅ printable
       ...(doctorNotes !== undefined ? { doctorNotes } : {}),
-
-      // ✅ non-printable
       ...(doctorReceptionNotes !== undefined ? { doctorReceptionNotes } : {}),
-
-      // receptionist printable notes remain separate
       receptionNotes: undefined,
       createdAt: now,
       updatedAt: now,
@@ -280,25 +353,21 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
 
     const v1 = await this.getById(rxIdFor(visit.visitId, 1));
 
+    // carry-forward: toothDetails is already in DB shape; still normalize defensively
+    const carriedToothDetails = normalizeToothDetails(v1?.toothDetails);
+
     const base: Prescription = {
       rxId,
       visitId: visit.visitId,
       lines: v1?.lines ?? [],
       version,
       jsonKey,
-      ...(v1?.toothDetails !== undefined ? { toothDetails: v1.toothDetails } : {}),
-
-      // ✅ printable carry-forward
+      ...(carriedToothDetails !== undefined ? { toothDetails: carriedToothDetails } : {}),
       ...(v1?.doctorNotes !== undefined ? { doctorNotes: v1.doctorNotes } : {}),
-
-      // ✅ non-printable carry-forward
       ...(v1?.doctorReceptionNotes !== undefined
         ? { doctorReceptionNotes: v1.doctorReceptionNotes }
         : {}),
-
-      // ✅ receptionist printable notes carry-forward (unchanged)
       receptionNotes: v1?.receptionNotes,
-
       createdAt: now,
       updatedAt: now,
     };
@@ -372,30 +441,29 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     lines: RxLineType[];
     jsonKey: string;
     toothDetails?: Prescription['toothDetails'];
-
-    // ✅ printable
     doctorNotes?: Prescription['doctorNotes'];
-
-    // ✅ non-printable
     doctorReceptionNotes?: Prescription['doctorReceptionNotes'];
   }): Promise<Prescription | null> {
-    const { rxId, lines, jsonKey, toothDetails, doctorNotes, doctorReceptionNotes } = params;
+    const { rxId, lines, jsonKey, doctorNotes, doctorReceptionNotes } = params;
 
     const existing = await this.getById(rxId);
     if (!existing) return null;
 
     const now = Date.now();
 
-    const hasToothDetails = toothDetails !== undefined;
+    const hasDoctorNotes = doctorNotes !== undefined;
+    const hasDoctorReceptionNotes = doctorReceptionNotes !== undefined;
 
-    const hasDoctorNotes = doctorNotes !== undefined; // printable
-    const hasDoctorReceptionNotes = doctorReceptionNotes !== undefined; // non-printable
+    // ✅ normalize toothDetails (and validate non-empty rows)
+    const normalizedToothDetails =
+      params.toothDetails !== undefined ? normalizeToothDetails(params.toothDetails) : undefined;
+    const hasToothDetails = params.toothDetails !== undefined;
 
     const next: Prescription = {
       ...existing,
       lines,
       jsonKey,
-      ...(hasToothDetails ? { toothDetails } : {}),
+      ...(hasToothDetails ? { toothDetails: normalizedToothDetails } : {}),
       ...(hasDoctorNotes ? { doctorNotes } : {}),
       ...(hasDoctorReceptionNotes ? { doctorReceptionNotes } : {}),
       updatedAt: now,
@@ -416,7 +484,7 @@ export class DynamoDBPrescriptionRepository implements PrescriptionRepository {
     if (hasToothDetails) {
       setParts.push('#toothDetails = :t');
       names['#toothDetails'] = 'toothDetails';
-      values[':t'] = toothDetails;
+      values[':t'] = normalizedToothDetails;
     }
 
     if (hasDoctorNotes) {

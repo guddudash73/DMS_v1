@@ -1,6 +1,6 @@
 import express, { type Request, type Response, type NextFunction } from 'express';
 import { z } from 'zod';
-import { RxId } from '@dcm/types';
+import { RxId, RxLine, ToothDetail } from '@dcm/types';
 import { prescriptionRepository } from '../repositories/prescriptionRepository';
 import { getEnv } from '../config/env';
 import { getPresignedDownloadUrl } from '../lib/s3';
@@ -8,7 +8,6 @@ import { visitRepository } from '../repositories/visitRepository';
 import { patientRepository } from '../repositories/patientRepository';
 import { sendZodValidationError } from '../lib/validation';
 import { logError } from '../lib/logger';
-import { RxLine, ToothDetail } from '@dcm/types';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { s3Client } from '../config/aws';
 import { requireRole } from '../middlewares/auth';
@@ -40,11 +39,33 @@ async function withRetry<T>(fn: () => Promise<T>, attempts = 3, delayMs = 100): 
 const RxIdParam = z.object({ rxId: RxId });
 type RxIdParam = z.infer<typeof RxIdParam>;
 
+/**
+ * ✅ Tooth position + tooth numbers are now optional in the backend schema.
+ * We also ensure each tooth detail is not “empty”: it must include either
+ * toothNumbers OR at least one text field (notes/diagnosis/advice/procedure).
+ */
+const ToothDetailLoose = ToothDetail.superRefine((d, ctx) => {
+  const hasToothNumbers = (d.toothNumbers?.length ?? 0) > 0;
+  const hasText =
+    !!d.notes?.trim() || !!d.diagnosis?.trim() || !!d.advice?.trim() || !!d.procedure?.trim();
+
+  if (!hasToothNumbers && !hasText) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: 'Tooth detail must include tooth numbers or notes/diagnosis/advice/procedure.',
+      path: ['toothNumbers'],
+    });
+  }
+});
+
 const RxUpdateBody = z
   .object({
     lines: z.array(RxLine).optional(),
     jsonKey: z.string().min(1).optional(),
-    toothDetails: z.array(ToothDetail).optional(),
+
+    // ✅ updated: use the refined schema that allows position & toothNumbers to be optional
+    toothDetails: z.array(ToothDetailLoose).optional(),
+
     doctorNotes: z.string().max(2000).optional(),
   })
   .superRefine((val, ctx) => {

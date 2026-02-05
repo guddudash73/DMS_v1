@@ -1,3 +1,4 @@
+// apps/web/app/(clinic)/visits/[visitId]/checkout/printing/prescription/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -7,7 +8,6 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
 import { PrescriptionPreview } from '@/components/prescription/PrescriptionPreview';
-import { PrescriptionPrintSheet } from '@/components/prescription/PrescriptionPrintSheet';
 
 import type { ToothDetail, Visit } from '@dcm/types';
 
@@ -20,6 +20,7 @@ import {
 } from '@/src/store/api';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
+type PageKind = 'ODD' | 'EVEN';
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
@@ -53,9 +54,6 @@ function toLocalISODate(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-/* ------------------------------------------------------------------ */
-/* backend-aligned: DOB preferred; fallback to stored age              */
-/* ------------------------------------------------------------------ */
 function safeParseDobToDate(dob: unknown): Date | null {
   if (!dob) return null;
 
@@ -113,26 +111,82 @@ function looksLikeDoctorIdLabel(name?: string) {
   return false;
 }
 
+/**
+ * ✅ Updated for new backend rules:
+ * - position is optional
+ * - toothNumbers is optional
+ * - allow notes/diagnosis/advice/procedure only blocks (no tooth numbers)
+ */
 function isToothDetail(v: unknown): v is ToothDetail {
   if (!isRecord(v)) return false;
+
   const pos = (v as any).position;
   const nums = (v as any).toothNumbers;
 
-  const posOk = pos === 'UL' || pos === 'UR' || pos === 'LL' || pos === 'LR';
-  const numsOk = Array.isArray(nums) && nums.every((n) => typeof n === 'string');
-  const notesOk = (v as any).notes === undefined || typeof (v as any).notes === 'string';
+  const posOk =
+    pos === undefined ||
+    pos === null ||
+    pos === '' ||
+    pos === 'UL' ||
+    pos === 'UR' ||
+    pos === 'LL' ||
+    pos === 'LR';
 
-  return posOk && numsOk && notesOk;
+  const numsOk =
+    nums === undefined ||
+    nums === null ||
+    (Array.isArray(nums) && nums.every((n) => typeof n === 'string'));
+
+  const notesOk = (v as any).notes === undefined || typeof (v as any).notes === 'string';
+  const dxOk = (v as any).diagnosis === undefined || typeof (v as any).diagnosis === 'string';
+  const adviceOk = (v as any).advice === undefined || typeof (v as any).advice === 'string';
+  const procOk = (v as any).procedure === undefined || typeof (v as any).procedure === 'string';
+  const blockOk = (v as any).blockId === undefined || typeof (v as any).blockId === 'string';
+
+  if (!posOk || !numsOk || !notesOk || !dxOk || !adviceOk || !procOk || !blockOk) return false;
+
+  const hasAnyValue =
+    (typeof pos === 'string' && pos.trim()) ||
+    (Array.isArray(nums) && nums.length > 0) ||
+    (typeof (v as any).notes === 'string' && (v as any).notes.trim()) ||
+    (typeof (v as any).diagnosis === 'string' && (v as any).diagnosis.trim()) ||
+    (typeof (v as any).advice === 'string' && (v as any).advice.trim()) ||
+    (typeof (v as any).procedure === 'string' && (v as any).procedure.trim()) ||
+    (typeof (v as any).blockId === 'string' && (v as any).blockId.trim());
+
+  return Boolean(hasAnyValue);
 }
 
 function toToothDetails(input: unknown): ToothDetail[] {
   if (!Array.isArray(input)) return [];
-  return input.filter(isToothDetail);
+
+  return input.filter(isToothDetail).map((raw: any) => {
+    const next: any = { ...raw };
+
+    if (Array.isArray(next.toothNumbers)) {
+      const cleaned = next.toothNumbers
+        .map(String)
+        .map((s: string) => s.trim())
+        .filter(Boolean);
+      if (cleaned.length) next.toothNumbers = cleaned;
+      else delete next.toothNumbers;
+    }
+
+    for (const k of ['notes', 'diagnosis', 'advice', 'procedure', 'blockId', 'position'] as const) {
+      if (typeof next[k] === 'string') {
+        const t = next[k].trim();
+        if (t) next[k] = t;
+        else delete next[k];
+      } else if (next[k] == null) {
+        delete next[k];
+      }
+    }
+
+    return next as ToothDetail;
+  });
 }
 
-/** ✅ NEW: patient registration date formatter (same idea as PatientDetailPage) */
 function formatPatientRegdDate(patientData: unknown): string {
-  // prefer numeric ms timestamps
   const createdAtNum =
     getPropNumber(patientData, 'createdAt') ??
     getPropNumber(patientData, 'created_at') ??
@@ -143,7 +197,6 @@ function formatPatientRegdDate(patientData: unknown): string {
     return new Date(createdAtNum).toLocaleDateString('en-GB');
   }
 
-  // fallback: string dates
   const createdAtStr =
     getPropString(patientData, 'createdAt') ??
     getPropString(patientData, 'created_at') ??
@@ -156,6 +209,53 @@ function formatPatientRegdDate(patientData: unknown): string {
   }
 
   return '—';
+}
+
+async function waitForFontsReady(timeoutMs = 1500) {
+  try {
+    const fonts = (document as any).fonts;
+    if (!fonts?.ready) return;
+
+    await Promise.race([
+      fonts.ready,
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+  } catch {
+    // ignore
+  }
+}
+
+async function waitForImagesReady(root: HTMLElement, timeoutMs = 2000) {
+  const imgs = Array.from(root.querySelectorAll('img')) as HTMLImageElement[];
+  if (!imgs.length) return;
+
+  const tasks = imgs.map(async (img) => {
+    try {
+      if (img.complete && img.naturalWidth > 0) return;
+
+      if (typeof (img as any).decode === 'function') {
+        await Promise.race([
+          (img as any).decode(),
+          new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+        ]);
+        return;
+      }
+
+      await new Promise<void>((resolve) => {
+        const done = () => resolve();
+        img.addEventListener('load', done, { once: true });
+        img.addEventListener('error', done, { once: true });
+        setTimeout(done, timeoutMs);
+      });
+    } catch {
+      // ignore
+    }
+  });
+
+  await Promise.race([
+    Promise.all(tasks).then(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
 }
 
 export default function PrescriptionPrintPreviewPage() {
@@ -207,14 +307,12 @@ export default function PrescriptionPrintPreviewPage() {
 
   const visitCreatedAtMs = getNumber(visitRec.createdAt) ?? Date.now();
 
-  // ✅ UPDATED (backend-aligned): compute from DOB if present; else fallback to stored age
   const ageFromDob = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
   const ageStored = getNumber((patientRec as any).age);
   const patientAge = ageFromDob ?? ageStored;
 
   const patientSex = normalizeSex(patientSexRaw);
 
-  // ✅ NEW: fetch/compute patient registration date (formatted)
   const patientRegdDate = React.useMemo(() => {
     return formatPatientRegdDate(patientQuery.data);
   }, [patientQuery.data]);
@@ -260,7 +358,20 @@ export default function PrescriptionPrintPreviewPage() {
     ? `Visit: ${toLocalISODate(new Date(visitCreatedAtMs))}`
     : undefined;
 
+  // ---- UI toggles ----
   const [printWithHistory, setPrintWithHistory] = React.useState(true);
+
+  // true => show header/footer artwork; false => hide them but keep space reserved
+  const [showPrintHeader, setShowPrintHeader] = React.useState(true);
+
+  // track which page is currently being previewed (ODD/EVEN)
+  const [activeKind, setActiveKind] = React.useState<PageKind>('ODD');
+
+  const previewCurrentOnly = !printWithHistory;
+
+  React.useEffect(() => {
+    if (activeKind === 'EVEN') setShowPrintHeader(true);
+  }, [activeKind]);
 
   const printChain = React.useMemo(() => {
     const meta = new Map<string, Visit>();
@@ -318,39 +429,155 @@ export default function PrescriptionPrintPreviewPage() {
     return toToothDetails((rec as any).toothDetails);
   }, [rx]);
 
-  // ✅ doctor notes from Rx JSON
+  /**
+   * ✅ Force Tooth Details block to render even when no entries exist:
+   * PrescriptionPreview likely checks toothDetails.length > 0.
+   * Passing one empty object will show the block but with blank content.
+   */
+  const toothDetailsForPreview = React.useMemo<ToothDetail[]>(() => {
+    return currentToothDetails.length > 0
+      ? currentToothDetails
+      : ([{} as ToothDetail] as ToothDetail[]);
+  }, [currentToothDetails]);
+
   const doctorNotes = React.useMemo(() => {
     if (!rx || !isRecord(rx)) return '';
     return String((rx as any).doctorNotes ?? '');
   }, [rx]);
 
   const hasLines = (rx as any)?.lines?.length ? ((rx as any).lines.length as number) > 0 : false;
-  const hasTeeth = currentToothDetails.length > 0;
+
+  // ✅ allow printing even if only notes/diagnosis exist (even without teeth numbers)
+  const hasTeeth = currentToothDetails.length > 0 || toothDetailsForPreview.length > 0; // will be true due to placeholder
   const canPrint = hasLines || hasTeeth;
+
+  // ✅ Match PrescriptionPreview's A4 canvas (@96dpi)
+  const PRINT_BASE_W = Math.round((210 / 25.4) * 96); // 794
+  const PRINT_BASE_H = Math.round((297 / 25.4) * 96); // 1123
 
   const printPrescription = () => {
     if (!canPrint) return;
 
     const onAfterPrint = () => {
-      document.body.classList.remove('print-rx');
-      document.body.classList.remove('print-rx-current-only');
+      const el = document.querySelector<HTMLElement>('.rx-preview-print-source');
+      el?.style.removeProperty('--rx-print-scale');
+      document.body.classList.remove('print-preview-rx');
       window.removeEventListener('afterprint', onAfterPrint);
     };
 
     window.addEventListener('afterprint', onAfterPrint);
-
-    document.body.classList.add('print-rx');
-    if (!printWithHistory) document.body.classList.add('print-rx-current-only');
+    document.body.classList.add('print-preview-rx');
 
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => window.print());
+      requestAnimationFrame(async () => {
+        const host = document.querySelector<HTMLElement>('.rx-preview-print-source');
+        if (host) {
+          await waitForFontsReady(2000);
+          await waitForImagesReady(host, 2500);
+
+          const rect = host.getBoundingClientRect();
+          const w = rect.width || 1;
+          const h = rect.height || 1;
+
+          const scale = Math.min(1, Math.min(w / PRINT_BASE_W, h / PRINT_BASE_H));
+          host.style.setProperty('--rx-print-scale', String(scale));
+        }
+
+        window.print();
+      });
     });
   };
 
-  const previewCurrentOnly = !printWithHistory;
+  /**
+   * ✅ UX change:
+   * Don't hide "Print Header" when Print: Current only is ON.
+   * Keep it visible but DISABLED (muted).
+   *
+   * Also disable on EVEN pages (header doesn't apply there).
+   */
+  const printHeaderDisabled = !canPrint || previewCurrentOnly || activeKind !== 'ODD';
+
+  const printHeaderDisabledTitle = !canPrint
+    ? 'Nothing to print'
+    : previewCurrentOnly
+      ? 'Print Header is only available when History is ON'
+      : activeKind !== 'ODD'
+        ? 'Print Header applies to ODD pages only'
+        : 'Toggle showing the printed prescription header/footer artwork (ODD pages only)';
 
   return (
     <section className="p-4 2xl:p-8">
+      <style>{`
+        @media print {
+          @page { size: A4; margin: 0; }
+
+          html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #fff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+
+          body.print-preview-rx :not(.rx-preview-print-source):not(.rx-preview-print-source *) {
+            visibility: hidden;
+          }
+
+          body.print-preview-rx .rx-preview-print-source {
+            visibility: visible;
+            position: fixed;
+            inset: 0;
+            margin: 0;
+            padding: 0;
+            background: #fff;
+            overflow: hidden;
+            overscroll-behavior: none;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            --rx-print-scale: 1;
+          }
+
+          body.print-preview-rx .rx-preview-print-source .rx-print-stage {
+            width: ${PRINT_BASE_W}px;
+            height: ${PRINT_BASE_H}px;
+            display: inline-block;
+
+            transform: scale(var(--rx-print-scale));
+            transform-origin: center center;
+          }
+
+          body.print-preview-rx .rx-preview-print-source .rx-preview-shell {
+            width: ${PRINT_BASE_W}px;
+          }
+
+          body.print-preview-rx .rx-preview-print-source .shadow-sm,
+          body.print-preview-rx .rx-preview-print-source .shadow,
+          body.print-preview-rx .rx-preview-print-source .rounded-xl,
+          body.print-preview-rx .rx-preview-print-source .rounded-2xl,
+          body.print-preview-rx .rx-preview-print-source .border {
+            box-shadow: none;
+            border: none;
+            border-radius: 0;
+          }
+
+          body.print-preview-rx .rx-preview-print-source button,
+          body.print-preview-rx .rx-preview-print-source .rx-preview-pagination,
+          body.print-preview-rx .rx-preview-print-source [data-pagination="1"] {
+            display: none;
+          }
+
+          body.print-preview-rx .rx-preview-shell {
+            margin: 0;
+            padding: 0;
+          }
+        }
+      `}</style>
+
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="text-lg font-semibold text-gray-900">Prescription Print Preview</div>
@@ -376,6 +603,20 @@ export default function PrescriptionPrintPreviewPage() {
             {printWithHistory ? 'Print: History ON' : 'Print: Current only'}
           </Button>
 
+          {/* ✅ Always visible now; muted via disabled */}
+          <Button
+            variant="outline"
+            className="rounded-xl cursor-pointer"
+            disabled={printHeaderDisabled}
+            onClick={() => {
+              if (printHeaderDisabled) return;
+              setShowPrintHeader((v) => !v);
+            }}
+            title={printHeaderDisabledTitle}
+          >
+            {showPrintHeader ? 'Print Header: ON' : 'Print Header: OFF'}
+          </Button>
+
           <Button
             variant="default"
             className="rounded-xl bg-black text-white hover:bg-black/90 cursor-pointer"
@@ -391,50 +632,37 @@ export default function PrescriptionPrintPreviewPage() {
       <Card className="rounded-2xl border bg-white p-4">
         <div className="text-sm font-semibold text-gray-900">Preview</div>
 
-        <div className="rx-preview-shell mt-3 min-w-0 overflow-x-hidden">
-          <PrescriptionPreview
-            patientName={patientName}
-            patientPhone={patientPhone}
-            patientAge={patientAge}
-            patientSex={patientSex}
-            sdId={patientSdId}
-            opdNo={opdNo}
-            doctorName={resolvedDoctorName}
-            doctorRegdLabel={resolvedDoctorRegdLabel}
-            visitDateLabel={visitCreatedDateLabel}
-            regdDate={patientRegdDate} // ✅ NEW
-            lines={(rx as any)?.lines ?? []}
-            currentVisitId={printChain.currentVisitId}
-            chainVisitIds={printChain.visitIds}
-            visitMetaMap={printChain.meta}
-            toothDetails={currentToothDetails}
-            receptionNotes={previewCurrentOnly ? undefined : ((rx as any)?.receptionNotes ?? '')}
-            doctorNotes={doctorNotes}
-            currentOnly={previewCurrentOnly}
-          />
+        <div className="rx-preview-print-source mt-3">
+          <div className="rx-print-stage">
+            <div className="rx-preview-shell min-w-0 overflow-x-hidden">
+              <PrescriptionPreview
+                patientName={patientName}
+                patientPhone={patientPhone}
+                patientAge={patientAge}
+                patientSex={patientSex}
+                sdId={patientSdId}
+                opdNo={opdNo}
+                doctorName={resolvedDoctorName}
+                doctorRegdLabel={resolvedDoctorRegdLabel}
+                visitDateLabel={visitCreatedDateLabel}
+                regdDate={patientRegdDate}
+                lines={(rx as any)?.lines ?? []}
+                currentVisitId={printChain.currentVisitId}
+                chainVisitIds={printChain.visitIds}
+                visitMetaMap={printChain.meta}
+                toothDetails={toothDetailsForPreview}
+                receptionNotes={
+                  previewCurrentOnly ? undefined : ((rx as any)?.receptionNotes ?? '')
+                }
+                doctorNotes={doctorNotes}
+                currentOnly={previewCurrentOnly}
+                showPrintHeader={showPrintHeader}
+                onActivePageKindChange={(kind) => setActiveKind(kind)}
+              />
+            </div>
+          </div>
         </div>
       </Card>
-
-      <PrescriptionPrintSheet
-        patientName={patientName}
-        patientPhone={patientPhone}
-        patientAge={patientAge}
-        patientSex={patientSex}
-        sdId={patientSdId}
-        opdNo={opdNo}
-        doctorName={resolvedDoctorName}
-        doctorRegdLabel={resolvedDoctorRegdLabel}
-        visitDateLabel={visitCreatedDateLabel}
-        regdDate={patientRegdDate} // ✅ NEW
-        lines={(rx as any)?.lines ?? []}
-        receptionNotes={(rx as any)?.receptionNotes ?? ''}
-        doctorNotes={doctorNotes}
-        currentVisitId={printChain.currentVisitId}
-        chainVisitIds={printChain.visitIds}
-        visitMetaMap={printChain.meta}
-        printWithHistory={printWithHistory}
-        toothDetails={currentToothDetails}
-      />
     </section>
   );
 }

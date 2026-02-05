@@ -1,6 +1,7 @@
 'use client';
 
 import * as React from 'react';
+import dynamic from 'next/dynamic';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import {
   useGetVisitRxQuery,
@@ -9,7 +10,6 @@ import {
   useGetPatientVisitsQuery,
 } from '@/src/store/api';
 import { clinicDateISO } from '@/src/lib/clinicTime';
-import dynamic from 'next/dynamic';
 
 import type { Visit, ToothDetail } from '@dcm/types';
 
@@ -24,27 +24,54 @@ type UnknownRecord = Record<string, unknown>;
 function isRecord(v: unknown): v is UnknownRecord {
   return typeof v === 'object' && v !== null;
 }
+
 function getProp(obj: unknown, key: string): unknown {
   if (!isRecord(obj)) return undefined;
   return obj[key];
 }
-function getPropString(obj: unknown, key: string): string | undefined {
-  const v = getProp(obj, key);
+
+function getString(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v : undefined;
 }
-function getPropNumber(obj: unknown, key: string): number | undefined {
-  const v = getProp(obj, key);
+
+function getNumber(v: unknown): number | undefined {
   return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
 }
+
+function getPropString(obj: unknown, key: string): string | undefined {
+  return getString(getProp(obj, key));
+}
+
+function getPropNumber(obj: unknown, key: string): number | undefined {
+  return getNumber(getProp(obj, key));
+}
+
 function safeParseDate(input: unknown): Date | null {
   if (!input) return null;
   const d = input instanceof Date ? input : new Date(input as any);
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
-/** ✅ NEW: patient registration date formatter (matches PatientDetailPage style) */
+function getVisitTimeMs(v: unknown): number {
+  const n =
+    getPropNumber(v, 'createdAt') ??
+    getPropNumber(v, 'updatedAt') ??
+    getPropNumber(v, 'created_at') ??
+    getPropNumber(v, 'updated_at');
+
+  if (typeof n === 'number' && Number.isFinite(n) && n > 0) return n;
+
+  const s =
+    getPropString(v, 'createdAt') ??
+    getPropString(v, 'updatedAt') ??
+    getPropString(v, 'created_at') ??
+    getPropString(v, 'updated_at');
+
+  const d = s ? safeParseDate(s) : null;
+  return d ? d.getTime() : 0;
+}
+
 function formatPatientRegdDate(patient: unknown): string {
-  // prefer numeric timestamps
   const createdAtNum =
     getPropNumber(patient, 'createdAt') ??
     getPropNumber(patient, 'created_at') ??
@@ -55,7 +82,6 @@ function formatPatientRegdDate(patient: unknown): string {
     return new Date(createdAtNum).toLocaleDateString('en-GB');
   }
 
-  // fallback to string date
   const createdAtStr =
     getPropString(patient, 'createdAt') ??
     getPropString(patient, 'created_at') ??
@@ -69,10 +95,6 @@ function formatPatientRegdDate(patient: unknown): string {
 
   return '—';
 }
-
-/* ------------------------------------------------------------------ */
-/* patient helpers (backend-aligned: DOB preferred; fallback to age) */
-/* ------------------------------------------------------------------ */
 
 function safeParseDobToDate(dob: unknown): Date | null {
   if (typeof dob !== 'string') return null;
@@ -136,6 +158,40 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
     doctorRegdLabel,
   } = props;
 
+  /**
+   * ✅ Critical fix for dialog:
+   * Radix Dialog often mounts content before it is visually “painted”.
+   * PrescriptionPreview measures header/footer via offsetHeight; if measured while hidden,
+   * footerH stays too small → content overlaps footer.
+   *
+   * We:
+   * 1) wait for 2 RAFs after open to ensure the dialog is painted
+   * 2) then mount the preview (so measurements are correct)
+   * 3) also force remount per open/visitId change
+   */
+  const [openNonce, setOpenNonce] = React.useState(0);
+  const [previewReady, setPreviewReady] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!open) {
+      setPreviewReady(false);
+      return;
+    }
+
+    setOpenNonce((n) => n + 1);
+
+    let raf1 = 0;
+    let raf2 = 0;
+    raf1 = window.requestAnimationFrame(() => {
+      raf2 = window.requestAnimationFrame(() => setPreviewReady(true));
+    });
+
+    return () => {
+      window.cancelAnimationFrame(raf1);
+      window.cancelAnimationFrame(raf2);
+    };
+  }, [open, visitId]);
+
   const rxQuery = useGetVisitRxQuery({ visitId: visitId ?? '' }, { skip: !open || !visitId });
   const visitQuery = useGetVisitByIdQuery(visitId ?? '', { skip: !open || !visitId });
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !open || !patientId });
@@ -151,7 +207,8 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
   }, [visitsQuery.data]);
 
   const visitCreatedAtDate = React.useMemo(() => {
-    const createdAt = getProp(visitQuery.data, 'createdAt');
+    const createdAt =
+      getProp(visitQuery.data, 'createdAt') ?? getProp(visitQuery.data, 'updatedAt');
     return safeParseDate(createdAt);
   }, [visitQuery.data]);
 
@@ -170,7 +227,6 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
     return normalizeSex(raw);
   }, [patientQuery.data]);
 
-  // ✅ DOB preferred (YYYY-MM-DD), fallback to stored age, computed at visit createdAt
   const patientAge = React.useMemo<number | undefined>(() => {
     const dobRaw =
       getProp(patientQuery.data, 'dob') ??
@@ -181,7 +237,6 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
 
     const dob = safeParseDobToDate(dobRaw);
     const at = visitCreatedAtDate ?? new Date();
-
     const ageFromDob = dob ? calculateAge(dob, at) : undefined;
 
     const ageStoredRaw = getProp(patientQuery.data, 'age');
@@ -191,7 +246,6 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
     return ageFromDob ?? ageStored;
   }, [patientQuery.data, visitCreatedAtDate]);
 
-  // ✅ NEW: patient registration date to show in Rx header
   const patientRegdDate = React.useMemo(() => {
     return formatPatientRegdDate(patientQuery.data);
   }, [patientQuery.data]);
@@ -207,18 +261,25 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
     return Array.isArray(td) ? (td as ToothDetail[]) : [];
   }, [rxUnknown]);
 
-  // ✅ doctor notes for preview/print
   const doctorNotes = React.useMemo<string>(() => {
     if (!rxUnknown || !isRecord(rxUnknown)) return '';
     const dn = getProp(rxUnknown, 'doctorNotes');
     return dn == null ? '' : String(dn);
   }, [rxUnknown]);
 
+  const receptionNotes = React.useMemo<string>(() => {
+    if (!rxUnknown || !isRecord(rxUnknown)) return '';
+    const rn = getProp(rxUnknown, 'receptionNotes');
+    return rn == null ? '' : String(rn);
+  }, [rxUnknown]);
+
   const rxChain = React.useMemo(() => {
     const selectedId = visitId ?? '';
     const meta = new Map<string, Visit>();
 
-    for (const v of allVisitsRaw) meta.set(v.visitId, v);
+    for (const v of allVisitsRaw) {
+      if (v?.visitId) meta.set(v.visitId, v);
+    }
 
     const vd = visitQuery.data;
     const vdId = getPropString(vd, 'visitId');
@@ -230,10 +291,12 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
     const anchorVisitId = getPropString(vSelected, 'anchorVisitId');
 
     const anchorId = tag === 'F' ? anchorVisitId : selectedId;
-    if (!anchorId)
+    if (!anchorId) {
       return { visitIds: selectedId ? [selectedId] : [], meta, currentVisitId: selectedId };
+    }
 
     const chain: Visit[] = [];
+
     const anchor = meta.get(anchorId);
     if (anchor) chain.push(anchor);
 
@@ -242,9 +305,8 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
       const aId = anchorIdFromVisit(v);
       if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
     }
-    followups.sort(
-      (a, b) => (getPropNumber(a, 'createdAt') ?? 0) - (getPropNumber(b, 'createdAt') ?? 0),
-    );
+
+    followups.sort((a, b) => getVisitTimeMs(a) - getVisitTimeMs(b));
     chain.push(...followups);
 
     if (selectedId && !chain.some((x) => x.visitId === selectedId)) {
@@ -252,11 +314,7 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
       chain.push(cur ?? ({ visitId: selectedId } as Visit));
     }
 
-    chain.sort(
-      (a, b) =>
-        (getPropNumber(a, 'createdAt') ?? getPropNumber(a, 'updatedAt') ?? 0) -
-        (getPropNumber(b, 'createdAt') ?? getPropNumber(b, 'updatedAt') ?? 0),
-    );
+    chain.sort((a, b) => getVisitTimeMs(a) - getVisitTimeMs(b));
 
     const seen = new Set<string>();
     const chainIdsOrdered = chain
@@ -290,6 +348,9 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
 
   type PreviewProps = React.ComponentProps<typeof PrescriptionPreview>;
 
+  const loading = rxQuery.isFetching || visitQuery.isFetching || patientQuery.isFetching;
+  const previewKey = `rxql:${visitId ?? 'none'}:${openNonce}`;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl rounded-2xl">
@@ -297,36 +358,44 @@ export function VisitPrescriptionQuickLookDialog(props: VisitPrescriptionQuickLo
           <DialogTitle>Prescription</DialogTitle>
         </DialogHeader>
 
-        <div className="min-w-0 overflow-x-hidden rounded-2xl border bg-white p-4">
-          {rxQuery.isFetching || visitQuery.isFetching || patientQuery.isFetching ? (
-            <div className="text-sm text-gray-500">Loading…</div>
-          ) : !visitId ? (
-            <div className="text-sm text-gray-500">Invalid visit.</div>
-          ) : (
-            <PrescriptionPreview
-              patientName={
-                (getProp(patientQuery.data, 'name') as PreviewProps['patientName']) ?? patientName
-              }
-              patientPhone={
-                (getProp(patientQuery.data, 'phone') as PreviewProps['patientPhone']) ??
-                patientPhone
-              }
-              patientAge={patientAge}
-              patientSex={patientSex}
-              sdId={(getProp(patientQuery.data, 'sdId') as string | undefined) ?? patientSdId}
-              opdNo={selectedVisitOpdNo ?? opdNo}
-              doctorName={doctorName}
-              doctorRegdLabel={doctorRegdLabel}
-              visitDateLabel={visitDateLabelComputed}
-              regdDate={patientRegdDate} // ✅ NEW: show patient registration date
-              lines={currentLines as PreviewProps['lines']}
-              toothDetails={currentToothDetails}
-              doctorNotes={doctorNotes}
-              currentVisitId={rxChain.currentVisitId}
-              chainVisitIds={rxChain.visitIds}
-              visitMetaMap={rxChain.meta}
-            />
-          )}
+        <div className="max-h-[78vh] min-h-105 w-full overflow-auto">
+          <div className="mx-auto w-full rounded-2xl border bg-white p-4">
+            {loading ? (
+              <div className="text-sm text-gray-500">Loading…</div>
+            ) : !visitId ? (
+              <div className="text-sm text-gray-500">Invalid visit.</div>
+            ) : !previewReady ? (
+              <div className="text-sm text-gray-500">Preparing preview…</div>
+            ) : (
+              <div key={previewKey} className="rx-preview-shell min-w-0 overflow-x-hidden">
+                <PrescriptionPreview
+                  patientName={
+                    (getProp(patientQuery.data, 'name') as PreviewProps['patientName']) ??
+                    patientName
+                  }
+                  patientPhone={
+                    (getProp(patientQuery.data, 'phone') as PreviewProps['patientPhone']) ??
+                    patientPhone
+                  }
+                  patientAge={patientAge}
+                  patientSex={patientSex}
+                  sdId={(getProp(patientQuery.data, 'sdId') as string | undefined) ?? patientSdId}
+                  opdNo={selectedVisitOpdNo ?? opdNo}
+                  doctorName={doctorName}
+                  doctorRegdLabel={doctorRegdLabel}
+                  visitDateLabel={visitDateLabelComputed}
+                  regdDate={patientRegdDate}
+                  lines={currentLines as PreviewProps['lines']}
+                  toothDetails={currentToothDetails}
+                  doctorNotes={doctorNotes}
+                  receptionNotes={receptionNotes}
+                  currentVisitId={rxChain.currentVisitId}
+                  chainVisitIds={rxChain.visitIds}
+                  visitMetaMap={rxChain.meta}
+                />
+              </div>
+            )}
+          </div>
         </div>
       </DialogContent>
     </Dialog>

@@ -1,3 +1,4 @@
+// apps/web/src/lib/printing/escpos.ts
 import type { TokenPrintPayload } from '@dcm/types';
 import { CLINIC_TZ } from '../clinicTime';
 
@@ -9,24 +10,14 @@ function hr() {
   return '-------------------------------' + LF;
 }
 
-function fmtDateTime(ms: number) {
+/** ✅ Time only (no date) */
+function fmtTime(ms: number) {
   return new Intl.DateTimeFormat('en-IN', {
     timeZone: CLINIC_TZ,
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
     hour12: true,
   }).format(new Date(ms));
-}
-
-function maskPhone(phone?: string) {
-  if (!phone) return '';
-  const digits = phone.replace(/\D/g, '');
-  if (digits.length < 4) return phone;
-  const last4 = digits.slice(-4);
-  return `XXXXXX${last4}`;
 }
 
 function parseDobIso(dob?: string): { y: number; m: number; d: number } | null {
@@ -40,7 +31,7 @@ function parseDobIso(dob?: string): { y: number; m: number; d: number } | null {
   return { y, m: mo, d: da };
 }
 
-function calcAge(dobIso: string, atMs: number): number | null {
+function calcAgeFromDob(dobIso: string, atMs: number): number | null {
   const p = parseDobIso(dobIso);
   if (!p) return null;
 
@@ -58,10 +49,10 @@ function calcAge(dobIso: string, atMs: number): number | null {
 function sexShort(g?: string): string | undefined {
   if (!g) return undefined;
   const s = String(g).toUpperCase().trim();
-  if (s === 'MALE') return 'M';
-  if (s === 'FEMALE') return 'F';
-  if (s === 'OTHER') return 'O';
-  if (s === 'UNKNOWN') return 'U';
+  if (s === 'MALE' || s === 'M') return 'M';
+  if (s === 'FEMALE' || s === 'F') return 'F';
+  if (s === 'OTHER' || s === 'O') return 'O';
+  if (s === 'UNKNOWN' || s === 'U') return 'U';
   return undefined;
 }
 
@@ -71,26 +62,44 @@ function blankLines(n: number) {
   return out;
 }
 
+function pickAge(p: TokenPrintPayload): number | null {
+  // ✅ 1) Prefer explicit age from payload (when patient stores age)
+  if (typeof p.patientAge === 'number' && Number.isFinite(p.patientAge) && p.patientAge >= 0) {
+    return p.patientAge;
+  }
+
+  // ✅ 2) Else compute from DOB (when patient stores dob)
+  if (p.patientDob) {
+    return calcAgeFromDob(p.patientDob, p.createdAt);
+  }
+
+  return null;
+}
+
 export function buildTokenEscPos(p: TokenPrintPayload): string {
-  const clinicName = (p.clinicName ?? 'SARANGI DENTISTRY').slice(0, 32);
-  const clinicPhone = p.clinicPhone ? String(p.clinicPhone).slice(0, 32) : '';
   const patientName = String(p.patientName ?? '').slice(0, 32);
-  const phoneMasked = maskPhone(p.patientPhone);
+
+  // ✅ Unmasked phone
+  const phone = p.patientPhone ? String(p.patientPhone).slice(0, 32) : '';
+
   const reason = String(p.reason ?? '')
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 64);
 
-  const tag = p.tag ?? 'N';
-  const offline = !!p.isOffline;
   const visitNo = p.visitNumberForPatient;
   const patientNo = typeof p.dailyPatientNumber === 'number' ? p.dailyPatientNumber : p.tokenNumber;
-  const created = fmtDateTime(p.createdAt);
+
   const opdNo = p.opdNo ? String(p.opdNo).slice(0, 32) : '';
   const sdId = p.sdId ? String(p.sdId).slice(0, 32) : '';
-  const age = p.patientDob ? calcAge(p.patientDob, p.createdAt) : null;
+
+  const age = pickAge(p);
   const sx = sexShort(p.patientGender);
+
   const ageSex = age !== null && sx ? `${age}/${sx}` : age !== null ? `${age}` : sx ? `${sx}` : '';
+
+  const timeOnly = fmtTime(p.createdAt);
+
   const init = ESC + '@';
   const alignLeft = ESC + 'a' + '\x00';
   const alignCenter = ESC + 'a' + '\x01';
@@ -103,61 +112,62 @@ export function buildTokenEscPos(p: TokenPrintPayload): string {
   let out = '';
   out += init;
 
+  // ✅ Start directly with Patient line (no clinic heading)
   out += alignCenter;
   out += boldOn + sizeBig;
-  out += `${clinicName}${LF}`;
+  out += `Patient: ${patientNo}${LF}`;
   out += sizeNormal + boldOff;
-
-  if (clinicPhone) out += `${clinicPhone}${LF}`;
   out += LF;
 
-  out += hr();
-  out += boldOn;
-  out += `PATIENT NO: ${patientNo}${LF}`;
-  out += boldOff;
   out += hr();
 
   out += alignLeft;
   out += `Name   : ${patientName}${LF}`;
-  if (phoneMasked) out += `Phone  : ${phoneMasked}${LF}`;
+  if (phone) out += `Phone  : ${phone}${LF}`;
   if (ageSex) out += `Age/Sex: ${ageSex}${LF}`;
   if (sdId) out += `SD ID  : ${sdId}${LF}`;
   if (opdNo) out += `OPD No : ${opdNo}${LF}`;
 
   out += `Reason : ${reason}${LF}`;
-  out += `Tag    : ${offline ? `${tag} / OFFLINE` : tag}${LF}`;
 
+  // ✅ Tag + Date removed
   out += `Visit# : ${visitNo}${LF}`;
-  out += `Time   : ${created}${LF}`;
-  out += `Date   : ${p.visitDate}${LF}`;
+  out += `Time   : ${timeOnly}${LF}`;
 
   out += LF;
   out += hr();
 
   out += boldOn + `Medical History (tick):` + LF + boldOff;
   out += `[ ] Diabetes` + LF;
-  out += `[ ] BP` + LF;
-  out += `[ ] Hepatitis` + LF;
-  out += `[ ] HIV` + LF;
+  out += `[ ] Blood Pressure` + LF;
+  out += `[ ] Heart Problem` + LF;
+  out += `[ ] Blood Thinner` + LF;
+  out += `[ ] Gastritis` + LF;
+  out += `[ ] Drug Allergy` + LF;
   out += `[ ] Asthma` + LF;
   out += `[ ] Steriod` + LF;
-  out += `[ ] Blood Thinner` + LF;
-  out += `[ ] Heart Medicine` + LF;
-  out += `[ ] Drug Allergy` + LF;
+  out += `[ ] Hepatitis` + LF;
+  out += `[ ] HIV` + LF;
 
   out += hr();
 
   out += boldOn + `Procedure:` + LF + boldOff;
+  out += blankLines(4);
+
+  out += hr();
+
+  out += boldOn + `Next Appt.:` + LF + boldOff;
   out += blankLines(2);
 
   out += hr();
 
-  out += blankLines(6);
+  out += boldOn + `Payment:` + LF + boldOff;
+  out += blankLines(2);
 
-  out += alignCenter;
-  out += `Please wait for your turn` + LF;
-  out += `THANK YOU.` + LF;
-  out += LF + LF;
+  out += hr();
+
+  out += boldOn + `Asst.:` + LF + boldOff;
+  out += blankLines(2);
 
   out += cut;
 

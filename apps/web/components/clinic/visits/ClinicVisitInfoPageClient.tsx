@@ -1,3 +1,4 @@
+// apps/web/components/clinic/visits/ClinicVisitInfoPageClient.tsx
 'use client';
 
 import * as React from 'react';
@@ -62,6 +63,10 @@ type VisitExtras = {
   doctorId?: string;
   anchorVisitId?: string;
   tag?: string;
+
+  // ✅ assistant fields (for display)
+  assistantId?: string;
+  assistantName?: string;
 };
 type VisitWithExtras = Visit & VisitExtras;
 
@@ -205,9 +210,8 @@ function anchorIdFromVisit(v: Visit): string | undefined {
   );
 }
 
-/** ✅ NEW: format patient registration date for prescription header */
+/** ✅ Format patient registration date for prescription header */
 function formatPatientRegdDate(patientData: unknown): string {
-  // prefer numeric ms timestamps
   const createdAtNum =
     getPropNumber(patientData, 'createdAt') ??
     getPropNumber(patientData, 'created_at') ??
@@ -232,6 +236,14 @@ function formatPatientRegdDate(patientData: unknown): string {
   return '—';
 }
 
+/** ✅ Tag + stage labels (for header) */
+function stageLabel(status?: Visit['status']) {
+  if (status === 'QUEUED') return 'Waiting';
+  if (status === 'IN_PROGRESS') return 'In Progress';
+  if (status === 'DONE') return 'Done';
+  return '—';
+}
+
 type NavAction = 'PRIMARY' | 'EDIT_BILL' | 'PRINT_RX' | null;
 
 export default function ClinicVisitInfoPageClient() {
@@ -251,6 +263,21 @@ export default function ClinicVisitInfoPageClient() {
 
   const visit = (visitQuery.data ?? null) as VisitWithExtras | null;
   const isOfflineVisit = Boolean(visit?.isOffline);
+
+  // ✅ Tag + Stage (top header)
+  const tagLabel = getString(visit?.tag);
+  const status = (getPropString(visit, 'status') as Visit['status'] | undefined) ?? undefined;
+  const stage = stageLabel(status);
+
+  // ✅ Assistant display (visit-scoped; no cross-visit fallback)
+  const storedAssistantId = getString(visit?.assistantId);
+  const storedAssistantName = getString(visit?.assistantName);
+
+  const assistantLabelForUI = React.useMemo(() => {
+    if (storedAssistantName) return storedAssistantName;
+    if (storedAssistantId) return `Assistant (${storedAssistantId})`;
+    return undefined;
+  }, [storedAssistantId, storedAssistantName]);
 
   const patientId = visit?.patientId;
 
@@ -320,18 +347,11 @@ export default function ClinicVisitInfoPageClient() {
     return Array.isArray(td) ? (td as ToothDetail[]) : [];
   }, [rxToShow]);
 
-  /**
-   * ✅ Printed note INSIDE prescription:
-   * Keep using rx.doctorNotes for preview/print (your backend stores it in Rx JSON).
-   */
   const doctorNotes = React.useMemo(() => {
     if (!rxToShow || !isRecord(rxToShow)) return '';
     return String(getProp(rxToShow, 'doctorNotes') ?? '');
   }, [rxToShow]);
 
-  /**
-   * ✅ NOT printed note (Doctor → Reception internal note)
-   */
   const doctorReceptionNotes = React.useMemo(() => {
     if (!rxToShow || !isRecord(rxToShow)) return '';
     const candidates = [
@@ -450,7 +470,6 @@ export default function ClinicVisitInfoPageClient() {
   const visitCreatedAtMs = getPropNumber(visit, 'createdAt') ?? Date.now();
   const atDate = new Date(visitCreatedAtMs);
 
-  // ✅ FIX: if DOB exists calculate; else fall back to stored patient.age
   const patientAgeFromDob = patientDob ? calculateAge(patientDob, atDate) : undefined;
   const patientAgeStored =
     typeof patientAgeRaw === 'number' && Number.isFinite(patientAgeRaw) ? patientAgeRaw : undefined;
@@ -460,7 +479,6 @@ export default function ClinicVisitInfoPageClient() {
 
   const patientSex = normalizeSex(patientSexRaw);
 
-  // ✅ NEW: patient registration date (formatted) for PrescriptionPreview
   const patientRegdDate = React.useMemo(() => {
     return formatPatientRegdDate(patientQuery.data);
   }, [patientQuery.data]);
@@ -508,7 +526,6 @@ export default function ClinicVisitInfoPageClient() {
   const [updateVisitStatus, updateVisitStatusState] = useUpdateVisitStatusMutation();
   const [offlineCheckoutBusy, setOfflineCheckoutBusy] = React.useState(false);
 
-  // ✅ NEW: button-level loading for primary + edit bill + print rx
   const [navAction, setNavAction] = React.useState<NavAction>(null);
 
   const doOfflineCheckout = async () => {
@@ -525,7 +542,6 @@ export default function ClinicVisitInfoPageClient() {
       router.push(`/visits/${visitId}/checkout/billing`);
     } catch (err: unknown) {
       toast.error(getErrorMessage(err) ?? 'Failed to mark visit DONE.');
-      // important: allow user to click again after error
       setNavAction(null);
     } finally {
       setOfflineCheckoutBusy(false);
@@ -545,7 +561,6 @@ export default function ClinicVisitInfoPageClient() {
 
   const printRxDisabled = !visitId || !visit || actionLocked;
 
-  // ✅ Build chain only when toggle is ON; otherwise keep it light (current visit only)
   const rxChain = React.useMemo(() => {
     const meta = new Map<string, Visit>();
     if (visit?.visitId) meta.set(visit.visitId, visit);
@@ -628,11 +643,9 @@ export default function ClinicVisitInfoPageClient() {
   const historyLoading = showHistory && (visitsQuery.isLoading || visitsQuery.isFetching);
 
   const primaryButtonLabelNode = React.useMemo(() => {
-    // Offline flow: keep explicit "Preparing..." with dots
     if (offlineCheckoutBusy || updateVisitStatusState.isLoading) {
       return <LoadingDots label="Preparing" />;
     }
-    // Normal route navigation
     if (navAction === 'PRIMARY') {
       return <LoadingDots label="Opening" />;
     }
@@ -644,11 +657,33 @@ export default function ClinicVisitInfoPageClient() {
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
           <div className="text-lg font-semibold text-gray-900">Visit Info</div>
-          {isOfflineVisit ? <div className="mt-1 text-xs text-amber-600">Offline visit</div> : null}
+
+          {/* ✅ Tag · Stage · Assistant (like screenshot) */}
+          <div className="mt-1 text-xs text-gray-500">
+            {isOfflineVisit ? (
+              <>
+                <span className="text-amber-600">Offline</span>
+                {' · '}
+              </>
+            ) : null}
+            {tagLabel ? (
+              <>
+                Tag: <span className="font-medium text-gray-700">{tagLabel}</span>
+                {' · '}
+              </>
+            ) : null}
+            Stage: <span className="font-medium text-gray-700">{stage}</span>
+            {assistantLabelForUI ? (
+              <>
+                {' · '}Assistant:{' '}
+                <span className="font-medium text-gray-700">{assistantLabelForUI}</span>
+              </>
+            ) : null}
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* ✅ NEW: Offline visit can always re-print blank Rx */}
+          {/* ✅ Offline visit can always re-print blank Rx */}
           {isOfflineVisit ? (
             <Button
               type="button"
@@ -725,8 +760,8 @@ export default function ClinicVisitInfoPageClient() {
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-lg font-semibold text-gray-900">Prescription</div>
-              <div className="text-xs text-gray-500">
-                {rxLoading ? 'Loading…' : rxReady ? 'Ready' : 'No prescription'}
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gray-500">
+                <span>{rxLoading ? 'Loading…' : rxReady ? 'Ready' : 'No prescription'}</span>
               </div>
             </div>
 
@@ -803,7 +838,7 @@ export default function ClinicVisitInfoPageClient() {
               doctorName={resolvedDoctorName}
               doctorRegdLabel={resolvedDoctorRegdLabel}
               visitDateLabel={rxVisitDateLabel}
-              regdDate={patientRegdDate} // ✅ NEW: pass patient registration date
+              regdDate={patientRegdDate}
               lines={
                 isRecord(rxToShow) && Array.isArray(getProp(rxToShow, 'lines'))
                   ? (getProp(rxToShow, 'lines') as PreviewProps['lines'])
@@ -811,7 +846,6 @@ export default function ClinicVisitInfoPageClient() {
               }
               receptionNotes={notes}
               toothDetails={toothDetails}
-              // ✅ Printed note inside prescription
               doctorNotes={doctorNotes}
               currentVisitId={showHistory ? rxChain.currentVisitId : undefined}
               chainVisitIds={showHistory ? rxChain.visitIds : undefined}
@@ -827,6 +861,14 @@ export default function ClinicVisitInfoPageClient() {
 
           <div className="mt-3">
             <XrayTrayReadOnly visitId={visitId} />
+          </div>
+
+          {/* ✅ Assistant (display only) */}
+          <div className="mt-4 rounded-2xl border bg-white p-3">
+            <div className="text-sm font-semibold text-gray-900">Assistant</div>
+            <div className="mt-2 rounded-xl bg-gray-50 p-3 text-sm text-gray-800">
+              {assistantLabelForUI ?? '—'}
+            </div>
           </div>
 
           {/* ✅ Doctor → Reception note (NOT printed) */}

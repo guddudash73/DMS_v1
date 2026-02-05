@@ -14,6 +14,8 @@ import {
   FollowUpStatusUpdate,
   FollowUpId,
   ToothDetail,
+  VisitAssistantUpdate,
+  AssistantId,
 } from '@dcm/types';
 import { PutObjectCommand } from '@aws-sdk/client-s3';
 
@@ -32,6 +34,7 @@ import {
   DuplicateCheckoutError,
   VisitNotDoneError,
 } from '../repositories/billingRepository';
+import { assistantRepository } from '../repositories/assistantRepository';
 
 import { buildXrayObjectKey } from './xray';
 import { s3Client } from '../config/aws';
@@ -137,6 +140,7 @@ router.post(
           opdNo: visit.opdNo,
           sdId: patient?.sdId,
           patientDob: patient?.dob,
+          patientAge: patient?.age,
           patientGender: patient?.gender,
         },
       });
@@ -221,14 +225,54 @@ router.patch(
   asyncHandler(async (req, res) => {
     const id = VisitId.safeParse(req.params.visitId);
     const body = VisitStatusUpdate.safeParse(req.body);
-    if (!id.success || !body.success)
+
+    if (!id.success || !body.success) {
       return handleValidationError(req, res, [
         ...(id.error?.issues ?? []),
         ...(body.error?.issues ?? []),
       ]);
+    }
+
+    const visitId = id.data;
+
+    // Determine if client explicitly sent assistantId
+    const hasAssistantKey = Object.prototype.hasOwnProperty.call(body.data, 'assistantId');
+
+    // Validate assistant (only when assistantId is a string)
+    let assistantNameToSet: string | null | undefined = undefined;
+
+    if (hasAssistantKey) {
+      const incoming = body.data.assistantId; // string | null | undefined
+
+      if (typeof incoming === 'string') {
+        const assistant = await assistantRepository.getById(incoming);
+        if (!assistant || assistant.active === false) {
+          return res.status(400).json({
+            error: 'ASSISTANT_INVALID',
+            message: 'Assistant not found or inactive',
+            traceId: req.requestId,
+          });
+        }
+        assistantNameToSet = assistant.name;
+      }
+
+      if (incoming === null) {
+        assistantNameToSet = null;
+      }
+    }
 
     try {
-      const updated = await visitRepository.updateStatus(id.data, body.data.status);
+      const updated = await visitRepository.updateStatusWithAssistant({
+        visitId,
+        nextStatus: body.data.status,
+        ...(hasAssistantKey
+          ? {
+              assistantId: body.data.assistantId ?? null,
+              assistantName: assistantNameToSet ?? null,
+            }
+          : {}),
+      });
+
       if (!updated) return res.status(404).json({ error: 'NOT_FOUND' });
 
       void publishClinicQueueUpdated({ visitDate: updated.visitDate });
@@ -237,6 +281,37 @@ router.patch(
       if (err instanceof InvalidStatusTransitionError) {
         return res.status(409).json({ error: err.code, message: err.message });
       }
+
+      const name = err instanceof Error ? err.name : '';
+      const message = err instanceof Error ? err.message : String(err);
+
+      // ✅ DynamoDB validation errors should be 400, not 500
+      if (name === 'ValidationException') {
+        return res.status(400).json({
+          error: 'BAD_REQUEST',
+          message,
+          traceId: req.requestId,
+        });
+      }
+
+      // ✅ Status update conflicts should be 409, not 500
+      if (name === 'TransactionCanceledException' || name === 'ConditionalCheckFailedException') {
+        return res.status(409).json({
+          error: 'VISIT_STATUS_UPDATE_CONFLICT',
+          message,
+          traceId: req.requestId,
+        });
+      }
+
+      logError('visit_status_patch_failed', {
+        reqId: req.requestId,
+        visitId,
+        error:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      });
+
       throw err;
     }
   }),
@@ -992,6 +1067,62 @@ router.patch(
     }
 
     return res.status(200).json({ rx: updated });
+  }),
+);
+
+router.patch(
+  '/:visitId/assistant',
+  requireRole('DOCTOR', 'ADMIN', 'RECEPTION'),
+  asyncHandler(async (req, res) => {
+    const id = VisitId.safeParse(req.params.visitId);
+    const body = VisitAssistantUpdate.safeParse(req.body);
+
+    if (!id.success || !body.success) {
+      return handleValidationError(req, res, [
+        ...(id.error?.issues ?? []),
+        ...(body.error?.issues ?? []),
+      ]);
+    }
+
+    const visit = await visitRepository.getById(id.data);
+    if (!visit) {
+      return res.status(404).json({
+        error: 'NOT_FOUND',
+        message: 'Visit not found',
+        traceId: req.requestId,
+      });
+    }
+
+    // clear
+    if (body.data.assistantId === null) {
+      const updated = await visitRepository.setVisitAssistant({
+        visitId: id.data,
+        assistantId: null,
+        assistantName: null,
+      });
+
+      void publishClinicQueueUpdated({ visitDate: visit.visitDate });
+      return res.status(200).json(updated);
+    }
+
+    // set
+    const assistant = await assistantRepository.getById(body.data.assistantId);
+    if (!assistant || assistant.active === false) {
+      return res.status(400).json({
+        error: 'ASSISTANT_INVALID',
+        message: 'Assistant not found or inactive',
+        traceId: req.requestId,
+      });
+    }
+
+    const updated = await visitRepository.setVisitAssistant({
+      visitId: id.data,
+      assistantId: assistant.assistantId,
+      assistantName: assistant.name,
+    });
+
+    void publishClinicQueueUpdated({ visitDate: visit.visitDate });
+    return res.status(200).json(updated);
   }),
 );
 

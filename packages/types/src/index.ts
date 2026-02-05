@@ -15,3 +15,5 @@ export * from './http';
 export * from './print';
 export * from './visitResponses';
 export * from './patientSummary';
+export * from './assistant';
+export * from './estimation';

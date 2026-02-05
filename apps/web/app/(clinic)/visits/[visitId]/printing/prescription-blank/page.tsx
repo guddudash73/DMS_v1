@@ -1,3 +1,4 @@
+// apps/web/app/(clinic)/visits/[visitId]/printing/prescription-blank/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -6,15 +7,13 @@ import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 
-import {
-  PrescriptionBlankPrintSheet,
-  PrescriptionBlankPreview,
-} from '@/components/prescription/PrescriptionBlankPrintSheet';
+import { PrescriptionPreview } from '@/components/prescription/PrescriptionPreview';
 
-import type { Visit } from '@dcm/types';
+import type { ToothDetail, Visit } from '@dcm/types';
 import { useGetVisitByIdQuery, useGetPatientByIdQuery } from '@/src/store/api';
 
 type PatientSex = 'M' | 'F' | 'O' | 'U';
+type PageKind = 'ODD' | 'EVEN';
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null;
@@ -86,6 +85,93 @@ function normalizeSex(raw: unknown): PatientSex | undefined {
   return undefined;
 }
 
+function getProp(obj: unknown, key: string): unknown {
+  if (!isRecord(obj)) return undefined;
+  return obj[key];
+}
+
+function getPropNumber(obj: unknown, key: string): number | undefined {
+  const v = getProp(obj, key);
+  return getNumber(v);
+}
+
+function getPropString(obj: unknown, key: string): string | undefined {
+  const v = getProp(obj, key);
+  return getString(v);
+}
+
+function formatPatientRegdDate(patientData: unknown): string {
+  const createdAtNum =
+    getPropNumber(patientData, 'createdAt') ??
+    getPropNumber(patientData, 'created_at') ??
+    getPropNumber(patientData, 'registeredAt') ??
+    getPropNumber(patientData, 'regdAt');
+
+  if (typeof createdAtNum === 'number' && Number.isFinite(createdAtNum) && createdAtNum > 0) {
+    return new Date(createdAtNum).toLocaleDateString('en-GB');
+  }
+
+  const createdAtStr =
+    getPropString(patientData, 'createdAt') ??
+    getPropString(patientData, 'created_at') ??
+    getPropString(patientData, 'registeredAt') ??
+    getPropString(patientData, 'regdAt');
+
+  if (createdAtStr) {
+    const d = new Date(createdAtStr);
+    if (Number.isFinite(d.getTime())) return d.toLocaleDateString('en-GB');
+  }
+
+  return '—';
+}
+
+async function waitForFontsReady(timeoutMs = 1500) {
+  try {
+    const fonts = (document as any).fonts;
+    if (!fonts?.ready) return;
+
+    await Promise.race([
+      fonts.ready,
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+    ]);
+  } catch {
+    // ignore
+  }
+}
+
+async function waitForImagesReady(root: HTMLElement, timeoutMs = 2000) {
+  const imgs = Array.from(root.querySelectorAll('img')) as HTMLImageElement[];
+  if (!imgs.length) return;
+
+  const tasks = imgs.map(async (img) => {
+    try {
+      if (img.complete && img.naturalWidth > 0) return;
+
+      if (typeof (img as any).decode === 'function') {
+        await Promise.race([
+          (img as any).decode(),
+          new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+        ]);
+        return;
+      }
+
+      await new Promise<void>((resolve) => {
+        const done = () => resolve();
+        img.addEventListener('load', done, { once: true });
+        img.addEventListener('error', done, { once: true });
+        setTimeout(done, timeoutMs);
+      });
+    } catch {
+      // ignore
+    }
+  });
+
+  await Promise.race([
+    Promise.all(tasks).then(() => undefined),
+    new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
+  ]);
+}
+
 export default function BlankPrescriptionPrintPage() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -98,6 +184,7 @@ export default function BlankPrescriptionPrintPage() {
   const visitRec: Record<string, unknown> = isRecord(visit)
     ? (visit as unknown as Record<string, unknown>)
     : {};
+
   const patientId = getString((visitRec as any).patientId);
 
   const patientQuery = useGetPatientByIdQuery(patientId ?? '', { skip: !patientId });
@@ -130,33 +217,152 @@ export default function BlankPrescriptionPrintPage() {
 
   const visitCreatedAtMs = getNumber((visitRec as any).createdAt) ?? Date.now();
 
-  // ✅ UPDATED (backend-aligned): compute from DOB if present; else fallback to stored age
   const ageFromDob = patientDob ? calculateAge(patientDob, new Date(visitCreatedAtMs)) : undefined;
   const ageStored = getNumber((patientRec as any).age);
   const patientAge = ageFromDob ?? ageStored;
 
   const patientSex = normalizeSex(patientSexRaw);
 
+  const patientRegdDate = React.useMemo(() => {
+    return formatPatientRegdDate(patientQuery.data);
+  }, [patientQuery.data]);
+
   const visitCreatedDateLabel = visitCreatedAtMs
     ? `Visit: ${toLocalISODate(new Date(visitCreatedAtMs))}`
     : undefined;
 
+  /**
+   * ✅ Keep the SAME Rx layout, but “blank” content:
+   * ToothDetailsBlock renders only when toothDetails.length > 0.
+   * Passing one empty object preserves the left column block area.
+   */
+  const toothDetailsForPreview = React.useMemo<ToothDetail[]>(() => {
+    return [{} as ToothDetail];
+  }, []);
+
+  // ---- UI toggles (match filled Rx UX pattern) ----
+  const [showPrintHeader, setShowPrintHeader] = React.useState(true);
+  const [activeKind, setActiveKind] = React.useState<PageKind>('ODD');
+
+  // If preview ever lands on EVEN, header toggle should snap back ON (same as filled page)
+  React.useEffect(() => {
+    if (activeKind === 'EVEN') setShowPrintHeader(true);
+  }, [activeKind]);
+
+  const printHeaderDisabled = activeKind !== 'ODD';
+  const printHeaderDisabledTitle =
+    activeKind !== 'ODD'
+      ? 'Print Header applies to ODD pages only'
+      : 'Toggle showing the printed prescription header/footer artwork (ODD pages only)';
+
+  // ✅ Match PrescriptionPreview's A4 canvas (@96dpi)
+  const PRINT_BASE_W = Math.round((210 / 25.4) * 96); // 794
+  const PRINT_BASE_H = Math.round((297 / 25.4) * 96); // 1123
+
   const printBlank = () => {
     const onAfterPrint = () => {
-      document.body.classList.remove('print-rx-blank');
+      const el = document.querySelector<HTMLElement>('.rx-preview-print-source');
+      el?.style.removeProperty('--rx-print-scale');
+      document.body.classList.remove('print-preview-rx-blank');
       window.removeEventListener('afterprint', onAfterPrint);
     };
 
     window.addEventListener('afterprint', onAfterPrint);
-    document.body.classList.add('print-rx-blank');
+    document.body.classList.add('print-preview-rx-blank');
 
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => window.print());
+      requestAnimationFrame(async () => {
+        const host = document.querySelector<HTMLElement>('.rx-preview-print-source');
+        if (host) {
+          await waitForFontsReady(2000);
+          await waitForImagesReady(host, 2500);
+
+          const rect = host.getBoundingClientRect();
+          const w = rect.width || 1;
+          const h = rect.height || 1;
+
+          const scale = Math.min(1, Math.min(w / PRINT_BASE_W, h / PRINT_BASE_H));
+          host.style.setProperty('--rx-print-scale', String(scale));
+        }
+
+        window.print();
+      });
     });
   };
 
   return (
     <section className="p-4 2xl:p-8">
+      <style>{`
+        @media print {
+          @page { size: A4; margin: 0; }
+
+          html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            background: #fff;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+
+          body.print-preview-rx-blank :not(.rx-preview-print-source):not(.rx-preview-print-source *) {
+            visibility: hidden;
+          }
+
+          body.print-preview-rx-blank .rx-preview-print-source {
+            visibility: visible;
+            position: fixed;
+            inset: 0;
+            margin: 0;
+            padding: 0;
+            background: #fff;
+            overflow: hidden;
+            overscroll-behavior: none;
+
+            display: flex;
+            align-items: center;
+            justify-content: center;
+
+            --rx-print-scale: 1;
+          }
+
+          body.print-preview-rx-blank .rx-preview-print-source .rx-print-stage {
+            width: ${PRINT_BASE_W}px;
+            height: ${PRINT_BASE_H}px;
+            display: inline-block;
+
+            transform: scale(var(--rx-print-scale));
+            transform-origin: center center;
+          }
+
+          body.print-preview-rx-blank .rx-preview-print-source .rx-preview-shell {
+            width: ${PRINT_BASE_W}px;
+          }
+
+          body.print-preview-rx-blank .rx-preview-print-source .shadow-sm,
+          body.print-preview-rx-blank .rx-preview-print-source .shadow,
+          body.print-preview-rx-blank .rx-preview-print-source .rounded-xl,
+          body.print-preview-rx-blank .rx-preview-print-source .rounded-2xl,
+          body.print-preview-rx-blank .rx-preview-print-source .border {
+            box-shadow: none;
+            border: none;
+            border-radius: 0;
+          }
+
+          body.print-preview-rx-blank .rx-preview-print-source button,
+          body.print-preview-rx-blank .rx-preview-print-source .rx-preview-pagination,
+          body.print-preview-rx-blank .rx-preview-print-source [data-pagination="1"] {
+            display: none;
+          }
+
+          body.print-preview-rx-blank .rx-preview-shell {
+            margin: 0;
+            padding: 0;
+          }
+        }
+      `}</style>
+
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <div className="text-lg font-semibold text-gray-900">
@@ -176,9 +382,23 @@ export default function BlankPrescriptionPrintPage() {
           </Button>
 
           <Button
+            variant="outline"
+            className="rounded-xl cursor-pointer"
+            disabled={printHeaderDisabled}
+            onClick={() => {
+              if (printHeaderDisabled) return;
+              setShowPrintHeader((v) => !v);
+            }}
+            title={printHeaderDisabledTitle}
+          >
+            {showPrintHeader ? 'Print Header: ON' : 'Print Header: OFF'}
+          </Button>
+
+          <Button
             variant="default"
             className="rounded-xl bg-black text-white hover:bg-black/90"
             onClick={printBlank}
+            title="Print blank prescription"
           >
             Print
           </Button>
@@ -188,28 +408,30 @@ export default function BlankPrescriptionPrintPage() {
       <Card className="rounded-2xl border bg-white p-4">
         <div className="text-sm font-semibold text-gray-900">Preview</div>
 
-        <div className="mt-3">
-          <PrescriptionBlankPreview
-            patientName={patientName}
-            patientPhone={patientPhone}
-            patientAge={patientAge}
-            patientSex={patientSex}
-            sdId={patientSdId}
-            opdNo={opdNo}
-            visitDateLabel={visitCreatedDateLabel}
-          />
+        <div className="rx-preview-print-source mt-3">
+          <div className="rx-print-stage">
+            <div className="rx-preview-shell min-w-0 overflow-x-hidden">
+              <PrescriptionPreview
+                patientName={patientName}
+                patientPhone={patientPhone}
+                patientAge={patientAge}
+                patientSex={patientSex}
+                sdId={patientSdId}
+                opdNo={opdNo}
+                regdDate={patientRegdDate}
+                visitDateLabel={visitCreatedDateLabel}
+                lines={[]}
+                doctorNotes=""
+                receptionNotes={undefined}
+                toothDetails={toothDetailsForPreview}
+                currentOnly={false}
+                showPrintHeader={showPrintHeader}
+                onActivePageKindChange={(kind) => setActiveKind(kind)}
+              />
+            </div>
+          </div>
         </div>
       </Card>
-
-      <PrescriptionBlankPrintSheet
-        patientName={patientName}
-        patientPhone={patientPhone}
-        patientAge={patientAge}
-        patientSex={patientSex}
-        sdId={patientSdId}
-        opdNo={opdNo}
-        visitDateLabel={visitCreatedDateLabel}
-      />
     </section>
   );
 }

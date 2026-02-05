@@ -1,3 +1,4 @@
+// apps/web/app/(clinic)/patients/[id]/page.tsx
 'use client';
 
 import * as React from 'react';
@@ -35,7 +36,6 @@ import { Calendar } from '@/components/ui/calendar';
 
 import { ArrowRight, Calendar as CalendarIcon } from 'lucide-react';
 import { clinicDateISO, formatClinicDateShort } from '@/src/lib/clinicTime';
-import { PrescriptionPrintSheet } from '@/components/prescription/PrescriptionPrintSheet';
 import EditPatientModal from '@/components/patients/EditPatientModal';
 
 type ApiError = {
@@ -88,16 +88,6 @@ function calculateAge(dob: Date, at: Date): number {
   const m = at.getMonth() - dob.getMonth();
   if (m < 0 || (m === 0 && at.getDate() < dob.getDate())) age -= 1;
   return age < 0 ? 0 : age;
-}
-
-function normalizeSexFromPatientGender(raw?: string): PatientSex | undefined {
-  if (!raw) return undefined;
-  const s = String(raw).trim().toUpperCase();
-  if (s === 'MALE' || s === 'M') return 'M';
-  if (s === 'FEMALE' || s === 'F') return 'F';
-  if (s === 'OTHER' || s === 'O') return 'O';
-  if (s === 'UNKNOWN' || s === 'U') return 'U';
-  return undefined;
 }
 
 function genderLabel(raw?: string): string {
@@ -193,7 +183,6 @@ function zeroBilledBadgeClass() {
   return 'bg-rose-100 text-rose-700 border-rose-200';
 }
 
-// Lint-only fix: avoid `any` for the optional `isAvoided` field.
 function isAvoidedFlag(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return value['isAvoided'] === true;
@@ -205,10 +194,6 @@ export default function PatientDetailPage() {
   const router = useRouter();
 
   const [registerOpen, setRegisterOpen] = React.useState(false);
-
-  const [printMounted, setPrintMounted] = React.useState(false);
-  React.useEffect(() => setPrintMounted(true), []);
-
   const [editOpen, setEditOpen] = React.useState(false);
 
   if (!rawId || typeof rawId !== 'string') {
@@ -331,59 +316,21 @@ export default function PatientDetailPage() {
 
   const followupLabel = summary?.nextFollowUpDate ?? 'No Follow Up Scheduled';
 
-  // ✅ Patient can store either dob OR age
-  const patientDob = safeParseDobToDate(patient?.dob);
-  const computedAgeFromDob = patientDob ? calculateAge(patientDob, new Date()) : undefined;
-  const patientAgeForPrint =
-    typeof computedAgeFromDob === 'number'
-      ? computedAgeFromDob
-      : typeof patient?.age === 'number'
-        ? patient.age
-        : undefined;
-
-  const patientSex = normalizeSexFromPatientGender(patient?.gender);
-
-  const dobOrAgeLabel = React.useMemo(() => {
+  const patientAgeLabel = React.useMemo(() => {
     if (!patient) return '—';
 
-    if (patient.dob?.trim()) return patient.dob.trim();
-    if (typeof patient.age === 'number' && Number.isFinite(patient.age)) return `${patient.age}`;
+    const dobDate = safeParseDobToDate(patient.dob);
+    if (dobDate) {
+      const age = calculateAge(dobDate, new Date());
+      return Number.isFinite(age) ? String(age) : '—';
+    }
+
+    if (typeof patient.age === 'number' && Number.isFinite(patient.age)) {
+      return String(patient.age);
+    }
+
     return '—';
   }, [patient]);
-
-  const dobOrAgeModeLabel = React.useMemo(() => {
-    if (!patient) return 'DOB/Age';
-    if (patient.dob?.trim()) return 'DOB';
-    if (typeof patient.age === 'number' && Number.isFinite(patient.age)) return 'Age';
-    return 'DOB/Age';
-  }, [patient]);
-
-  const doctorName = me?.doctorProfile?.fullName?.trim()
-    ? me.doctorProfile.fullName.trim()
-    : undefined;
-
-  const doctorRegdLabel = me?.doctorProfile?.registrationNumber
-    ? `B.D.S Regd. - ${me.doctorProfile.registrationNumber}`
-    : undefined;
-
-  // ✅ safer: pass Date explicitly
-  const visitDateLabel = `Visit: ${clinicDateISO(new Date())}`;
-
-  const printBlankRx = () => {
-    if (!patient) return;
-
-    const onAfterPrint = () => {
-      document.body.classList.remove('print-rx');
-      window.removeEventListener('afterprint', onAfterPrint);
-    };
-
-    window.addEventListener('afterprint', onAfterPrint);
-    document.body.classList.add('print-rx');
-
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => window.print());
-    });
-  };
 
   const PAGE_SIZE = 4;
   const [page, setPage] = React.useState<number>(1);
@@ -498,11 +445,10 @@ export default function PatientDetailPage() {
                   <dd className="text-gray-900">: {patient.name}</dd>
                 </div>
 
-                {/* ✅ show DOB or Age depending on what is stored */}
                 <div className="flex gap-3">
-                  <dt className="w-28 shrink-0 text-gray-600">{dobOrAgeModeLabel}/Sex</dt>
+                  <dt className="w-28 shrink-0 text-gray-600">Age/Sex</dt>
                   <dd className="text-gray-900">
-                    : {dobOrAgeLabel} / {genderLabel(patient.gender)}
+                    : {patientAgeLabel} / {genderLabel(patient.gender)}
                   </dd>
                 </div>
 
@@ -542,7 +488,19 @@ export default function PatientDetailPage() {
             </div>
           )}
 
+          {/* ✅ Buttons row (added "Estimations") */}
           <div className="mt-5 flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-2xl cursor-pointer"
+              onClick={() => router.push(`/patients/${patientId}/estimations`)}
+              disabled={!patient || !!patientErrorMessage}
+              title={!patient ? 'Patient not loaded' : 'View estimations'}
+            >
+              Estimations
+            </Button>
+
             <Button
               type="button"
               variant="outline"
@@ -582,7 +540,7 @@ export default function PatientDetailPage() {
               type="button"
               variant="outline"
               className="rounded-2xl cursor-pointer"
-              onClick={printBlankRx}
+              onClick={() => router.push(`/patients/${patientId}/printing/prescription-blank`)}
               disabled={!patient || !!patientErrorMessage}
               title={!patient ? 'Patient not loaded' : 'Print blank prescription'}
             >
@@ -605,6 +563,7 @@ export default function PatientDetailPage() {
         </Card>
       </div>
 
+      {/* rest unchanged */}
       <div className="flex flex-col gap-4 pt-10">
         <div className="flex items-center justify-end gap-6">
           <Popover open={datePopoverOpen} onOpenChange={setDatePopoverOpen}>
@@ -660,19 +619,15 @@ export default function PatientDetailPage() {
                   <TableHead className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Visit Date
                   </TableHead>
-
                   <TableHead className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Reason
                   </TableHead>
-
                   <TableHead className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Type
                   </TableHead>
-
                   <TableHead className="px-6 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Stage
                   </TableHead>
-
                   <TableHead className="px-6 py-3 text-right text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Action
                   </TableHead>
@@ -912,22 +867,6 @@ export default function PatientDetailPage() {
           </Card>
         </div>
       </div>
-
-      {printMounted ? (
-        <PrescriptionPrintSheet
-          patientName={patient?.name}
-          patientPhone={patient?.phone}
-          patientAge={patientAgeForPrint}
-          patientSex={patientSex}
-          sdId={patient?.sdId}
-          opdNo={undefined}
-          doctorName={doctorName}
-          doctorRegdLabel={doctorRegdLabel}
-          visitDateLabel={visitDateLabel}
-          lines={[]}
-          receptionNotes={''}
-        />
-      ) : null}
     </section>
   );
 }

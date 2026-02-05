@@ -18,9 +18,18 @@ import {
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 
 import { Label } from '@/components/ui/label';
-import { Pencil, Trash2, Plus, Search, CheckCircle2, Loader2 } from 'lucide-react';
+import {
+  Pencil,
+  Trash2,
+  Plus,
+  Search,
+  CheckCircle2,
+  Loader2,
+  Check,
+  ChevronsUpDown,
+} from 'lucide-react';
 
-import type { MedicinePreset, MedicineForm } from '@dcm/types';
+import type { MedicinePreset } from '@dcm/types';
 
 import {
   useAdminListMedicinesQuery,
@@ -32,26 +41,52 @@ import {
   type AdminMedicinesStatus,
 } from '@/src/store/api';
 
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from '@/components/ui/command';
+import { cn } from '@/lib/utils';
+
 const FREQUENCIES = ['QD', 'BID', 'TID', 'QID', 'HS', 'PRN'] as const;
 type Frequency = (typeof FREQUENCIES)[number];
 
-const MEDICINE_FORMS: MedicineForm[] = [
-  'TABLET',
-  'CAPSULE',
-  'SYRUP',
-  'INJECTION',
-  'OINTMENT',
-  'GEL',
-  'MOUTHWASH',
-  'OTHER',
-];
+/**
+ * ✅ medicineType is a free string in backend (z.string().min(1).max(64)),
+ * but UI uses a common dropdown + allows "Use typed".
+ * Keep consistent with MedicinesEditor.tsx.
+ */
+const COMMON_MEDICINE_TYPES = [
+  'Antibiotic',
+  'Painkiller',
+  'Paracetamol',
+  'Anti-inflammatory',
+  'Antacid',
+  'Antihistamine',
+  'Decongestant',
+  'Cough Suppressant',
+  'Expectorant',
+  'Bronchodilator',
+  'Steroid',
+  'Antifungal',
+  'Antiviral',
+  'Deworming',
+  'Antiseptic',
+  'Vitamin',
+  'Mouthwash',
+  'Local Anesthetic',
+] as const;
 
 type FormState = {
   displayName: string;
   defaultDose?: string;
   defaultFrequency?: Frequency | '';
   defaultDuration?: number;
-  form?: MedicineForm | '';
+  medicineType?: string;
 };
 
 const emptyForm = (): FormState => ({
@@ -59,7 +94,7 @@ const emptyForm = (): FormState => ({
   defaultDose: '',
   defaultFrequency: '',
   defaultDuration: undefined,
-  form: '',
+  medicineType: '',
 });
 
 const toNumberOrUndef = (v: string) => {
@@ -69,11 +104,6 @@ const toNumberOrUndef = (v: string) => {
   return Number.isFinite(n) ? n : undefined;
 };
 
-const isMedicineForm = (v: unknown): v is MedicineForm =>
-  typeof v === 'string' && (MEDICINE_FORMS as readonly string[]).includes(v);
-
-const toFormValue = (v: unknown): MedicineForm | '' => (isMedicineForm(v) ? v : '');
-
 const toFrequencyValue = (v: unknown): Frequency | '' =>
   typeof v === 'string' && (FREQUENCIES as readonly string[]).includes(v) ? (v as Frequency) : '';
 
@@ -81,7 +111,8 @@ const formatDefaults = (m: MedicinePreset) => {
   const dose = m.defaultDose?.trim() ? m.defaultDose : '—';
   const freq = m.defaultFrequency?.trim() ? m.defaultFrequency : '—';
   const dur = typeof m.defaultDuration === 'number' ? `${m.defaultDuration}d` : '—';
-  return { dose, freq, dur };
+  const type = m.medicineType?.trim() ? m.medicineType : '—';
+  return { dose, freq, dur, type };
 };
 
 function SelectLike({
@@ -114,6 +145,118 @@ function getStringProp(obj: unknown, keys: string[]): string | undefined {
     if (typeof v === 'string' && v.trim()) return v;
   }
   return undefined;
+}
+
+/**
+ * ✅ MedicineType combobox:
+ * - dropdown of common categories
+ * - searchable
+ * - allow "Use typed"
+ */
+function MedicineTypeCombobox({
+  value,
+  onChange,
+  placeholder = 'Type —',
+}: {
+  value: string;
+  onChange: (next: string) => void;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [query, setQuery] = React.useState(value);
+
+  const display = value.trim();
+  const q = query.trim();
+  const qLower = q.toLowerCase();
+
+  const filtered = COMMON_MEDICINE_TYPES.filter((t) => t.toLowerCase().includes(qLower));
+
+  const exactMatch =
+    q.length > 0 ? COMMON_MEDICINE_TYPES.some((t) => t.toLowerCase() === qLower) : false;
+  const canUseTyped = q.length > 0 && !exactMatch;
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (nextOpen) setQuery(display);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          className="h-10 w-full justify-between rounded-xl"
+        >
+          <span className={cn('truncate text-left', display ? 'text-gray-900' : 'text-gray-500')}>
+            {display || placeholder}
+          </span>
+          <ChevronsUpDown className="h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+
+      <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+        <Command>
+          <CommandInput
+            placeholder="Search / type medicine type…"
+            value={query}
+            onValueChange={setQuery}
+          />
+          <CommandList>
+            <CommandEmpty>No matches.</CommandEmpty>
+
+            <CommandGroup heading="Common types">
+              {filtered.map((t) => (
+                <CommandItem
+                  key={t}
+                  value={t}
+                  onSelect={() => {
+                    onChange(t);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn('mr-2 h-4 w-4', display === t ? 'opacity-100' : 'opacity-0')}
+                  />
+                  <span className="truncate">{t}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+
+            {canUseTyped ? (
+              <CommandGroup heading="Use typed">
+                <CommandItem
+                  value={`use:${q}`}
+                  onSelect={() => {
+                    onChange(q);
+                    setOpen(false);
+                  }}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Use “{q}”
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
+
+            {display ? (
+              <CommandGroup heading="Actions">
+                <CommandItem
+                  value="clear"
+                  onSelect={() => {
+                    onChange('');
+                    setOpen(false);
+                  }}
+                >
+                  Clear
+                </CommandItem>
+              </CommandGroup>
+            ) : null}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
 }
 
 export default function AdminMedicinesPage() {
@@ -189,7 +332,7 @@ export default function AdminMedicinesPage() {
       defaultDose: m.defaultDose ?? '',
       defaultFrequency: toFrequencyValue(m.defaultFrequency),
       defaultDuration: m.defaultDuration,
-      form: toFormValue(m.form),
+      medicineType: m.medicineType ?? '',
     });
     setEditOpen(true);
   };
@@ -198,12 +341,14 @@ export default function AdminMedicinesPage() {
     const name = addForm.displayName.trim();
     if (!name) return;
 
+    const mt = (addForm.medicineType ?? '').trim();
+
     await createMedicine({
       displayName: name,
       defaultDose: addForm.defaultDose?.trim() || undefined,
       defaultFrequency: addForm.defaultFrequency?.trim() || undefined,
       defaultDuration: addForm.defaultDuration,
-      form: addForm.form || undefined,
+      medicineType: mt ? mt : undefined,
     }).unwrap();
 
     setAddOpen(false);
@@ -215,6 +360,8 @@ export default function AdminMedicinesPage() {
     const name = editForm.displayName.trim();
     if (!name) return;
 
+    const mt = (editForm.medicineType ?? '').trim();
+
     await updateMedicine({
       id: editTarget.id,
       patch: {
@@ -222,7 +369,7 @@ export default function AdminMedicinesPage() {
         defaultDose: editForm.defaultDose?.trim() || undefined,
         defaultFrequency: editForm.defaultFrequency?.trim() || undefined,
         defaultDuration: editForm.defaultDuration,
-        form: editForm.form || undefined,
+        medicineType: mt ? mt : undefined,
       },
     }).unwrap();
 
@@ -342,6 +489,7 @@ export default function AdminMedicinesPage() {
         </Button>
       </div>
 
+      {/* ADD */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-xl rounded-2xl">
           <DialogHeader>
@@ -360,19 +508,31 @@ export default function AdminMedicinesPage() {
               />
             </div>
 
+            <div className="grid gap-2">
+              <Label className="text-xs">Type (medicineType)</Label>
+              <MedicineTypeCombobox
+                value={addForm.medicineType ?? ''}
+                onChange={(v) => setAddForm((p) => ({ ...p, medicineType: v }))}
+                placeholder="Type —"
+              />
+              <div className="text-[11px] text-gray-500">
+                Optional. Used by Rx editor as “Type” dropdown.
+              </div>
+            </div>
+
             <div className="grid grid-cols-3 gap-3">
               <div className="grid gap-2">
-                <Label className="text-xs">Dose</Label>
+                <Label className="text-xs">Default dose</Label>
                 <Input
                   className="rounded-xl"
-                  placeholder="e.g., 1 tab"
+                  placeholder="e.g., 500mg"
                   value={addForm.defaultDose ?? ''}
                   onChange={(e) => setAddForm((p) => ({ ...p, defaultDose: e.target.value }))}
                 />
               </div>
 
               <div className="grid gap-2">
-                <Label className="text-xs">Frequency</Label>
+                <Label className="text-xs">Default frequency</Label>
                 <SelectLike
                   value={addForm.defaultFrequency ?? ''}
                   onChange={(v) => setAddForm((p) => ({ ...p, defaultFrequency: v as Frequency }))}
@@ -387,7 +547,7 @@ export default function AdminMedicinesPage() {
               </div>
 
               <div className="grid gap-2">
-                <Label className="text-xs">Duration (days)</Label>
+                <Label className="text-xs">Default duration (days)</Label>
                 <Input
                   className="rounded-xl"
                   inputMode="numeric"
@@ -402,21 +562,6 @@ export default function AdminMedicinesPage() {
                   }
                 />
               </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label className="text-xs">Form (optional)</Label>
-              <SelectLike
-                value={addForm.form ?? ''}
-                onChange={(v) => setAddForm((p) => ({ ...p, form: toFormValue(v) }))}
-                placeholder="Select…"
-              >
-                {MEDICINE_FORMS.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </SelectLike>
             </div>
           </div>
 
@@ -436,6 +581,7 @@ export default function AdminMedicinesPage() {
         </DialogContent>
       </Dialog>
 
+      {/* EDIT */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-w-xl rounded-2xl">
           <DialogHeader>
@@ -453,9 +599,19 @@ export default function AdminMedicinesPage() {
               />
             </div>
 
+            <div className="grid gap-2">
+              <Label className="text-xs">Type (medicineType)</Label>
+              <MedicineTypeCombobox
+                value={editForm.medicineType ?? ''}
+                onChange={(v) => setEditForm((p) => ({ ...p, medicineType: v }))}
+                placeholder="Type —"
+              />
+              <div className="text-[11px] text-gray-500">Optional.</div>
+            </div>
+
             <div className="grid grid-cols-3 gap-3">
               <div className="grid gap-2">
-                <Label className="text-xs">Dose</Label>
+                <Label className="text-xs">Default dose</Label>
                 <Input
                   className="rounded-xl"
                   value={editForm.defaultDose ?? ''}
@@ -464,7 +620,7 @@ export default function AdminMedicinesPage() {
               </div>
 
               <div className="grid gap-2">
-                <Label className="text-xs">Frequency</Label>
+                <Label className="text-xs">Default frequency</Label>
                 <SelectLike
                   value={editForm.defaultFrequency ?? ''}
                   onChange={(v) => setEditForm((p) => ({ ...p, defaultFrequency: v as Frequency }))}
@@ -479,7 +635,7 @@ export default function AdminMedicinesPage() {
               </div>
 
               <div className="grid gap-2">
-                <Label className="text-xs">Duration (days)</Label>
+                <Label className="text-xs">Default duration (days)</Label>
                 <Input
                   className="rounded-xl"
                   inputMode="numeric"
@@ -493,21 +649,6 @@ export default function AdminMedicinesPage() {
                   }
                 />
               </div>
-            </div>
-
-            <div className="grid gap-2">
-              <Label className="text-xs">Form (optional)</Label>
-              <SelectLike
-                value={editForm.form ?? ''}
-                onChange={(v) => setEditForm((p) => ({ ...p, form: toFormValue(v) }))}
-                placeholder="Select…"
-              >
-                {MEDICINE_FORMS.map((f) => (
-                  <option key={f} value={f}>
-                    {f}
-                  </option>
-                ))}
-              </SelectLike>
             </div>
           </div>
 
@@ -607,9 +748,17 @@ function MedicinesTable({
                   <td className="px-5 py-4">
                     <div className="font-semibold text-gray-900">{m.displayName}</div>
                     <div className="mt-0.5 text-[11px] text-gray-500">ID: {m.id}</div>
+                    {m.medicineType?.trim() ? (
+                      <div className="mt-1">
+                        <Badge variant="secondary" className="rounded-full text-[10px]">
+                          {m.medicineType}
+                        </Badge>
+                      </div>
+                    ) : null}
                   </td>
 
                   <td className="px-5 py-4 text-[11px] text-gray-700">
+                    <div>Type: {d.type}</div>
                     <div>Dose: {d.dose}</div>
                     <div>Freq: {d.freq}</div>
                     <div>Dur: {d.dur}</div>

@@ -1,3 +1,4 @@
+// apps/web/components/doctor/visits/DoctorVisitPageClient.tsx
 'use client';
 
 import * as React from 'react';
@@ -8,6 +9,21 @@ import { toast } from 'react-toastify';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 
 import {
   useGetVisitByIdQuery,
@@ -16,12 +32,13 @@ import {
   useUpdateVisitStatusMutation,
   useGetDoctorsQuery,
   useStartVisitRxRevisionMutation,
+  useGetAssistantsQuery,
 } from '@/src/store/api';
 
 import { useAuth } from '@/src/hooks/useAuth';
 import { ArrowRight, Stethoscope } from 'lucide-react';
 
-import type { Visit } from '@dcm/types';
+import type { Visit, Assistant } from '@dcm/types';
 
 // Lazy-load DONE view (heavy: Rx preview + X-rays + history + calendar)
 const DoctorVisitDoneView = dynamic(
@@ -60,6 +77,9 @@ type VisitExtras = {
   opdNumber?: string;
   tag?: string;
   anchorVisitId?: string;
+
+  assistantId?: string;
+  assistantName?: string;
 };
 type VisitWithExtras = Visit & VisitExtras;
 
@@ -80,10 +100,6 @@ function getNumber(v: unknown): number | undefined {
 function getProp(obj: unknown, key: string): unknown {
   if (!isRecord(obj)) return undefined;
   return obj[key];
-}
-
-function getPropString(obj: unknown, key: string): string | undefined {
-  return getString(getProp(obj, key));
 }
 
 function getPropNumber(obj: unknown, key: string): number | undefined {
@@ -152,6 +168,16 @@ function stageBadgeClass(status?: Visit['status']) {
   return 'bg-gray-100 text-gray-700 border-gray-200';
 }
 
+/* ------------------------------------------------------------------ */
+/* assistant helpers                                                   */
+/* ------------------------------------------------------------------ */
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isUuid(v: string) {
+  return UUID_RE.test(v);
+}
+
 export function DoctorVisitPageClient() {
   const params = useParams<{ visitId: string }>();
   const router = useRouter();
@@ -174,8 +200,128 @@ export function DoctorVisitPageClient() {
   const [updateVisitStatus, updateVisitStatusState] = useUpdateVisitStatusMutation();
   const [startRevision, startRevisionState] = useStartVisitRxRevisionMutation();
 
-  // doctors list is cached longer now; still keep it but don’t refetch aggressively
   const doctorsQuery = useGetDoctorsQuery(undefined);
+
+  /* ---------------- assistants ---------------- */
+
+  const assistantsQuery = useGetAssistantsQuery(undefined);
+  const assistants = React.useMemo<Assistant[]>(() => {
+    const items = (assistantsQuery.data as any)?.items;
+    return Array.isArray(items) ? (items as Assistant[]) : [];
+  }, [assistantsQuery.data]);
+
+  const activeAssistants = React.useMemo(() => {
+    return assistants
+      .filter((a) => Boolean(a?.active))
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [assistants]);
+
+  const storedAssistantId = getString(getProp(visit as unknown, 'assistantId'));
+  const storedAssistantName = getString(getProp(visit as unknown, 'assistantName'));
+
+  // ✅ only allow choosing assistant when visit is editable (and not offline)
+  const canChooseAssistant =
+    !isOffline && (visit?.status === 'QUEUED' || visit?.status === 'IN_PROGRESS');
+
+  // ✅ Selection state is VISIT-SCOPED (no leakage across visits)
+  const [selectedAssistantId, setSelectedAssistantId] = React.useState<string>('');
+
+  // ✅ visit-scoped sessionStorage key
+  const assistantCacheKey = React.useMemo(() => {
+    return visitId ? `dcm:visit:${visitId}:assistantId` : '';
+  }, [visitId]);
+
+  // Restore selection (ONLY for this visitId)
+  React.useEffect(() => {
+    // If visit already has assistant stored, reflect it and stop.
+    if (storedAssistantId) {
+      setSelectedAssistantId(storedAssistantId);
+      return;
+    }
+
+    // Only allow restoring cached selection when assistant can be chosen
+    if (!canChooseAssistant) {
+      setSelectedAssistantId('');
+      return;
+    }
+
+    if (!assistantCacheKey) return;
+    if (typeof window === 'undefined') return;
+
+    try {
+      const prev = window.sessionStorage.getItem(assistantCacheKey)?.trim() ?? '';
+      if (prev && isUuid(prev)) setSelectedAssistantId(prev);
+      else window.sessionStorage.removeItem(assistantCacheKey);
+    } catch {}
+  }, [storedAssistantId, assistantCacheKey, canChooseAssistant]);
+
+  // Persist selection (ONLY for this visitId + only while selectable)
+  React.useEffect(() => {
+    if (!assistantCacheKey) return;
+    if (typeof window === 'undefined') return;
+
+    // If visit is DONE / not selectable, never persist and remove any cached value
+    if (!canChooseAssistant) {
+      try {
+        window.sessionStorage.removeItem(assistantCacheKey);
+      } catch {}
+      return;
+    }
+
+    // If backend already stored one, do not overwrite
+    if (storedAssistantId) return;
+
+    try {
+      const v = selectedAssistantId.trim();
+      if (v && isUuid(v)) window.sessionStorage.setItem(assistantCacheKey, v);
+      else window.sessionStorage.removeItem(assistantCacheKey);
+    } catch {}
+  }, [assistantCacheKey, selectedAssistantId, storedAssistantId, canChooseAssistant]);
+
+  // Auto-clean stale UUIDs (e.g., assistant deleted/inactive)
+  React.useEffect(() => {
+    if (storedAssistantId) return;
+    if (!selectedAssistantId) return;
+
+    if (!isUuid(selectedAssistantId)) {
+      setSelectedAssistantId('');
+      return;
+    }
+
+    const ok = activeAssistants.some((a) => a.assistantId === selectedAssistantId);
+    if (!ok) setSelectedAssistantId('');
+  }, [storedAssistantId, selectedAssistantId, activeAssistants]);
+
+  const selectedAssistant = React.useMemo(() => {
+    // only consider selection when you can choose assistant
+    const id =
+      storedAssistantId ?? (canChooseAssistant ? selectedAssistantId || undefined : undefined);
+
+    if (!id) return null;
+    return activeAssistants.find((a) => a.assistantId === id) ?? null;
+  }, [activeAssistants, selectedAssistantId, storedAssistantId, canChooseAssistant]);
+
+  // ✅ Show "(selected)" only when user can choose assistant AND visit has no stored assistant
+  const pendingAssistantLabel =
+    canChooseAssistant && !storedAssistantId ? selectedAssistant?.name : undefined;
+
+  // ✅ For display: ONLY visit-specific stored assistant name (no fallback)
+  const assistantLabelForUI = storedAssistantName ?? undefined;
+
+  // Decide what assistantId (if any) to send when starting the session
+  const resolvedAssistantId = React.useMemo(() => {
+    // If backend already stored one, always use it (read-only)
+    if (storedAssistantId) return storedAssistantId;
+
+    const v = selectedAssistantId.trim();
+    if (!v || !isUuid(v)) return undefined;
+
+    const ok = activeAssistants.some((a) => a.assistantId === v);
+    return ok ? v : undefined;
+  }, [storedAssistantId, selectedAssistantId, activeAssistants]);
+
+  /* ---------------- doctor display ---------------- */
 
   const doctorFromList = React.useMemo<DoctorLite | null>(() => {
     const list = doctorsQuery.data;
@@ -232,6 +378,43 @@ export function DoctorVisitPageClient() {
   const sessionMutedReason =
     'This is an offline visit. Session editing is disabled in Doctor view.';
 
+  /* ---------------- proceed-without-assistant confirm ---------------- */
+
+  const [noAssistantConfirmOpen, setNoAssistantConfirmOpen] = React.useState(false);
+
+  // In UI, "selectedAssistantId" might be '', but user could still proceed.
+  // We only consider a valid assistant selection if it is a UUID AND exists in activeAssistants.
+  const hasValidAssistantSelected = Boolean(resolvedAssistantId);
+  const canProceedWithoutAssistant = true; // business rule: assistant optional
+
+  const startQueuedSession = async (opts?: { proceededWithoutAssistant?: boolean }) => {
+    if (sessionMuted) {
+      toast.info(sessionMutedReason);
+      return;
+    }
+    if (!visitId) return;
+
+    try {
+      if (opts?.proceededWithoutAssistant) {
+        toast.warn('Proceeding without selecting an assistant.');
+      }
+
+      await updateVisitStatus({
+        visitId,
+        status: 'IN_PROGRESS',
+        date: visit?.visitDate,
+
+        // ✅ Only send when it is a valid UUID + active assistant
+        ...(resolvedAssistantId !== undefined ? { assistantId: resolvedAssistantId } : {}),
+      }).unwrap();
+
+      toast.success('Session started.');
+      router.push(`/doctor/visits/${visitId}/prescription`);
+    } catch (err: unknown) {
+      toast.error(getErrorMessage(err) ?? 'Failed to start session.');
+    }
+  };
+
   const onStartRevision = async () => {
     if (!visitId) return;
 
@@ -262,24 +445,23 @@ export function DoctorVisitPageClient() {
       return;
     }
 
+    // If already in progress, continue without forcing assistant selection
     if (status === 'IN_PROGRESS') {
+      if (!storedAssistantId && !selectedAssistantId) {
+        toast.info('Tip: You can select an assistant (optional) before starting.');
+      }
       router.push(`/doctor/visits/${visitId}/prescription`);
       return;
     }
 
     if (status === 'QUEUED') {
-      try {
-        await updateVisitStatus({
-          visitId,
-          status: 'IN_PROGRESS',
-          date: visit?.visitDate,
-        }).unwrap();
-
-        toast.success('Session started.');
-        router.push(`/doctor/visits/${visitId}/prescription`);
-      } catch (err: unknown) {
-        toast.error(getErrorMessage(err) ?? 'Failed to start session.');
+      // Confirm only when user has not selected a valid assistant
+      if (!hasValidAssistantSelected && canProceedWithoutAssistant) {
+        setNoAssistantConfirmOpen(true);
+        return;
       }
+
+      await startQueuedSession();
       return;
     }
 
@@ -294,9 +476,43 @@ export function DoctorVisitPageClient() {
     );
   }
 
-  // tiny, fast header; heavy DONE view is lazily loaded below
   return (
     <section className="h-full px-3 py-4 md:px-6 md:py-6 2xl:px-10 2xl:py-10">
+      {/* Proceed without assistant confirm dialog */}
+      <Dialog open={noAssistantConfirmOpen} onOpenChange={setNoAssistantConfirmOpen}>
+        <DialogContent className="max-w-lg rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>No assistant selected</DialogTitle>
+            <DialogDescription>
+              You haven’t selected an assistant for this visit. Do you want to proceed without one?
+            </DialogDescription>
+          </DialogHeader>
+
+          <DialogFooter className="gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              className="rounded-xl"
+              onClick={() => setNoAssistantConfirmOpen(false)}
+              disabled={updateVisitStatusState.isLoading || sessionMuted}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              className="rounded-xl bg-black text-white hover:bg-black/90"
+              onClick={async () => {
+                setNoAssistantConfirmOpen(false);
+                await startQueuedSession({ proceededWithoutAssistant: true });
+              }}
+              disabled={updateVisitStatusState.isLoading || sessionMuted}
+            >
+              Proceed
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -317,6 +533,19 @@ export function DoctorVisitPageClient() {
               </>
             ) : null}
             Stage: <span className="font-medium text-gray-700">{stageLabel(status)}</span>
+            {assistantLabelForUI ? (
+              <>
+                {' · '}Assistant:{' '}
+                <span className="font-medium text-gray-700">{assistantLabelForUI}</span>
+              </>
+            ) : pendingAssistantLabel ? (
+              <>
+                {' · '}Assistant:{' '}
+                <span className="font-medium text-gray-700">
+                  {pendingAssistantLabel} <span className="text-gray-400">(selected)</span>
+                </span>
+              </>
+            ) : null}
           </div>
         </div>
 
@@ -469,6 +698,14 @@ export function DoctorVisitPageClient() {
                   {String(getProp(visit, 'reason') ?? '—')}
                 </div>
               </div>
+
+              <div className="flex justify-between gap-3">
+                <div className="text-gray-600">Assistant</div>
+                <div className="font-semibold text-gray-900">
+                  {assistantLabelForUI ??
+                    (pendingAssistantLabel ? `${pendingAssistantLabel} (selected)` : '—')}
+                </div>
+              </div>
             </div>
           </Card>
 
@@ -498,6 +735,46 @@ export function DoctorVisitPageClient() {
                 <li>Finalize and mark visit as DONE</li>
               </ul>
             </div>
+
+            {/* Assistant select (optional) */}
+            {canChooseAssistant ? (
+              <div className="min-w-[210px]">
+                <Select
+                  value={storedAssistantId ?? selectedAssistantId}
+                  onValueChange={(v) => {
+                    if (storedAssistantId) {
+                      toast.info('Assistant already assigned for this visit.');
+                      return;
+                    }
+                    setSelectedAssistantId(v === '__none__' ? '' : v);
+                  }}
+                  disabled={
+                    Boolean(storedAssistantId) ||
+                    assistantsQuery.isLoading ||
+                    assistantsQuery.isFetching ||
+                    sessionMuted
+                  }
+                >
+                  <SelectTrigger className="h-10 rounded-xl">
+                    <SelectValue placeholder="Assistant (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">No assistant</SelectItem>
+                    {activeAssistants.length ? (
+                      activeAssistants.map((a) => (
+                        <SelectItem key={a.assistantId} value={a.assistantId}>
+                          {a.name}
+                        </SelectItem>
+                      ))
+                    ) : (
+                      <SelectItem value="__none__" disabled>
+                        No assistants available
+                      </SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
           </Card>
         </div>
       )}

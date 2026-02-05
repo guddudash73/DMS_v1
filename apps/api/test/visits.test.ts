@@ -148,4 +148,47 @@ describe('Visits API', () => {
     const found = queueRes.body.items.find((v: any) => v.visitId === visitId);
     expect(found).toBeDefined();
   });
+
+  it('can attach and clear assistant on visit (optional)', async () => {
+    const patientId = await createPatient();
+
+    const createVisitRes = await request(app)
+      .post('/visits')
+      .set('Authorization', asReception())
+      .send({
+        patientId,
+        doctorId: 'DOCTOR#010',
+        reason: 'Assistant attach test',
+      })
+      .expect(201);
+
+    const visitId = (createVisitRes.body.visit?.visitId ?? createVisitRes.body.visitId) as string;
+
+    // create assistant
+    const createdAssistant = await request(app)
+      .post('/assistants')
+      .set('Authorization', asReception())
+      .send({ name: 'Assistant One', active: true })
+      .expect(201);
+
+    // attach (doctor allowed)
+    const attached = await request(app)
+      .patch(`/visits/${visitId}/assistant`)
+      .set('Authorization', asDoctor())
+      .send({ assistantId: createdAssistant.body.assistantId })
+      .expect(200);
+
+    expect(attached.body.assistantId).toBe(createdAssistant.body.assistantId);
+    expect(attached.body.assistantName).toBe('Assistant One');
+
+    // clear
+    const cleared = await request(app)
+      .patch(`/visits/${visitId}/assistant`)
+      .set('Authorization', asDoctor())
+      .send({ assistantId: null })
+      .expect(200);
+
+    expect(cleared.body.assistantId).toBeUndefined();
+    expect(cleared.body.assistantName).toBeUndefined();
+  });
 });

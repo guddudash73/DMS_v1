@@ -62,7 +62,7 @@ function getString(obj: unknown, key: string): string | undefined {
 function getNumberLike(obj: unknown, key: string): number | undefined {
   const val = getValue(obj, key);
   if (typeof val === 'number' && Number.isFinite(val)) return val;
-  if (typeof val === 'string' && Number.isFinite(Number(val))) return Number(val);
+  if (typeof val === 'string' && val.trim() && Number.isFinite(Number(val))) return Number(val);
   return undefined;
 }
 
@@ -73,12 +73,30 @@ function getStringArray(obj: unknown, key: string): string[] | undefined {
   return out.length ? out : undefined;
 }
 
-function normalizePresetLines(lines: unknown[]): RxLineType[] {
-  return (lines ?? [])
+const FREQ_SET = new Set(['QD', 'BID', 'TID', 'QID', 'HS', 'PRN']);
+const TIMING_SET = new Set(['BEFORE_MEAL', 'AFTER_MEAL', 'ANY']);
+
+function normalizeFrequency(raw: unknown): RxLineType['frequency'] | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const up = raw.trim().toUpperCase();
+  if (!FREQ_SET.has(up)) return undefined;
+  return up as RxLineType['frequency'];
+}
+
+function normalizeTiming(raw: unknown): RxLineType['timing'] | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const v = raw.trim();
+  if (!TIMING_SET.has(v)) return undefined;
+  return v as RxLineType['timing'];
+}
+
+function normalizePresetLines(linesUnknown: unknown[]): RxLineType[] {
+  return (linesUnknown ?? [])
     .map((lUnknown) => {
       const medicine = (
         getString(lUnknown, 'medicine') ??
         getString(lUnknown, 'medicineName') ??
+        getString(lUnknown, 'name') ??
         ''
       )
         .toString()
@@ -86,35 +104,54 @@ function normalizePresetLines(lines: unknown[]): RxLineType[] {
 
       if (!medicine) return null;
 
+      // ✅ NEW: preserve medicineType (and common legacy aliases if any)
+      const medicineType = (
+        getString(lUnknown, 'medicineType') ??
+        getString(lUnknown, 'type') ??
+        getString(lUnknown, 'category') ??
+        ''
+      )
+        .toString()
+        .trim();
+
+      // ✅ NEW: preserve amountPerDose (and common legacy aliases)
+      const amountPerDose = (
+        getString(lUnknown, 'amountPerDose') ??
+        getString(lUnknown, 'quantityPerDose') ??
+        getString(lUnknown, 'qtyPerDose') ??
+        getString(lUnknown, 'qty') ??
+        ''
+      )
+        .toString()
+        .trim();
+
       const dose = (getString(lUnknown, 'dose') ?? '').toString().trim();
 
-      const frequencyRaw = getValue(lUnknown, 'frequency');
-      const frequency: RxLineType['frequency'] =
-        (typeof frequencyRaw === 'string' &&
-          ['QD', 'BID', 'TID', 'QID', 'HS', 'PRN'].includes(frequencyRaw)) ||
-        (typeof frequencyRaw === 'string' &&
-          ['QD', 'BID', 'TID', 'QID', 'HS', 'PRN'].includes(frequencyRaw.toUpperCase()))
-          ? ((typeof frequencyRaw === 'string'
-              ? frequencyRaw.toUpperCase()
-              : frequencyRaw) as RxLineType['frequency'])
-          : 'QD';
+      const frequency = normalizeFrequency(getValue(lUnknown, 'frequency'));
 
-      const duration = getNumberLike(lUnknown, 'duration') ?? 0;
-
-      const timingRaw = getValue(lUnknown, 'timing');
-      const timing: RxLineType['timing'] | undefined =
-        typeof timingRaw === 'string' && ['BEFORE_MEAL', 'AFTER_MEAL', 'ANY'].includes(timingRaw)
-          ? (timingRaw as RxLineType['timing'])
+      const durationRaw = getNumberLike(lUnknown, 'duration');
+      const duration =
+        typeof durationRaw === 'number' && Number.isFinite(durationRaw) && durationRaw > 0
+          ? Math.trunc(durationRaw)
           : undefined;
+
+      const timing = normalizeTiming(getValue(lUnknown, 'timing'));
+
+      const sig = (getString(lUnknown, 'sig') ?? getString(lUnknown, 'SIG') ?? '')
+        .toString()
+        .trim();
 
       const notes = (getString(lUnknown, 'notes') ?? '').toString().trim();
 
       const out: RxLineType = {
         medicine,
-        dose,
-        frequency,
-        duration,
+        ...(medicineType ? { medicineType } : {}),
+        ...(dose ? { dose } : {}),
+        ...(amountPerDose ? { amountPerDose } : {}),
+        ...(frequency ? { frequency } : {}),
+        ...(duration ? { duration } : {}),
         ...(timing ? { timing } : {}),
+        ...(sig ? { sig } : {}),
         ...(notes ? { notes } : {}),
       };
 
@@ -161,8 +198,10 @@ export function RxPresetImportDialog({ open, onOpenChange, disabled, onImport }:
 
   const doImport = () => {
     if (!selectedPreset) return;
+
     const normalized = normalizePresetLines((selectedPreset.lines ?? []) as unknown[]);
     if (!normalized.length) return;
+
     onImport(normalized);
     onOpenChange(false);
   };
@@ -311,10 +350,22 @@ export function RxPresetImportDialog({ open, onOpenChange, disabled, onImport }:
                           getString(lUnknown, 'medicineName') ??
                           '—';
 
+                        const type =
+                          getString(lUnknown, 'medicineType') ??
+                          getString(lUnknown, 'type') ??
+                          getString(lUnknown, 'category');
+
+                        const qtyPerDose =
+                          getString(lUnknown, 'amountPerDose') ??
+                          getString(lUnknown, 'quantityPerDose') ??
+                          getString(lUnknown, 'qtyPerDose') ??
+                          getString(lUnknown, 'qty');
+
                         const dose = getString(lUnknown, 'dose');
                         const frequency = getString(lUnknown, 'frequency');
                         const duration = getString(lUnknown, 'duration');
                         const timing = getString(lUnknown, 'timing');
+                        const sig = getString(lUnknown, 'sig');
                         const notes = getString(lUnknown, 'notes');
 
                         return (
@@ -323,8 +374,11 @@ export function RxPresetImportDialog({ open, onOpenChange, disabled, onImport }:
                             className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2"
                           >
                             <div className="text-sm font-medium text-gray-900">{medicine}</div>
+
                             <div className="mt-0.5 text-xs text-gray-600">
                               {[
+                                type ? `Type: ${type}` : null,
+                                qtyPerDose ? `Qty/Time: ${qtyPerDose}` : null,
                                 dose ? `Dose: ${dose}` : null,
                                 frequency ? `Freq: ${frequency}` : null,
                                 duration ? `Days: ${duration}` : null,
@@ -333,6 +387,11 @@ export function RxPresetImportDialog({ open, onOpenChange, disabled, onImport }:
                                 .filter(Boolean)
                                 .join(' · ') || '—'}
                             </div>
+
+                            {sig ? (
+                              <div className="mt-1 text-xs text-gray-500">SIG: {sig}</div>
+                            ) : null}
+
                             {notes ? (
                               <div className="mt-1 text-xs text-gray-500">Notes: {notes}</div>
                             ) : null}

@@ -8,6 +8,12 @@ import { Textarea } from '@/components/ui/textarea';
 
 type ToothDetailAny = ToothDetail & {
   blockId?: string;
+
+  // ✅ new fields
+  notes?: string;
+  diagnosis?: string;
+
+  // existing
   advice?: string;
   procedure?: string;
 };
@@ -80,7 +86,7 @@ function mapFromValue(value: ToothDetail[]) {
   for (const d of value ?? []) {
     if (!d?.position) continue;
     const pos = d.position as ToothPosition;
-    byPos[pos] = [...(byPos[pos] ?? []), ...(d.toothNumbers ?? [])].filter(Boolean);
+    byPos[pos] = [...(byPos[pos] ?? []), ...((d as any).toothNumbers ?? [])].filter(Boolean);
   }
 
   for (const p of POSITIONS) {
@@ -97,10 +103,14 @@ function mapFromValue(value: ToothDetail[]) {
     byPos[p] = out;
   }
 
+  // ✅ new fields (take first non-empty from block)
+  const notes = firstNonEmptyTrimmed((value ?? []).map((d) => (d as any)?.notes));
+  const diagnosis = firstNonEmptyTrimmed((value ?? []).map((d) => (d as any)?.diagnosis));
+
   const advice = firstNonEmptyTrimmed((value ?? []).map((d) => (d as any)?.advice));
   const procedure = firstNonEmptyTrimmed((value ?? []).map((d) => (d as any)?.procedure));
 
-  return { byPos, advice, procedure };
+  return { byPos, notes, diagnosis, advice, procedure };
 }
 
 function normalize(items: ToothDetail[]): ToothDetailAny[] {
@@ -109,8 +119,15 @@ function normalize(items: ToothDetail[]): ToothDetailAny[] {
     return {
       ...anyD,
       blockId: (anyD as any).blockId ? String((anyD as any).blockId) : undefined,
+
+      // ✅ new
+      notes: (anyD as any).notes?.trim() || undefined,
+      diagnosis: (anyD as any).diagnosis?.trim() || undefined,
+
       advice: (anyD as any).advice?.trim() || undefined,
       procedure: (anyD as any).procedure?.trim() || undefined,
+
+      // ✅ allow empty toothNumbers (optional teeth)
       toothNumbers: ((anyD as any).toothNumbers ?? [])
         .map((x: any) => String(x).trim())
         .filter(Boolean),
@@ -133,6 +150,11 @@ function stableKey(details: ToothDetail[]) {
   const normalized = (details ?? []).map((d: any) => ({
     position: d?.position ?? null,
     toothNumbers: (d?.toothNumbers ?? []).map((x: any) => String(x).trim()).filter(Boolean),
+
+    // ✅ new
+    notes: typeof d?.notes === 'string' ? d.notes.trim() : '',
+    diagnosis: typeof d?.diagnosis === 'string' ? d.diagnosis.trim() : '',
+
     advice: typeof d?.advice === 'string' ? d.advice.trim() : '',
     procedure: typeof d?.procedure === 'string' ? d.procedure.trim() : '',
     blockId: typeof d?.blockId === 'string' ? d.blockId : '',
@@ -156,6 +178,9 @@ function stableKey(details: ToothDetail[]) {
  * - Save + Remove per block
  * - Status: Unsaved changes (red) / Saved (green)
  * - Autosave with debounce
+ *
+ * ✅ UPDATE: Tooth numbers are OPTIONAL.
+ * You can save Notes/Diagnosis/Advice/Procedure even if all tooth quadrants are empty.
  */
 export function ToothDetailsEditor({
   value,
@@ -177,6 +202,11 @@ export function ToothDetailsEditor({
   const [ur, setUr] = useState('');
   const [ll, setLl] = useState('');
   const [lr, setLr] = useState('');
+
+  // ✅ new
+  const [notes, setNotes] = useState('');
+  const [diagnosis, setDiagnosis] = useState('');
+
   const [advice, setAdvice] = useState('');
   const [procedure, setProcedure] = useState('');
 
@@ -189,11 +219,16 @@ export function ToothDetailsEditor({
     // But avoid fighting with an in-flight autosave tick
     if (isSavingRef.current) return;
 
-    const { byPos, advice: a, procedure: p } = mapFromValue(value ?? []);
+    const { byPos, notes: n, diagnosis: dx, advice: a, procedure: p } = mapFromValue(value ?? []);
     setUl(joinTokens(byPos.UL));
     setUr(joinTokens(byPos.UR));
     setLl(joinTokens(byPos.LL));
     setLr(joinTokens(byPos.LR));
+
+    // ✅ new
+    setNotes(n);
+    setDiagnosis(dx);
+
     setAdvice(a);
     setProcedure(p);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -207,30 +242,64 @@ export function ToothDetailsEditor({
       LR: tokensFromInput(lr),
     };
 
+    const cleanedNotes = notes.trim();
+    const cleanedDiagnosis = diagnosis.trim();
     const cleanedAdvice = advice.trim();
     const cleanedProcedure = procedure.trim();
 
     const details: ToothDetail[] = [];
     const positionsWithTokens = POSITIONS.filter((p) => (byPos[p]?.length ?? 0) > 0);
 
-    positionsWithTokens.forEach((p, idx) => {
+    // ✅ If we have teeth numbers, store per-position rows,
+    // and put block-level fields on the first row.
+    if (positionsWithTokens.length > 0) {
+      positionsWithTokens.forEach((p, idx) => {
+        details.push({
+          position: p,
+          toothNumbers: byPos[p],
+          ...(effectiveBlockId ? { blockId: effectiveBlockId } : {}),
+
+          // ✅ store block-level fields on first row only
+          ...(cleanedNotes && idx === 0 ? { notes: cleanedNotes } : {}),
+          ...(cleanedDiagnosis && idx === 0 ? { diagnosis: cleanedDiagnosis } : {}),
+          ...(cleanedAdvice && idx === 0 ? { advice: cleanedAdvice } : {}),
+          ...(cleanedProcedure && idx === 0 ? { procedure: cleanedProcedure } : {}),
+        } as ToothDetail);
+      });
+
+      return details;
+    }
+
+    // ✅ NEW: No tooth numbers, but still allow saving block-level fields.
+    // We save a single row with an empty toothNumbers array.
+    const hasBlockFields =
+      !!cleanedNotes || !!cleanedDiagnosis || !!cleanedAdvice || !!cleanedProcedure;
+
+    if (hasBlockFields || effectiveBlockId) {
       details.push({
-        position: p,
-        toothNumbers: byPos[p],
+        position: 'UL',
+        toothNumbers: [],
         ...(effectiveBlockId ? { blockId: effectiveBlockId } : {}),
-        ...(cleanedAdvice && idx === 0 ? { advice: cleanedAdvice } : {}),
-        ...(cleanedProcedure && idx === 0 ? { procedure: cleanedProcedure } : {}),
+        ...(cleanedNotes ? { notes: cleanedNotes } : {}),
+        ...(cleanedDiagnosis ? { diagnosis: cleanedDiagnosis } : {}),
+        ...(cleanedAdvice ? { advice: cleanedAdvice } : {}),
+        ...(cleanedProcedure ? { procedure: cleanedProcedure } : {}),
       } as ToothDetail);
-    });
+    }
 
     return details;
-  }, [ul, ur, ll, lr, advice, procedure, effectiveBlockId]);
+  }, [ul, ur, ll, lr, notes, diagnosis, advice, procedure, effectiveBlockId]);
 
   const savedKey = useMemo(() => stableKey(value ?? []), [value]);
   const draftKey = useMemo(() => stableKey(nextValue ?? []), [nextValue]);
   const isDirty = savedKey !== draftKey;
 
-  const hasAnything = (nextValue?.length ?? 0) > 0;
+  const hasAnything =
+    (nextValue?.length ?? 0) > 0 ||
+    notes.trim().length > 0 ||
+    diagnosis.trim().length > 0 ||
+    advice.trim().length > 0 ||
+    procedure.trim().length > 0;
 
   const commit = () => {
     if (disabled) return;
@@ -252,7 +321,6 @@ export function ToothDetailsEditor({
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => {
-      // autosave even if empty; but only when dirty (so it’s meaningful)
       isSavingRef.current = true;
       try {
         onChange(nextValue);
@@ -284,7 +352,6 @@ export function ToothDetailsEditor({
         <div className="text-sm font-semibold text-gray-900">{title ?? 'Teeth'}</div>
 
         <div className="flex items-center gap-2">
-          {/* ✅ status just before Remove */}
           {statusNode}
 
           {onRemove ? (
@@ -354,18 +421,44 @@ export function ToothDetailsEditor({
               </div>
             </div>
           </div>
+
+          <div className="mt-1 text-[10px] text-gray-500">Tooth numbers (optional)</div>
         </div>
 
-        {/* compact advice/procedure */}
+        {/* ✅ Notes/Diagnosis/Advice/Procedure */}
         <div className="min-w-0 w-full">
           <div className="grid w-full grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="min-w-0">
+              <div className="mb-1 text-[11px] font-semibold text-gray-700">Notes</div>
+              <Textarea
+                disabled={disabled}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="min-h-9.5 w-full resize-none rounded-lg"
+                placeholder="—"
+                maxLength={500}
+              />
+            </div>
+
+            <div className="min-w-0">
+              <div className="mb-1 text-[11px] font-semibold text-gray-700">Diagnosis</div>
+              <Textarea
+                disabled={disabled}
+                value={diagnosis}
+                onChange={(e) => setDiagnosis(e.target.value)}
+                className="min-h-9.5 w-full resize-none rounded-lg"
+                placeholder="—"
+                maxLength={500}
+              />
+            </div>
+
             <div className="min-w-0">
               <div className="mb-1 text-[11px] font-semibold text-gray-700">Advice</div>
               <Textarea
                 disabled={disabled}
                 value={advice}
                 onChange={(e) => setAdvice(e.target.value)}
-                className="min-h-[38px] w-full resize-none rounded-lg"
+                className="min-h-9.5 w-full resize-none rounded-lg"
                 placeholder="—"
                 maxLength={500}
               />
@@ -377,7 +470,7 @@ export function ToothDetailsEditor({
                 disabled={disabled}
                 value={procedure}
                 onChange={(e) => setProcedure(e.target.value)}
-                className="min-h-[38px] w-full resize-none rounded-lg"
+                className="min-h-9.5 w-full resize-none rounded-lg"
                 placeholder="—"
                 maxLength={500}
               />

@@ -5,7 +5,6 @@ import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
 
 import { Card } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 
 import type { Visit } from '@dcm/types';
 
@@ -79,9 +78,13 @@ function anchorIdFromVisit(v: Visit): string | undefined {
   return getPropString(v as unknown, 'anchorVisitId') ?? getPropString(v as unknown, 'anchorId');
 }
 
-/** ✅ NEW: format patient registration date (same logic style as PatientDetailPage) */
+function getVisitSortTs(v?: Visit | null): number {
+  if (!v) return 0;
+  return getPropNumber(v as unknown, 'createdAt') ?? getPropNumber(v as unknown, 'updatedAt') ?? 0;
+}
+
+/** format patient registration date */
 function formatPatientRegdDate(patient: unknown): string {
-  // prefer ms timestamps
   const createdAtNum =
     getPropNumber(patient, 'createdAt') ??
     getPropNumber(patient, 'created_at') ??
@@ -92,7 +95,6 @@ function formatPatientRegdDate(patient: unknown): string {
     return new Date(createdAtNum).toLocaleDateString('en-GB');
   }
 
-  // fallback: string
   const createdAtStr =
     getPropString(patient, 'createdAt') ??
     getPropString(patient, 'created_at') ??
@@ -108,7 +110,7 @@ function formatPatientRegdDate(patient: unknown): string {
 }
 
 /* ------------------------------------------------------------------ */
-/* patient helpers (backend-aligned) */
+/* patient helpers */
 /* ------------------------------------------------------------------ */
 
 function safeParseDobToDate(dob: unknown): Date | null {
@@ -198,13 +200,12 @@ export function DoctorVisitDoneView(props: {
     ? (getProp(rxToShow, 'toothDetails') as any[])
     : [];
 
-  // ✅ doctorNotes should be displayed/printed in prescription
   const doctorNotes =
     isRecord(rxToShow) && typeof getProp(rxToShow, 'doctorNotes') !== 'undefined'
       ? String(getProp(rxToShow, 'doctorNotes') ?? '')
       : '';
 
-  /* ---------------- patient age / sex FIX ---------------- */
+  /* ---------------- patient age / sex ---------------- */
 
   const patientDobRaw = getProp(patient, 'dob');
   const patientAgeRaw = getProp(patient, 'age');
@@ -220,42 +221,68 @@ export function DoctorVisitDoneView(props: {
   const patientAge = ageFromDob ?? ageStored;
   const patientSex = normalizeSex(patientSexRaw);
 
-  // ✅ NEW: patient registration date (formatted) for prescription header
   const patientRegdDate = React.useMemo(() => formatPatientRegdDate(patient), [patient]);
 
-  /* ---------------- rx chain ---------------- */
+  /* ---------------- rx chain (FIXED: ascending order) ---------------- */
 
   const rxChain = React.useMemo(() => {
     const meta = new Map<string, Visit>();
+
+    // Collect meta: history items + current visit (ensure present)
+    for (const v of allVisitsRaw) {
+      if (v?.visitId) meta.set(v.visitId, v);
+    }
     if (visit?.visitId) meta.set(visit.visitId, visit);
 
     if (!showHistory) {
       return { visitIds: [visitId], meta, currentVisitId: visitId };
     }
 
-    for (const v of allVisitsRaw) {
-      if (v?.visitId) meta.set(v.visitId, v);
-    }
-    if (visit?.visitId) meta.set(visit.visitId, visit);
-
     const tag = getPropString(visit as unknown, 'tag');
     const anchorVisitId = getPropString(visit as unknown, 'anchorVisitId');
+
     const anchorId = tag === 'F' ? anchorVisitId : visitId;
     if (!anchorId) return { visitIds: [visitId], meta, currentVisitId: visitId };
 
     const anchor = meta.get(anchorId);
-    const chain: Visit[] = [];
-    if (anchor) chain.push(anchor);
 
+    const followups: Visit[] = [];
     for (const v of meta.values()) {
       const aId = anchorIdFromVisit(v);
-      if (aId && aId === anchorId && v.visitId !== anchorId) chain.push(v);
+      if (aId && aId === anchorId && v.visitId !== anchorId) followups.push(v);
     }
 
-    const seen = new Set<string>();
-    const ids = chain.map((v) => v.visitId).filter((id) => id && !seen.has(id) && seen.add(id));
+    followups.sort((a, b) => getVisitSortTs(a) - getVisitSortTs(b));
 
-    return { visitIds: ids, meta, currentVisitId: visitId };
+    const chain: Visit[] = [];
+    if (anchor) chain.push(anchor);
+    chain.push(...followups);
+
+    // Ensure current visit is included
+    if (!chain.some((v) => v.visitId === visitId)) {
+      const cur = meta.get(visitId);
+      chain.push(cur ?? ({ visitId } as Visit));
+    }
+
+    // Final ascending sort (anchor will naturally float by its timestamp)
+    chain.sort((a, b) => getVisitSortTs(a) - getVisitSortTs(b));
+
+    // De-dupe ids preserving sorted order
+    const seen = new Set<string>();
+    const chainIdsOrdered = chain
+      .map((v) => v.visitId)
+      .filter((id) => {
+        if (!id) return false;
+        if (seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      });
+
+    // Match your other screens: limit to “up to current visit”
+    const idx = chainIdsOrdered.indexOf(visitId);
+    const limitedIds = idx >= 0 ? chainIdsOrdered.slice(0, idx + 1) : [visitId];
+
+    return { visitIds: limitedIds, meta, currentVisitId: visitId };
   }, [allVisitsRaw, showHistory, visit, visitId]);
 
   /* ---------------- quick look dialogs ---------------- */
@@ -270,7 +297,7 @@ export function DoctorVisitDoneView(props: {
         <Card className="lg:col-span-6 rounded-2xl border bg-white p-4">
           <div className="mb-3 flex gap-2">
             <div>
-              <div className="flex gap-1 items-center">
+              <div className="flex items-center gap-1">
                 <ClipboardList className="h-4 w-4 text-gray-700" />
                 <div className="text-sm font-semibold text-gray-900">Prescription</div>
               </div>
@@ -303,7 +330,7 @@ export function DoctorVisitDoneView(props: {
             doctorName={doctorName}
             doctorRegdLabel={doctorRegdLabel}
             visitDateLabel={visitDateLabel}
-            regdDate={patientRegdDate} // ✅ NEW: patient registration date
+            regdDate={patientRegdDate}
             lines={lines as any}
             doctorNotes={doctorNotes}
             receptionNotes={

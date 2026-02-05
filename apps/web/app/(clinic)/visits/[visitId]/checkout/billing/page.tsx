@@ -21,11 +21,17 @@ import {
 } from '@/src/store/api';
 import { useAuth } from '@/src/hooks/useAuth';
 
-type LineDraft = { description: string; unitAmount: number };
+type LineDraft = { description: string; quantity: number; unitAmount: number };
 
 const money = (n: unknown) => {
   const v = typeof n === 'number' ? n : Number(n);
   return Number.isFinite(v) ? v : 0;
+};
+
+const intQty = (n: unknown) => {
+  const v = typeof n === 'number' ? n : Number(n);
+  if (!Number.isFinite(v)) return 1;
+  return Math.max(1, Math.floor(v));
 };
 
 type UnknownRecord = Record<string, unknown>;
@@ -85,7 +91,7 @@ function IconX(props: React.SVGProps<SVGSVGElement>) {
   );
 }
 
-type BillItemLike = { description?: unknown; unitAmount?: unknown };
+type BillItemLike = { description?: unknown; unitAmount?: unknown; quantity?: unknown };
 type BillLike = {
   items?: unknown;
   discountAmount?: unknown;
@@ -221,10 +227,12 @@ export default function VisitCheckoutBillingPage() {
   const [taxAmount, setTaxAmount] = React.useState(0);
 
   const [serviceDraft, setServiceDraft] = React.useState('');
+  const [qtyDraft, setQtyDraft] = React.useState('1');
   const [amountDraft, setAmountDraft] = React.useState('');
 
   const [editIndex, setEditIndex] = React.useState<number | null>(null);
   const [editService, setEditService] = React.useState('');
+  const [editQty, setEditQty] = React.useState('1');
   const [editAmount, setEditAmount] = React.useState('');
 
   const [receivedOnline, setReceivedOnline] = React.useState(false);
@@ -241,6 +249,7 @@ export default function VisitCheckoutBillingPage() {
     setLines(
       items.map((it) => ({
         description: typeof it.description === 'string' ? it.description : '',
+        quantity: intQty(it.quantity ?? 1),
         unitAmount: money(it.unitAmount),
       })),
     );
@@ -265,11 +274,12 @@ export default function VisitCheckoutBillingPage() {
     const safeLines = lines
       .map((l) => ({
         description: (l.description ?? '').trim(),
+        quantity: intQty(l.quantity ?? 1),
         unitAmount: Math.max(0, money(l.unitAmount)),
       }))
       .filter((l) => l.description.length > 0);
 
-    const subtotal = safeLines.reduce((sum, l) => sum + l.unitAmount, 0);
+    const subtotal = safeLines.reduce((sum, l) => sum + l.quantity * l.unitAmount, 0);
     const discount = Math.max(0, money(discountAmount));
     const tax = Math.max(0, money(taxAmount));
     const total = Math.max(0, subtotal - Math.min(discount, subtotal) + tax);
@@ -328,9 +338,12 @@ export default function VisitCheckoutBillingPage() {
 
   // ---- Refs / inputs ----
   const serviceRef = React.useRef<HTMLInputElement | null>(null);
+  const qtyRef = React.useRef<HTMLInputElement | null>(null);
   const amountRef = React.useRef<HTMLInputElement | null>(null);
   const addBtnRef = React.useRef<HTMLButtonElement | null>(null);
+
   const editServiceRef = React.useRef<HTMLInputElement | null>(null);
+  const editQtyRef = React.useRef<HTMLInputElement | null>(null);
   const editAmountRef = React.useRef<HTMLInputElement | null>(null);
 
   React.useEffect(() => {
@@ -341,6 +354,7 @@ export default function VisitCheckoutBillingPage() {
     if (billingMuted) return;
 
     const desc = serviceDraft.trim();
+    const qty = intQty(qtyDraft);
     const amt = Math.max(0, money(amountDraft));
 
     if (!desc) {
@@ -349,8 +363,15 @@ export default function VisitCheckoutBillingPage() {
       return;
     }
 
-    setLines((prev) => [...prev, { description: desc, unitAmount: amt }]);
+    if (!Number.isFinite(qty) || qty < 1) {
+      toast.info('Quantity must be at least 1.');
+      qtyRef.current?.focus();
+      return;
+    }
+
+    setLines((prev) => [...prev, { description: desc, quantity: qty, unitAmount: amt }]);
     setServiceDraft('');
+    setQtyDraft('1');
     setAmountDraft('');
     requestAnimationFrame(() => serviceRef.current?.focus());
   };
@@ -360,6 +381,7 @@ export default function VisitCheckoutBillingPage() {
     const row = lines[idx];
     setEditIndex(idx);
     setEditService(row?.description ?? '');
+    setEditQty(String(intQty(row?.quantity ?? 1)));
     setEditAmount(String(row?.unitAmount ?? 0));
     requestAnimationFrame(() => editServiceRef.current?.focus());
   };
@@ -368,6 +390,7 @@ export default function VisitCheckoutBillingPage() {
     if (editIndex === null) return;
 
     const desc = editService.trim();
+    const qty = intQty(editQty);
     const amt = Math.max(0, money(editAmount));
 
     if (!desc) {
@@ -376,11 +399,20 @@ export default function VisitCheckoutBillingPage() {
       return;
     }
 
+    if (!Number.isFinite(qty) || qty < 1) {
+      toast.info('Quantity must be at least 1.');
+      editQtyRef.current?.focus();
+      return;
+    }
+
     setLines((prev) =>
-      prev.map((x, i) => (i === editIndex ? { description: desc, unitAmount: amt } : x)),
+      prev.map((x, i) =>
+        i === editIndex ? { description: desc, quantity: qty, unitAmount: amt } : x,
+      ),
     );
     setEditIndex(null);
     setEditService('');
+    setEditQty('1');
     setEditAmount('');
     requestAnimationFrame(() => serviceRef.current?.focus());
   };
@@ -388,6 +420,7 @@ export default function VisitCheckoutBillingPage() {
   const cancelEdit = () => {
     setEditIndex(null);
     setEditService('');
+    setEditQty('1');
     setEditAmount('');
     requestAnimationFrame(() => serviceRef.current?.focus());
   };
@@ -440,7 +473,7 @@ export default function VisitCheckoutBillingPage() {
           items: computed.safeLines.length
             ? computed.safeLines.map((l) => ({
                 description: l.description,
-                quantity: 1,
+                quantity: intQty(l.quantity),
                 unitAmount: l.unitAmount,
               }))
             : [
@@ -693,6 +726,24 @@ export default function VisitCheckoutBillingPage() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
+                    qtyRef.current?.focus();
+                  }
+                }}
+              />
+            </div>
+
+            <div className="w-28">
+              <Label className="text-xs text-gray-600">Qty</Label>
+              <Input
+                ref={qtyRef}
+                className="mt-1 h-11 rounded-xl bg-white"
+                inputMode="numeric"
+                value={qtyDraft}
+                onChange={(e) => setQtyDraft(e.target.value)}
+                placeholder="1"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
                     amountRef.current?.focus();
                   }
                 }}
@@ -735,23 +786,45 @@ export default function VisitCheckoutBillingPage() {
         <div className="mt-2 space-y-2">
           {lines.length === 0 ? (
             <div className="rounded-2xl border border-dashed bg-gray-50 p-6 text-sm text-gray-600">
-              No services added yet. Add a service and amount above.
+              No services added yet. Add a service, qty and amount above.
             </div>
           ) : (
             lines.map((l, idx) => {
               const isEditing = editIndex === idx;
+              const q = intQty(l.quantity);
+              const ua = money(l.unitAmount);
+              const lineTotal = q * ua;
 
               return (
                 <div key={`${idx}-${l.description}`} className="rounded-2xl border bg-white p-4">
                   {isEditing ? (
-                    <div className="grid grid-cols-13 items-end gap-3">
-                      <div className="col-span-12 md:col-span-7">
+                    <div className="grid grid-cols-12 items-end gap-3">
+                      <div className="col-span-12 md:col-span-6">
                         <Label className="text-xs text-gray-600">Service</Label>
                         <Input
                           ref={editServiceRef}
                           className="mt-1 h-10 rounded-xl"
                           value={editService}
                           onChange={(e) => setEditService(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              editQtyRef.current?.focus();
+                            }
+                            if (e.key === 'Escape') cancelEdit();
+                          }}
+                          disabled={billingMuted}
+                        />
+                      </div>
+
+                      <div className="col-span-6 md:col-span-2">
+                        <Label className="text-xs text-gray-600">Qty</Label>
+                        <Input
+                          ref={editQtyRef}
+                          className="mt-1 h-10 rounded-xl"
+                          inputMode="numeric"
+                          value={editQty}
+                          onChange={(e) => setEditQty(e.target.value)}
                           onKeyDown={(e) => {
                             if (e.key === 'Enter') {
                               e.preventDefault();
@@ -763,7 +836,7 @@ export default function VisitCheckoutBillingPage() {
                         />
                       </div>
 
-                      <div className="col-span-10 md:col-span-4">
+                      <div className="col-span-6 md:col-span-2">
                         <Label className="text-xs text-gray-600">Amount</Label>
                         <Input
                           ref={editAmountRef}
@@ -782,7 +855,7 @@ export default function VisitCheckoutBillingPage() {
                         />
                       </div>
 
-                      <div className="col-span-2 md:col-span-1 flex justify-start gap-2">
+                      <div className="col-span-12 md:col-span-2 flex justify-start gap-2">
                         <Button
                           type="button"
                           variant="default"
@@ -808,12 +881,14 @@ export default function VisitCheckoutBillingPage() {
                         <div className="truncate text-sm font-semibold text-gray-900">
                           {l.description || '—'}
                         </div>
-                        <div className="text-xs text-gray-500">Amount</div>
+                        <div className="text-xs text-gray-500">
+                          Qty {q} × {ua.toFixed(2)}
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-3">
                         <div className="tabular-nums text-base font-bold text-gray-900">
-                          {money(l.unitAmount).toFixed(2)}
+                          {lineTotal.toFixed(2)}
                         </div>
 
                         <div className="flex items-center gap-1">
@@ -847,7 +922,7 @@ export default function VisitCheckoutBillingPage() {
         </div>
 
         <div className="mt-4 rounded-2xl border border-dashed bg-gray-50 p-4 text-sm text-gray-600">
-          Tip: Enter → Amount, Enter → Add, Enter → Next service.
+          Tip: Enter → Qty, Enter → Amount, Enter → Add, Enter → Next service.
         </div>
       </Card>
     </section>
