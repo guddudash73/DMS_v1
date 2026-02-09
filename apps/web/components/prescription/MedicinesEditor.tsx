@@ -223,6 +223,23 @@ function MedicineTypeCombobox({
   );
 }
 
+// helper: accept backend timing OR UI timing strings from presets
+function timingStringToUi(tRaw?: string): TimingUI | undefined {
+  const t = (tRaw ?? '').trim().toUpperCase();
+  if (!t) return undefined;
+
+  // backend values
+  if (t === 'BEFORE_MEAL') return 'BE_MEAL';
+  if (t === 'AFTER_MEAL') return 'AF_MEAL';
+  if (t === 'ANY') return 'ANY';
+
+  // UI values (some presets may store UI strings)
+  if (t === 'BE_MEAL' || t === 'BE MEAL' || t === 'BE-MEAL') return 'BE_MEAL';
+  if (t === 'AF_MEAL' || t === 'AF MEAL' || t === 'AF-MEAL') return 'AF_MEAL';
+
+  return undefined;
+}
+
 export function MedicinesEditor({ lines, onChange }: Props) {
   const [medicine, setMedicine] = useState('');
   const [medicineType, setMedicineType] = useState(''); // ✅ stored in RxLine now
@@ -290,8 +307,31 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     const mt = getString((picked as any).medicineType);
     if (mt) setMedicineType(mt);
 
-    const apd = getString((picked as any).defaultAmountPerDose);
-    if (apd) setAmountPerDose(apd);
+    /**
+     * ✅ FIX: Populate "Qty/Time" (amountPerDose) from top-level preset fields too
+     * (different payloads use different names)
+     */
+    const apdTop =
+      getString((picked as any).defaultAmountPerDose) ??
+      getString((picked as any).amountPerDose) ??
+      getString((picked as any).qtyPerTime) ??
+      getString((picked as any).defaultQtyPerTime) ??
+      getString((picked as any).defaultAmount) ??
+      getString((picked as any).amount);
+
+    if (apdTop) setAmountPerDose(apdTop);
+
+    /**
+     * ✅ FIX: Populate Timing from top-level preset fields too
+     */
+    const tTop =
+      getString((picked as any).defaultTiming) ??
+      getString((picked as any).timing) ??
+      getString((picked as any).defaultTime) ??
+      getString((picked as any).time);
+
+    const tUiTop = timingStringToUi(tTop);
+    if (tUiTop) setTimingUi(tUiTop);
 
     // legacy nested defaults (fallback)
     const defaultsRaw =
@@ -340,16 +380,27 @@ export function MedicinesEditor({ lines, onChange }: Props) {
       }
     }
 
+    /**
+     * ✅ FIX: nested "Qty/Time" can be stored as:
+     * - amountPerDose
+     * - defaultAmountPerDose
+     * - qtyPerTime
+     */
+    const apdNested =
+      getString((defaultsRaw as any).amountPerDose) ??
+      getString((defaultsRaw as any).defaultAmountPerDose) ??
+      getString((defaultsRaw as any).qtyPerTime) ??
+      getString((defaultsRaw as any).defaultQtyPerTime);
+
+    if (apdNested) setAmountPerDose(apdNested);
+
     const t =
       (defaultsRaw as any).timing ??
       (defaultsRaw as any).time ??
       (defaultsRaw as any).defaultTiming;
     const tStr = getString(t);
-    if (tStr) {
-      if (tStr === 'BEFORE_MEAL') setTimingUi('BE_MEAL');
-      else if (tStr === 'AFTER_MEAL') setTimingUi('AF_MEAL');
-      else if (tStr === 'ANY') setTimingUi('ANY');
-    }
+    const tUi = timingStringToUi(tStr);
+    if (tUi) setTimingUi(tUi);
 
     const n = (defaultsRaw as any).notes ?? (defaultsRaw as any).note;
     const nStr = getString(n);
@@ -494,6 +545,8 @@ export function MedicinesEditor({ lines, onChange }: Props) {
                 }
 
                 applyMedicineDefaults(m);
+
+                // If timing/qty-time defaults exist, it’s helpful to move focus forward
                 goNext(typeTriggerRef.current);
               }}
               onEnterPicked={() => goNext(typeTriggerRef.current)}

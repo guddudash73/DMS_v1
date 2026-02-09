@@ -114,7 +114,7 @@ function LabeledLines(props: { label: string; lines: string[] }) {
   if (!lines.length) return null;
 
   return lines.length === 1 ? (
-    <div className="min-w-0 whitespace-normal text-[16px] font-semibold text-gray-900 ">
+    <div className="min-w-0 whitespace-normal text-[14px] font-semibold text-gray-900 ">
       <span className="text-gray-700">{label}:</span> {lines[0]}
     </div>
   ) : (
@@ -162,25 +162,25 @@ function SingleBlockView({ items, className }: { items: ToothDetailAny[]; classN
       <div className="relative shrink-0">
         <div className="grid w-20 grid-cols-2 rounded-md bg-white">
           <div className="flex min-w-0 items-center justify-center border-b border-r border-gray-700 px-2 h-8">
-            <div className="whitespace-normal text-[16px] font-semibold text-gray-900">
+            <div className="whitespace-normal text-[14px] font-semibold text-gray-900">
               {(byPos.get('UL') ?? []).join(', ') || '—'}
             </div>
           </div>
 
           <div className="flex items-center justify-center border-b border-gray-700 px-1">
-            <div className="whitespace-normal text-[16px] font-semibold text-gray-900">
+            <div className="whitespace-normal text-[14px] font-semibold text-gray-900">
               {(byPos.get('UR') ?? []).join(', ') || '—'}
             </div>
           </div>
 
           <div className="flex items-center justify-center border-r border-gray-700 px-1">
-            <div className="whitespace-normal text-[16px] font-semibold text-gray-900">
+            <div className="whitespace-normal text-[14px] font-semibold text-gray-900">
               {(byPos.get('LL') ?? []).join(', ') || '—'}
             </div>
           </div>
 
           <div className="flex items-center justify-center px-1">
-            <div className="whitespace-normal text-[16px] font-semibold text-gray-900">
+            <div className="whitespace-normal text-[14px] font-semibold text-gray-900">
               {(byPos.get('LR') ?? []).join(', ') || '—'}
             </div>
           </div>
