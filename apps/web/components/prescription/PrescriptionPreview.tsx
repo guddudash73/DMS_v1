@@ -1653,7 +1653,7 @@ export function PrescriptionPreview({
                     className="absolute left-0 top-0 z-10 w-full"
                     style={{ display: activePage.kind === 'ODD' ? 'block' : 'none' }}
                   >
-                    <div className="px-2 pt-8 pb-3" style={headerFooterHiddenStyle2}>
+                    <div className="px-2 pb-3" style={headerFooterHiddenStyle2}>
                       {Header}
                     </div>
                   </div>
@@ -1663,7 +1663,7 @@ export function PrescriptionPreview({
                     className="absolute bottom-0 left-0 z-10 w-full"
                     style={{ display: activePage.kind === 'ODD' ? 'block' : 'none' }}
                   >
-                    <div className="px-2 pb-8" style={headerFooterHiddenStyle2}>
+                    <div className="px-2" style={headerFooterHiddenStyle2}>
                       {Footer}
                     </div>
                   </div>
