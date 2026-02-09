@@ -34,7 +34,6 @@ type Props = {
   onChange: (next: RxLineType[]) => void;
 };
 
-// ✅ FIX: predicate must narrow to NON-undefined
 type FrequencyValue = NonNullable<RxLineType['frequency']>;
 type TimingBackend = NonNullable<RxLineType['timing']>;
 type TimingUI = 'BE_MEAL' | 'AF_MEAL' | 'ANY';
@@ -49,10 +48,6 @@ const FREQUENCY = [
 ] as const satisfies readonly FrequencyValue[];
 const TIMING_UI = ['BE_MEAL', 'AF_MEAL', 'ANY'] as const satisfies readonly TimingUI[];
 
-/**
- * ✅ "medicineType" here = category/classification (not dosage form)
- * Tune this list anytime.
- */
 const COMMON_MEDICINE_TYPES = [
   'Antibiotic',
   'Painkiller',
@@ -103,6 +98,7 @@ function getString(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim().length > 0 ? v.trim() : undefined;
 }
 
+// kept ONLY for legacy fallbacks (older data might have numeric defaultDuration/duration)
 function getNumber(v: unknown): number | undefined {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string' && v.trim().length > 0) {
@@ -231,13 +227,13 @@ export function MedicinesEditor({ lines, onChange }: Props) {
   const [medicine, setMedicine] = useState('');
   const [medicineType, setMedicineType] = useState(''); // ✅ stored in RxLine now
   const [dose, setDose] = useState(''); // optional
-  const [amountPerDose, setAmountPerDose] = useState(''); // ✅ NEW: "1 tab / 5ml / 2 tsp" etc.
+  const [amountPerDose, setAmountPerDose] = useState(''); // e.g. "1 tab / 5ml"
 
-  // moved to 2nd row:
   const [frequency, setFrequency] = useState<FrequencyValue | undefined>(undefined);
   const [timingUi, setTimingUi] = useState<TimingUI | undefined>(undefined);
 
-  const [durationDays, setDurationDays] = useState('');
+  // ✅ quantity is STRING now (e.g., "10 tabs", "5 cups")
+  const [quantityStr, setQuantityStr] = useState('');
 
   const [notesOpen, setNotesOpen] = useState(false);
   const [notes, setNotes] = useState('');
@@ -253,7 +249,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
   const amountRef = useRef<HTMLInputElement | null>(null);
   const freqTriggerRef = useRef<HTMLButtonElement | null>(null);
   const timingTriggerRef = useRef<HTMLButtonElement | null>(null);
-  const durationRef = useRef<HTMLInputElement | null>(null);
+  const quantityRef = useRef<HTMLInputElement | null>(null);
 
   const notesBtnRef = useRef<HTMLButtonElement | null>(null);
   const notesTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -272,13 +268,28 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     const df = getString((picked as any).defaultFrequency);
     if (df && isFrequency(df)) setFrequency(df);
 
-    const dur = getNumber((picked as any).defaultDuration);
-    if (typeof dur === 'number' && dur > 0) setDurationDays(String(Math.trunc(dur)));
+    /**
+     * ✅ FIX: Quantity may come as:
+     * - defaultQuantity (medicine preset)
+     * - quantity (rx preset line / imported line)
+     * - qty (some payloads)
+     * - legacy defaultDuration (number)
+     */
+    const qStrTop =
+      getString((picked as any).defaultQuantity) ??
+      getString((picked as any).quantity) ??
+      getString((picked as any).qty);
+
+    if (qStrTop) {
+      setQuantityStr(qStrTop);
+    } else {
+      const legacy = getNumber((picked as any).defaultDuration);
+      if (typeof legacy === 'number' && legacy > 0) setQuantityStr(String(Math.trunc(legacy)));
+    }
 
     const mt = getString((picked as any).medicineType);
     if (mt) setMedicineType(mt);
 
-    // optional future default (won't break if absent)
     const apd = getString((picked as any).defaultAmountPerDose);
     if (apd) setAmountPerDose(apd);
 
@@ -303,15 +314,31 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     const fStr = getString(f);
     if (fStr && isFrequency(fStr)) setFrequency(fStr);
 
-    const legacyDur =
-      (defaultsRaw as any).duration ??
-      (defaultsRaw as any).dur ??
-      (defaultsRaw as any).days ??
-      (defaultsRaw as any).durationDays ??
-      (defaultsRaw as any).defaultDuration;
-    const legacyDurNum = getNumber(legacyDur);
-    if (typeof legacyDurNum === 'number' && legacyDurNum > 0)
-      setDurationDays(String(Math.trunc(legacyDurNum)));
+    /**
+     * ✅ FIX: nested quantity might also be stored as `quantity`
+     * not only `defaultQuantity`
+     */
+    const nestedQtyStr =
+      getString((defaultsRaw as any).quantity) ??
+      getString((defaultsRaw as any).qty) ??
+      getString((defaultsRaw as any).defaultQuantity);
+
+    if (nestedQtyStr) {
+      setQuantityStr(nestedQtyStr);
+    } else {
+      // legacy duration fields (old data)
+      const legacyDur =
+        (defaultsRaw as any).duration ??
+        (defaultsRaw as any).dur ??
+        (defaultsRaw as any).days ??
+        (defaultsRaw as any).durationDays ??
+        (defaultsRaw as any).defaultDuration;
+
+      const legacyDurNum = getNumber(legacyDur);
+      if (typeof legacyDurNum === 'number' && legacyDurNum > 0) {
+        setQuantityStr(String(Math.trunc(legacyDurNum)));
+      }
+    }
 
     const t =
       (defaultsRaw as any).timing ??
@@ -346,13 +373,8 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     const freq = frequency;
     const timing = timingToBackend(timingUi);
 
-    const durTrim = durationDays.trim();
-    const durNum = durTrim ? Number(durTrim) : undefined;
-    const duration =
-      typeof durNum === 'number' && Number.isFinite(durNum) && durNum > 0
-        ? Math.trunc(durNum)
-        : undefined;
-
+    // ✅ store quantity as STRING, no numeric conversion
+    const q = quantityStr.trim();
     const n = notes.trim();
 
     const next: RxLineType = {
@@ -361,7 +383,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
       ...(d ? { dose: d } : {}),
       ...(apd ? { amountPerDose: apd } : {}),
       ...(freq ? { frequency: freq } : {}),
-      ...(duration ? { duration } : {}),
+      ...(q ? { quantity: q } : {}),
       ...(timing ? { timing } : {}),
       ...(n ? { notes: n } : {}),
     };
@@ -374,7 +396,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
     setAmountPerDose('');
     setFrequency(undefined);
     setTimingUi(undefined);
-    setDurationDays('');
+    setQuantityStr('');
     setNotes('');
     setNotesOpen(false);
 
@@ -393,13 +415,19 @@ export function MedicinesEditor({ lines, onChange }: Props) {
 
   const edit = (idx: number) => {
     const row = lines[idx] as any;
+
     setMedicine(row?.medicine ?? '');
     setMedicineType(row?.medicineType ?? '');
     setDose(row?.dose ?? '');
     setAmountPerDose(row?.amountPerDose ?? '');
 
     setFrequency(row?.frequency ?? undefined);
-    setDurationDays(typeof row?.duration === 'number' ? String(row.duration) : '');
+
+    // ✅ quantity string (fallback: legacy duration number)
+    const q =
+      getString(row?.quantity) ?? (typeof row?.duration === 'number' ? String(row.duration) : '');
+    setQuantityStr(q ?? '');
+
     setTimingUi(timingToUi(row?.timing ?? undefined));
     setNotes(row?.notes ?? '');
     setNotesOpen(Boolean(row?.notes?.trim()));
@@ -438,14 +466,19 @@ export function MedicinesEditor({ lines, onChange }: Props) {
 
   const timingLabel = (t?: TimingBackend) => timingToUi(t) ?? '—';
   const freqLabel = (f?: RxLineType['frequency']) => f ?? '—';
-  const durLabel = (d?: number) => (typeof d === 'number' ? String(d) : '—');
+  const qtyLabel = (q?: unknown) => {
+    const s = getString(q);
+    if (s) return s;
+    if (typeof q === 'number' && Number.isFinite(q)) return String(q); // legacy
+    return '—';
+  };
   const typeLabel = (t?: string) => (t && t.trim() ? t.trim() : '—');
   const amountLabel = (a?: string) => (a && a.trim() ? a.trim() : '—');
 
   return (
     <div className="w-full overflow-hidden rounded-xl border bg-white">
       <div className="border-b bg-white px-3 py-3">
-        {/* ROW 1: Medicine + Type + Duration + Notes + Add */}
+        {/* ROW 1 */}
         <div className="flex items-center gap-2">
           <div className="w-[25%]">
             <MedicineCombobox
@@ -487,7 +520,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
               value={medicineType}
               onChange={(next) => {
                 setMedicineType(next);
-                goNext(durationRef.current);
+                goNext(quantityRef.current);
               }}
               triggerRef={typeTriggerRef}
               placeholder="Type —"
@@ -500,7 +533,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
               className="h-9 rounded-xl"
               value={amountPerDose}
               onChange={(e) => setAmountPerDose(e.target.value)}
-              placeholder="Qty/Time (e.g., 1 tab)"
+              placeholder="Qty/Time"
               onKeyDown={(e) => {
                 if (e.key !== 'Enter') return;
                 e.preventDefault();
@@ -539,16 +572,15 @@ export function MedicinesEditor({ lines, onChange }: Props) {
           </div>
         </div>
 
-        {/* ROW 2: Dose + Qty/Time + Freq + Timing */}
+        {/* ROW 2 */}
         <div className="mt-2 flex items-center gap-2">
-          <div className="w-[20.666%]">
+          <div className="w-[45.666%]">
             <Input
-              ref={durationRef}
+              ref={quantityRef}
               className="h-9 rounded-xl"
-              value={durationDays}
-              onChange={(e) => setDurationDays(e.target.value)}
-              placeholder="Days"
-              inputMode="numeric"
+              value={quantityStr}
+              onChange={(e) => setQuantityStr(e.target.value)}
+              placeholder='Qty (e.g., "5 Tabs")'
               onKeyDown={(e) => {
                 if (e.key !== 'Enter') return;
                 e.preventDefault();
@@ -674,7 +706,7 @@ export function MedicinesEditor({ lines, onChange }: Props) {
         <div className="w-[14%]">Type</div>
         <div className="w-[12%]">Qty/Time</div>
         <div className="w-[14%]">Frequency</div>
-        <div className="w-[12%]">Duration</div>
+        <div className="w-[12%]">Quantity</div>
         <div className="w-[12%] pl-2">Timing</div>
         <div className="w-[14%] pl-5">Notes</div>
         <div className="w-[8%]">Actions</div>
@@ -691,104 +723,111 @@ export function MedicinesEditor({ lines, onChange }: Props) {
         {lines.length === 0 ? (
           <div className="px-3 py-6 text-sm text-gray-500">No medicines added yet.</div>
         ) : (
-          lines.map((l: any, idx) => (
-            <div key={idx} className="flex items-start gap-2 px-3 py-1 text-sm">
-              <div className="w-[22%]">
-                <div className="font-medium text-gray-900">{l.medicine}</div>
-                {l.dose ? <div className="text-[12px] text-gray-500">{l.dose}</div> : null}
-              </div>
+          lines.map((l: any, idx) => {
+            // ✅ quantity string (fallback: legacy duration number)
+            const q =
+              getString(l.quantity) ??
+              (typeof l.duration === 'number' ? String(l.duration) : undefined);
 
-              <div className="w-[14%] text-gray-800">{typeLabel(l.medicineType)}</div>
+            return (
+              <div key={idx} className="flex items-start gap-2 px-3 py-1 text-sm">
+                <div className="w-[22%]">
+                  <div className="font-medium text-gray-900">{l.medicine}</div>
+                  {l.dose ? <div className="text-[12px] text-gray-500">{l.dose}</div> : null}
+                </div>
 
-              <div className="w-[12%] text-gray-800">{amountLabel(l.amountPerDose)}</div>
+                <div className="w-[14%] text-gray-800">{typeLabel(l.medicineType)}</div>
 
-              <div className="w-[14%] pl-1 text-gray-800">{freqLabel(l.frequency)}</div>
+                <div className="w-[12%] text-gray-800">{amountLabel(l.amountPerDose)}</div>
 
-              <div className="w-[12%] pl-1 text-gray-800">{durLabel(l.duration)}</div>
+                <div className="w-[14%] pl-1 text-gray-800">{freqLabel(l.frequency)}</div>
 
-              <div className="w-[12%] pl-2 text-gray-800">{timingLabel(l.timing)}</div>
+                <div className="w-[12%] pl-1 text-gray-800">{qtyLabel(q)}</div>
 
-              <div className="w-[14%]">
-                <Popover
-                  open={rowNotesIndex === idx}
-                  onOpenChange={(open) => {
-                    if (open) {
-                      setRowNotesIndex(idx);
-                      setRowNotesDraft(lines[idx]?.notes ?? '');
-                    } else {
-                      setRowNotesIndex(null);
-                      setRowNotesDraft('');
-                    }
-                  }}
-                >
-                  <PopoverTrigger asChild>
+                <div className="w-[12%] pl-2 text-gray-800">{timingLabel(l.timing)}</div>
+
+                <div className="w-[14%]">
+                  <Popover
+                    open={rowNotesIndex === idx}
+                    onOpenChange={(open) => {
+                      if (open) {
+                        setRowNotesIndex(idx);
+                        setRowNotesDraft(lines[idx]?.notes ?? '');
+                      } else {
+                        setRowNotesIndex(null);
+                        setRowNotesDraft('');
+                      }
+                    }}
+                  >
+                    <PopoverTrigger asChild>
+                      <Button
+                        type="button"
+                        variant="link"
+                        className="h-auto p-0 pl-6 text-xs font-semibold text-gray-800 underline decoration-gray-200 underline-offset-2 hover:decoration-gray-400"
+                      >
+                        {l.notes?.trim() ? 'View' : 'Add'}
+                      </Button>
+                    </PopoverTrigger>
+
+                    <PopoverContent side="bottom" align="start" className="w-80 rounded-2xl p-3">
+                      <div className="mb-2 text-sm font-semibold text-gray-900">Notes</div>
+                      <Textarea
+                        className="min-h-22.5 resize-none rounded-xl"
+                        value={rowNotesIndex === idx ? rowNotesDraft : ''}
+                        onChange={(e) => setRowNotesDraft(e.target.value)}
+                        placeholder="Add or edit notes…"
+                      />
+                      <div className="mt-2 flex items-center justify-between">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          className="h-8 rounded-xl px-3 text-xs"
+                          onClick={() => {
+                            setRowNotesIndex(null);
+                            setRowNotesDraft('');
+                          }}
+                        >
+                          Cancel
+                        </Button>
+                        <Button
+                          type="button"
+                          className="h-8 rounded-xl px-3 text-xs"
+                          onClick={saveRowNotes}
+                        >
+                          Save
+                        </Button>
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+
+                <div className="w-[8%]">
+                  <div className="flex justify-end">
                     <Button
                       type="button"
-                      variant="link"
-                      className="h-auto p-0 pl-6 text-xs font-semibold text-gray-800 underline decoration-gray-200 underline-offset-2 hover:decoration-gray-400"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 rounded-xl"
+                      onClick={() => edit(idx)}
+                      aria-label="Edit"
                     >
-                      {l.notes?.trim() ? 'View' : 'Add'}
+                      <Pencil className="h-4 w-4" />
                     </Button>
-                  </PopoverTrigger>
-
-                  <PopoverContent side="bottom" align="start" className="w-80 rounded-2xl p-3">
-                    <div className="mb-2 text-sm font-semibold text-gray-900">Notes</div>
-                    <Textarea
-                      className="min-h-22.5 resize-none rounded-xl"
-                      value={rowNotesIndex === idx ? rowNotesDraft : ''}
-                      onChange={(e) => setRowNotesDraft(e.target.value)}
-                      placeholder="Add or edit notes…"
-                    />
-                    <div className="mt-2 flex items-center justify-between">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        className="h-8 rounded-xl px-3 text-xs"
-                        onClick={() => {
-                          setRowNotesIndex(null);
-                          setRowNotesDraft('');
-                        }}
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        type="button"
-                        className="h-8 rounded-xl px-3 text-xs"
-                        onClick={saveRowNotes}
-                      >
-                        Save
-                      </Button>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              <div className="w-[8%]">
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 rounded-xl"
-                    onClick={() => edit(idx)}
-                    aria-label="Edit"
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-9 w-9 rounded-xl text-gray-600 hover:text-gray-900"
-                    onClick={() => remove(idx)}
-                    aria-label="Delete"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-9 w-9 rounded-xl text-gray-600 hover:text-gray-900"
+                      onClick={() => remove(idx)}
+                      aria-label="Delete"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </div>
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>

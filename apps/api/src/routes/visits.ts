@@ -562,45 +562,71 @@ router.post(
       });
       throw new PrescriptionStorageError();
     }
+    try {
+      let prescription;
 
-    let prescription;
-    if (!isDone) {
-      prescription = await prescriptionRepository.upsertDraftForVisit({
-        visit,
-        lines: nextLines,
-        jsonKey,
-        toothDetails: nextToothDetails,
-
-        // ✅ printable
-        doctorNotes: nextDoctorNotes,
-
-        // ✅ non-printable
-        doctorReceptionNotes: nextDoctorReceptionNotes,
-      });
-    } else {
-      const revision = await prescriptionRepository.ensureRevisionForVisit({ visit, jsonKey });
-      prescription =
-        (await prescriptionRepository.updateById({
-          rxId: revision.rxId,
+      if (!isDone) {
+        prescription = await prescriptionRepository.upsertDraftForVisit({
+          visit,
           lines: nextLines,
           jsonKey,
           toothDetails: nextToothDetails,
-
-          // ✅ printable
           doctorNotes: nextDoctorNotes,
-
-          // ✅ non-printable
           doctorReceptionNotes: nextDoctorReceptionNotes,
-        })) ?? revision;
-    }
+        });
+      } else {
+        const revision = await prescriptionRepository.ensureRevisionForVisit({ visit, jsonKey });
+        prescription =
+          (await prescriptionRepository.updateById({
+            rxId: revision.rxId,
+            lines: nextLines,
+            jsonKey,
+            toothDetails: nextToothDetails,
+            doctorNotes: nextDoctorNotes,
+            doctorReceptionNotes: nextDoctorReceptionNotes,
+          })) ?? revision;
+      }
 
-    return res.status(201).json({
-      rxId: prescription.rxId,
-      visitId: prescription.visitId,
-      version: prescription.version,
-      createdAt: prescription.createdAt,
-      updatedAt: prescription.updatedAt,
-    });
+      return res.status(201).json({
+        rxId: prescription.rxId,
+        visitId: prescription.visitId,
+        version: prescription.version,
+        createdAt: prescription.createdAt,
+        updatedAt: prescription.updatedAt,
+      });
+    } catch (err) {
+      const name = err instanceof Error ? err.name : '';
+      const message = err instanceof Error ? err.message : String(err);
+
+      // ✅ Map Dynamo validation issues to 400 (instead of 500)
+      if (name === 'ValidationException') {
+        return res.status(400).json({
+          error: 'BAD_REQUEST',
+          message,
+          traceId: req.requestId,
+        });
+      }
+
+      // ✅ Map conditional conflicts to 409
+      if (name === 'TransactionCanceledException' || name === 'ConditionalCheckFailedException') {
+        return res.status(409).json({
+          error: 'RX_WRITE_CONFLICT',
+          message,
+          traceId: req.requestId,
+        });
+      }
+
+      logError('visit_rx_upsert_failed', {
+        reqId: req.requestId,
+        visitId: id.data,
+        error:
+          err instanceof Error
+            ? { name: err.name, message: err.message }
+            : { message: String(err) },
+      });
+
+      throw err;
+    }
   }),
 );
 

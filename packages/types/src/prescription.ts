@@ -33,8 +33,7 @@ export const RxLine = z.object({
   dose: z.string().min(1).optional(),
   amountPerDose: z.string().min(1).max(64).optional(),
   frequency: Frequency.optional(),
-  duration: z.number().int().min(1).max(365).optional(),
-  sig: z.string().max(500).optional(),
+  quantity: z.string().min(1).max(1000).optional(),
   timing: Timing.optional(),
   notes: z.string().max(500).optional(),
 });

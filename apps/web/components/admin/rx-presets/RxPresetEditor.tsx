@@ -75,6 +75,7 @@ function getString(v: unknown): string | undefined {
   return typeof v === 'string' && v.trim() ? v.trim() : undefined;
 }
 
+// kept ONLY for legacy fallbacks (older data might have numeric defaultDuration/duration)
 function getNumber(v: unknown): number | undefined {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
   if (typeof v === 'string' && v.trim()) {
@@ -267,14 +268,17 @@ export default function RxPresetEditor({
   const [lines, setLines] = useState<RxLineType[]>([]);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
 
-  /* ---------------- line form (MedicinesEditor-aligned) ---------------- */
+  /* ---------------- line form (backend-aligned) ---------------- */
 
   const [medicine, setMedicine] = useState('');
   const [medicineType, setMedicineType] = useState('');
   const [dose, setDose] = useState('');
   const [amountPerDose, setAmountPerDose] = useState('');
   const [frequency, setFrequency] = useState<Frequency | undefined>(undefined);
-  const [durationDays, setDurationDays] = useState('');
+
+  // ✅ quantity is STRING now (e.g., "5 tabs", "10 cups")
+  const [quantity, setQuantity] = useState('');
+
   const [timing, setTiming] = useState<Timing | undefined>(undefined);
   const [notes, setNotes] = useState('');
 
@@ -294,11 +298,6 @@ export default function RxPresetEditor({
   /* ---------------- derived ---------------- */
 
   const tagsArr = useMemo(() => tagsToArray(tagsCsv), [tagsCsv]);
-
-  const durationNum = useMemo(() => {
-    const n = Number(durationDays.trim());
-    return Number.isFinite(n) && n > 0 ? Math.trunc(n) : undefined;
-  }, [durationDays]);
 
   // ✅ backend RxLine requires only medicine
   const lineValid = medicine.trim().length > 0;
@@ -322,7 +321,7 @@ export default function RxPresetEditor({
     setDose('');
     setAmountPerDose('');
     setFrequency(undefined);
-    setDurationDays('');
+    setQuantity('');
     setTiming(undefined);
     setNotes('');
     setEditingIndex(null);
@@ -341,14 +340,26 @@ export default function RxPresetEditor({
     const dd = getString((picked as any).defaultDose);
     if (dd) setDose(dd);
 
-    const apd = getString((picked as any).defaultAmountPerDose);
+    /**
+     * ✅ FIX:
+     * Backend response contains `amountPerDose` (not `defaultAmountPerDose`).
+     * Support both to be safe.
+     */
+    const apd =
+      getString((picked as any).amountPerDose) ?? getString((picked as any).defaultAmountPerDose);
     if (apd) setAmountPerDose(apd);
 
     const df = getString((picked as any).defaultFrequency);
     if (df && isFrequency(df)) setFrequency(df);
 
-    const dur = getNumber((picked as any).defaultDuration);
-    if (typeof dur === 'number' && dur > 0) setDurationDays(String(Math.trunc(dur)));
+    // ✅ defaultQuantity is string now (fallback to legacy defaultDuration number)
+    const qStr = getString((picked as any).defaultQuantity);
+    if (qStr) {
+      setQuantity(qStr);
+    } else {
+      const legacy = getNumber((picked as any).defaultDuration);
+      if (typeof legacy === 'number' && legacy > 0) setQuantity(String(Math.trunc(legacy)));
+    }
 
     const n = getString((picked as any).defaultNotes) ?? getString((picked as any).notes);
     if (n) setNotes(n);
@@ -367,12 +378,25 @@ export default function RxPresetEditor({
     const f2 = getString((defaultsRaw as any).frequency ?? (defaultsRaw as any).defaultFrequency);
     if (f2 && isFrequency(f2)) setFrequency(f2);
 
-    const dur2 = getNumber(
-      (defaultsRaw as any).duration ??
+    // ✅ quantity string fallback (also accept legacy duration fields)
+    const nestedQtyStr =
+      getString((defaultsRaw as any).quantity) ??
+      getString((defaultsRaw as any).qty) ??
+      getString((defaultsRaw as any).defaultQuantity);
+
+    if (nestedQtyStr) {
+      setQuantity(nestedQtyStr);
+    } else {
+      const legacyDur =
+        (defaultsRaw as any).duration ??
         (defaultsRaw as any).durationDays ??
-        (defaultsRaw as any).defaultDuration,
-    );
-    if (typeof dur2 === 'number' && dur2 > 0) setDurationDays(String(Math.trunc(dur2)));
+        (defaultsRaw as any).defaultDuration;
+
+      const legacyDurNum = getNumber(legacyDur);
+      if (typeof legacyDurNum === 'number' && legacyDurNum > 0) {
+        setQuantity(String(Math.trunc(legacyDurNum)));
+      }
+    }
 
     const t2 = getString((defaultsRaw as any).timing ?? (defaultsRaw as any).defaultTiming);
     if (t2 && isTiming(t2)) setTiming(t2);
@@ -394,13 +418,15 @@ export default function RxPresetEditor({
   const onAddOrUpdateLine = () => {
     if (!lineValid) return;
 
+    const q = quantity.trim();
+
     const next: RxLineType = {
       medicine: medicine.trim(),
       ...(medicineType.trim() ? { medicineType: medicineType.trim() } : {}),
       ...(dose.trim() ? { dose: dose.trim() } : {}),
       ...(amountPerDose.trim() ? { amountPerDose: amountPerDose.trim() } : {}),
       ...(frequency ? { frequency } : {}),
-      ...(durationNum ? { duration: durationNum } : {}),
+      ...(q ? { quantity: q } : {}), // ✅ string
       ...(timing ? { timing } : {}),
       ...(notes.trim() ? { notes: notes.trim() } : {}),
     };
@@ -413,14 +439,18 @@ export default function RxPresetEditor({
   };
 
   const onEditLine = (idx: number) => {
-    const l = lines[idx];
+    const l = lines[idx] as any;
 
     setMedicine(l.medicine ?? '');
     setMedicineType(l.medicineType ?? '');
     setDose(l.dose ?? '');
     setAmountPerDose(l.amountPerDose ?? '');
     setFrequency(isFrequency(l.frequency) ? l.frequency : undefined);
-    setDurationDays(typeof l.duration === 'number' ? String(l.duration) : '');
+
+    // ✅ quantity string (fallback to legacy duration number)
+    const q = getString(l.quantity) ?? (typeof l.duration === 'number' ? String(l.duration) : '');
+    setQuantity(q ?? '');
+
     setTiming(isTiming(l.timing) ? l.timing : undefined);
     setNotes(l.notes ?? '');
 
@@ -557,63 +587,72 @@ export default function RxPresetEditor({
                     </div>
                   ) : (
                     <div className="flex flex-col gap-3">
-                      {lines.map((l, idx) => (
-                        <div
-                          key={idx}
-                          className={cn(
-                            'rounded-3xl border bg-white p-4 transition',
-                            editingIndex === idx && 'ring-2 ring-ring/30',
-                          )}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div className="min-w-0">
-                              <div className="truncate text-base font-semibold text-gray-900">
-                                {l.medicine}
-                              </div>
+                      {lines.map((lRaw, idx) => {
+                        const l = lRaw as any;
 
-                              <div className="mt-1 text-[12px] text-gray-600">
-                                {[
-                                  l.medicineType ? `Type: ${l.medicineType}` : '',
-                                  l.dose ?? '',
-                                  l.amountPerDose ? `Qty/Time: ${l.amountPerDose}` : '',
-                                  l.frequency ?? '',
-                                  l.duration != null ? `${l.duration} days` : '',
-                                  l.timing
-                                    ? timingLabel(isTiming(l.timing) ? l.timing : undefined)
-                                    : '',
-                                ]
-                                  .filter(Boolean)
-                                  .join(' · ')}
-                              </div>
+                        // ✅ quantity string (fallback to legacy duration number)
+                        const q =
+                          getString(l.quantity) ??
+                          (typeof l.duration === 'number' ? String(l.duration) : undefined);
 
-                              {l.notes ? (
-                                <div className="mt-3 rounded-2xl bg-gray-50 p-3 text-[12px] text-gray-700">
-                                  <span className="text-gray-500">Notes:</span> {l.notes}
+                        return (
+                          <div
+                            key={idx}
+                            className={cn(
+                              'rounded-3xl border bg-white p-4 transition',
+                              editingIndex === idx && 'ring-2 ring-ring/30',
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="truncate text-base font-semibold text-gray-900">
+                                  {l.medicine}
                                 </div>
-                              ) : null}
-                            </div>
 
-                            <div className="flex shrink-0 items-center gap-2">
-                              <Button
-                                variant="secondary"
-                                className="h-9 rounded-2xl"
-                                onClick={() => onEditLine(idx)}
-                              >
-                                <Pencil className="mr-2 h-4 w-4" />
-                                Edit
-                              </Button>
-                              <Button
-                                variant="destructive"
-                                className="h-9 rounded-2xl"
-                                onClick={() => onDeleteLine(idx)}
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Delete
-                              </Button>
+                                <div className="mt-1 text-[12px] text-gray-600">
+                                  {[
+                                    l.medicineType ? `Type: ${l.medicineType}` : '',
+                                    l.dose ?? '',
+                                    l.amountPerDose ? `Qty/Time: ${l.amountPerDose}` : '',
+                                    l.frequency ?? '',
+                                    q ? `Qty: ${q}` : '',
+                                    l.timing
+                                      ? timingLabel(isTiming(l.timing) ? l.timing : undefined)
+                                      : '',
+                                  ]
+                                    .filter(Boolean)
+                                    .join(' · ')}
+                                </div>
+
+                                {l.notes ? (
+                                  <div className="mt-3 rounded-2xl bg-gray-50 p-3 text-[12px] text-gray-700">
+                                    <span className="text-gray-500">Notes:</span> {l.notes}
+                                  </div>
+                                ) : null}
+                              </div>
+
+                              <div className="flex shrink-0 items-center gap-2">
+                                <Button
+                                  variant="secondary"
+                                  className="h-9 rounded-2xl"
+                                  onClick={() => onEditLine(idx)}
+                                >
+                                  <Pencil className="mr-2 h-4 w-4" />
+                                  Edit
+                                </Button>
+                                <Button
+                                  variant="destructive"
+                                  className="h-9 rounded-2xl"
+                                  onClick={() => onDeleteLine(idx)}
+                                >
+                                  <Trash2 className="mr-2 h-4 w-4" />
+                                  Delete
+                                </Button>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   )}
 
@@ -638,7 +677,7 @@ export default function RxPresetEditor({
 
                 <div className="p-6">
                   <div className="flex flex-col gap-5">
-                    {/* Preset fields (RESTORED) */}
+                    {/* Preset fields */}
                     <div className="flex flex-col gap-2">
                       <Label className="text-xs">Preset name</Label>
                       <Input
@@ -686,9 +725,7 @@ export default function RxPresetEditor({
                         value={medicine}
                         placeholder="Search medicine…"
                         onPick={(item) => {
-                          // item shape may vary; apply safe defaults
                           applyMedicineDefaults(item);
-                          // if displayName not present, still try:
                           if (isRecord(item)) {
                             const dn = getString((item as any).displayName);
                             if (dn) setMedicine(dn);
@@ -746,14 +783,16 @@ export default function RxPresetEditor({
                     </div>
 
                     <div className="flex flex-col gap-2">
-                      <Label className="text-xs">Duration (days)</Label>
+                      <Label className="text-xs">Quantity</Label>
                       <Input
                         className="h-10 rounded-2xl"
-                        inputMode="numeric"
-                        placeholder="e.g., 5"
-                        value={durationDays}
-                        onChange={(e) => setDurationDays(e.target.value)}
+                        placeholder='e.g., "5 tabs", "10 cups"'
+                        value={quantity}
+                        onChange={(e) => setQuantity(e.target.value)}
                       />
+                      <div className="text-[11px] text-gray-500">
+                        This is stored as text (no calculations).
+                      </div>
                     </div>
 
                     <div className="flex flex-col gap-2">

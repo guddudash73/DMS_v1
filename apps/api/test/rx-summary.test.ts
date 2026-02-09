@@ -9,7 +9,7 @@ describe('buildPrescriptionSummary', () => {
         medicine: 'Amoxicillin 500mg',
         dose: '500mg',
         frequency: 'BID',
-        duration: 5,
+        quantity: '5 Tabs',
         notes: undefined,
         timing: undefined,
       },
@@ -17,7 +17,7 @@ describe('buildPrescriptionSummary', () => {
         medicine: 'Amoxicillin 500mg',
         dose: '500mg',
         frequency: 'TID',
-        duration: 3,
+        quantity: '3 Tabs',
         notes: undefined,
         timing: undefined,
       },
@@ -25,7 +25,7 @@ describe('buildPrescriptionSummary', () => {
         medicine: 'ibuprofen 400mg',
         dose: '400mg',
         frequency: 'TID',
-        duration: 2,
+        quantity: '2 Tabs',
         notes: undefined,
         timing: undefined,
       },
@@ -33,7 +33,7 @@ describe('buildPrescriptionSummary', () => {
         medicine: 'Ibuprofen 400mg',
         dose: '400mg',
         frequency: 'QID',
-        duration: 4,
+        quantity: '4 Tabs',
         notes: undefined,
         timing: undefined,
       },
@@ -49,15 +49,13 @@ describe('buildPrescriptionSummary', () => {
 
     expect(amox).toBeDefined();
     expect(amox!.lineCount).toBe(2);
-    expect(amox!.totalDurationDays).toBe(8);
-    expect(amox!.minDurationDays).toBe(3);
-    expect(amox!.maxDurationDays).toBe(5);
+    expect(amox!.quantities).toEqual(['5 Tabs', '3 Tabs']);
+    expect(amox!.uniqueQuantities.length).toBe(2);
 
     expect(ibu).toBeDefined();
     expect(ibu!.lineCount).toBe(2);
-    expect(ibu!.totalDurationDays).toBe(6);
-    expect(ibu!.minDurationDays).toBe(2);
-    expect(ibu!.maxDurationDays).toBe(4);
+    expect(amox!.quantities).toEqual(['4 Tabs', '2 Tabs']);
+    expect(amox!.uniqueQuantities.length).toBe(2);
   });
 
   it('handles empty input', () => {

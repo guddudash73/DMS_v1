@@ -176,18 +176,24 @@ function lineToText(line: RxLineType): string {
     : {};
 
   const med =
-    (typeof rec.medicineName === 'string' && rec.medicineName.trim()) ||
-    (typeof rec.medicine === 'string' && rec.medicine.trim()) ||
+    (typeof (rec as any).medicineName === 'string' && (rec as any).medicineName.trim()) ||
+    (typeof (rec as any).medicine === 'string' && (rec as any).medicine.trim()) ||
     'Medicine';
 
-  const dose = rec.dose != null ? String(rec.dose) : '';
-  const freq = rec.frequency != null ? String(rec.frequency) : '';
-  const days =
-    rec.days !== undefined && rec.days !== null && rec.days !== '' ? String(rec.days) : '';
-  const timing = rec.timing != null ? String(rec.timing) : '';
-  const notes = rec.notes != null ? String(rec.notes) : '';
+  const dose = (rec as any).dose != null ? String((rec as any).dose) : '';
+  const freq = (rec as any).frequency != null ? String((rec as any).frequency) : '';
 
-  const parts = [dose, freq, days ? `${days} days` : '', timing].filter(Boolean);
+  // ✅ quantity is string now; keep fallbacks for older stored data
+  const quantity =
+    (typeof (rec as any).quantity === 'string' && (rec as any).quantity.trim()) ||
+    ((rec as any).quantity != null ? String((rec as any).quantity) : '') ||
+    ((rec as any).days != null ? String((rec as any).days) : '') ||
+    ((rec as any).duration != null ? String((rec as any).duration) : '');
+
+  const timing = (rec as any).timing != null ? String((rec as any).timing) : '';
+  const notes = (rec as any).notes != null ? String((rec as any).notes) : '';
+
+  const parts = [dose, freq, quantity ? `Qty: ${quantity}` : '', timing].filter(Boolean);
   return `${med}${parts.length ? ` — ${parts.join(' · ')}` : ''}${notes ? ` — ${notes}` : ''}`;
 }
 
@@ -628,12 +634,7 @@ export function PrescriptionWorkspace(props: Props) {
   );
 
   // ✅ Treat either notes field as meaningful content for saving too
-  const hasAnyRxData =
-    lines.length > 0 ||
-    toothDetails.length > 0 ||
-    !!doctorNotes.trim() ||
-    !!doctorReceptionNotes.trim();
-
+  const hasAnyRxData = lines.length > 0 || toothDetails.length > 0;
   const canAutosave = canEdit && hydratedRef.current && hasAnyRxData && hash !== lastHash.current;
 
   useEffect(() => {

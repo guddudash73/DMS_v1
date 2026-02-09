@@ -1083,6 +1083,25 @@ export const apiSlice = createApi({
           ...(typeof limit === 'number' ? { limit } : {}),
         },
       }),
+      transformResponse: (resp: { items: any[] }) => ({
+        items: (resp.items ?? []).map((x) => ({
+          ...x,
+
+          // legacy qty -> defaultQuantity
+          ...(x.defaultQuantity === undefined && x.defaultDuration !== undefined
+            ? { defaultQuantity: String(x.defaultDuration) }
+            : {}),
+
+          // legacy timing/notes keys -> new names
+          ...(x.defaultTiming === undefined && x.timing !== undefined
+            ? { defaultTiming: x.timing }
+            : {}),
+
+          ...(x.defaultNotes === undefined && x.notes !== undefined
+            ? { defaultNotes: x.notes }
+            : {}),
+        })),
+      }),
       providesTags: (_r, _e, arg) => [{ type: 'Medicines' as const, id: arg.query }],
     }),
 
@@ -1117,10 +1136,13 @@ export const apiSlice = createApi({
       {
         displayName: string;
         defaultDose?: string;
+        amountPerDose?: string;
         defaultFrequency?: string;
-        defaultDuration?: number;
+        defaultQuantity?: string | number;
 
-        // ✅ new
+        defaultTiming?: 'BEFORE_MEAL' | 'AFTER_MEAL' | 'ANY';
+        defaultNotes?: string;
+
         medicineType?: string;
       }
     >({

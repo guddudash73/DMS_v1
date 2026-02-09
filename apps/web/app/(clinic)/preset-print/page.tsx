@@ -12,6 +12,13 @@ import { MedicinesEditor } from '@/components/prescription/MedicinesEditor';
 const A4_W = 794;
 const A4_H = 1123;
 
+const timingLabel = (t?: RxLineType['timing']) => {
+  if (!t) return undefined;
+  if (t === 'BEFORE_MEAL') return 'Before meal';
+  if (t === 'AFTER_MEAL') return 'After meal';
+  return 'Any time';
+};
+
 function PresetBlock({ lines }: { lines: RxLineType[] }) {
   return (
     <div className="h-full w-full p-2">
@@ -21,19 +28,31 @@ function PresetBlock({ lines }: { lines: RxLineType[] }) {
         {lines.length === 0 ? (
           <div className="text-gray-500">No medicines</div>
         ) : (
-          lines.map((l, idx) => (
-            <div key={idx} className="flex gap-2">
-              <div className="w-5 shrink-0 text-gray-500">{idx + 1}.</div>
-              <div className="min-w-0">
-                <div className="font-semibold">{l.medicine}</div>
-                <div className="text-gray-700">
-                  {l.dose} • {l.frequency} • {l.duration} days
-                  {l.timing ? ` • ${l.timing}` : ''}
+          lines.map((l, idx) => {
+            const metaParts = [
+              l.dose,
+              l.amountPerDose,
+              l.frequency,
+              l.quantity,
+              timingLabel(l.timing),
+            ].filter(Boolean);
+
+            return (
+              <div key={idx} className="flex gap-2">
+                <div className="w-5 shrink-0 text-gray-500">{idx + 1}.</div>
+
+                <div className="min-w-0">
+                  <div className="font-semibold">{l.medicine}</div>
+
+                  {metaParts.length > 0 ? (
+                    <div className="text-gray-700">{metaParts.join(' • ')}</div>
+                  ) : null}
+
+                  {l.notes?.trim() ? <div className="mt-0.5 text-gray-700">{l.notes}</div> : null}
                 </div>
-                {l.notes?.trim() ? <div className="text-gray-700">{l.notes}</div> : null}
               </div>
-            </div>
-          ))
+            );
+          })
         )}
       </div>
     </div>
@@ -44,7 +63,9 @@ export default function PresetPrintPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [lines, setLines] = useState<RxLineType[]>([]);
   const [box, setBox] = useState({ x: 60, y: 80, w: 280, h: 180 });
+
   const hasLines = lines.length > 0;
+
   const previewWrapRef = useRef<HTMLDivElement>(null);
   const [wrapW, setWrapW] = useState(0);
 
@@ -63,24 +84,25 @@ export default function PresetPrintPage() {
 
   const previewScale = useMemo(() => {
     if (!wrapW) return 1;
-    const s = wrapW / A4_W;
-    return Math.min(s, 0.85);
+    return Math.min(wrapW / A4_W, 0.85);
   }, [wrapW]);
 
-  const previewOuterStyle = useMemo(() => {
-    return {
+  const previewOuterStyle = useMemo(
+    () => ({
       height: Math.round(A4_H * previewScale),
-    } as React.CSSProperties;
-  }, [previewScale]);
+    }),
+    [previewScale],
+  );
 
-  const previewInnerStyle = useMemo(() => {
-    return {
+  const previewInnerStyle = useMemo(
+    () => ({
       width: A4_W,
       height: A4_H,
       transform: `scale(${previewScale})`,
       transformOrigin: 'top left',
-    } as React.CSSProperties;
-  }, [previewScale]);
+    }),
+    [previewScale],
+  );
 
   const print = () => window.print();
 
@@ -91,7 +113,6 @@ export default function PresetPrintPage() {
         @media print {
           html, body { margin: 0 !important; padding: 0 !important; }
           body * { visibility: hidden !important; }
-          /* show only print root */
           #preset-print-root, #preset-print-root * { visibility: visible !important; }
           #preset-print-root {
             position: fixed !important;
@@ -102,13 +123,13 @@ export default function PresetPrintPage() {
             background: white !important;
             overflow: hidden !important;
           }
-          /* no preview grid / outlines in print */
           .preset-grid { display: none !important; }
           .preset-rnd-outline { outline: none !important; }
         }
       `}</style>
 
       <div className="grid grid-cols-1 gap-4 xl:grid-cols-12">
+        {/* LEFT */}
         <div className="xl:col-span-7 h-full">
           <Card className="rounded-2xl border bg-white p-4 h-full">
             <div className="flex items-center justify-between border-b pb-3">
@@ -118,10 +139,11 @@ export default function PresetPrintPage() {
                   Import preset, then edit medicines before printing.
                 </div>
               </div>
+
               <div className="flex gap-2">
                 <Button
                   variant="outline"
-                  className="rounded-xl cursor-pointer"
+                  className="rounded-xl"
                   onClick={() => setImportOpen(true)}
                 >
                   Import
@@ -129,7 +151,7 @@ export default function PresetPrintPage() {
 
                 <Button
                   variant="outline"
-                  className="rounded-xl cursor-pointer"
+                  className="rounded-xl"
                   onClick={() => {
                     setLines([]);
                     setBox({ x: 60, y: 80, w: 280, h: 180 });
@@ -146,6 +168,7 @@ export default function PresetPrintPage() {
           </Card>
         </div>
 
+        {/* RIGHT */}
         <div className="xl:col-span-5">
           <Card className="rounded-2xl border bg-white p-4">
             <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
@@ -156,14 +179,14 @@ export default function PresetPrintPage() {
                 </div>
               </div>
 
-              <div className="flex flex-wrap items-center gap-2">
-                <Button className="rounded-xl cursor-pointer" disabled={!hasLines} onClick={print}>
+              <div className="flex items-center gap-2">
+                <Button className="rounded-xl" disabled={!hasLines} onClick={print}>
                   Print
                 </Button>
 
                 <Button
                   variant="outline"
-                  className="rounded-xl cursor-pointer"
+                  className="rounded-xl"
                   disabled={!hasLines}
                   onClick={() => setBox({ x: 60, y: 80, w: 280, h: 180 })}
                 >
@@ -207,16 +230,6 @@ export default function PresetPrintPage() {
                       }}
                       minWidth={80}
                       minHeight={60}
-                      enableResizing={{
-                        top: true,
-                        right: true,
-                        bottom: true,
-                        left: true,
-                        topRight: true,
-                        bottomRight: true,
-                        bottomLeft: true,
-                        topLeft: true,
-                      }}
                       className="preset-rnd-outline rounded-md outline outline-dashed outline-gray-300"
                     >
                       <PresetBlock lines={lines} />
@@ -237,9 +250,10 @@ export default function PresetPrintPage() {
         </div>
       </div>
 
+      {/* PRINT ROOT */}
       <div
         id="preset-print-root"
-        className="pointer-events-none fixed -left-24999.75 top-0 bg-white"
+        className="pointer-events-none fixed -left-[25000px] top-0 bg-white"
         style={{ width: A4_W, height: A4_H }}
       >
         {hasLines ? (

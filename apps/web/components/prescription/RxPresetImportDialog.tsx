@@ -90,6 +90,10 @@ function normalizeTiming(raw: unknown): RxLineType['timing'] | undefined {
   return v as RxLineType['timing'];
 }
 
+/**
+ * ✅ FIX: Preserve quantity as STRING (supports new presets with `quantity`,
+ * while keeping backward compatibility with older presets that only had numeric `duration`).
+ */
 function normalizePresetLines(linesUnknown: unknown[]): RxLineType[] {
   return (linesUnknown ?? [])
     .map((lUnknown) => {
@@ -104,7 +108,6 @@ function normalizePresetLines(linesUnknown: unknown[]): RxLineType[] {
 
       if (!medicine) return null;
 
-      // ✅ NEW: preserve medicineType (and common legacy aliases if any)
       const medicineType = (
         getString(lUnknown, 'medicineType') ??
         getString(lUnknown, 'type') ??
@@ -114,7 +117,6 @@ function normalizePresetLines(linesUnknown: unknown[]): RxLineType[] {
         .toString()
         .trim();
 
-      // ✅ NEW: preserve amountPerDose (and common legacy aliases)
       const amountPerDose = (
         getString(lUnknown, 'amountPerDose') ??
         getString(lUnknown, 'quantityPerDose') ??
@@ -129,11 +131,24 @@ function normalizePresetLines(linesUnknown: unknown[]): RxLineType[] {
 
       const frequency = normalizeFrequency(getValue(lUnknown, 'frequency'));
 
+      // ✅ NEW: quantity is string (preferred)
+      const quantity = (
+        getString(lUnknown, 'quantity') ??
+        getString(lUnknown, 'defaultQuantity') ??
+        getString(lUnknown, 'qty') ??
+        ''
+      )
+        .toString()
+        .trim();
+
+      // ✅ legacy fallback: older presets used numeric duration
       const durationRaw = getNumberLike(lUnknown, 'duration');
-      const duration =
+      const legacyQuantity =
         typeof durationRaw === 'number' && Number.isFinite(durationRaw) && durationRaw > 0
-          ? Math.trunc(durationRaw)
+          ? String(Math.trunc(durationRaw))
           : undefined;
+
+      const finalQuantity = quantity || legacyQuantity;
 
       const timing = normalizeTiming(getValue(lUnknown, 'timing'));
 
@@ -149,7 +164,7 @@ function normalizePresetLines(linesUnknown: unknown[]): RxLineType[] {
         ...(dose ? { dose } : {}),
         ...(amountPerDose ? { amountPerDose } : {}),
         ...(frequency ? { frequency } : {}),
-        ...(duration ? { duration } : {}),
+        ...(finalQuantity ? { quantity: finalQuantity } : {}),
         ...(timing ? { timing } : {}),
         ...(sig ? { sig } : {}),
         ...(notes ? { notes } : {}),
@@ -363,6 +378,14 @@ export function RxPresetImportDialog({ open, onOpenChange, disabled, onImport }:
 
                         const dose = getString(lUnknown, 'dose');
                         const frequency = getString(lUnknown, 'frequency');
+
+                        // ✅ show quantity (string) first; fallback to duration (legacy)
+                        const quantity =
+                          getString(lUnknown, 'quantity') ??
+                          getString(lUnknown, 'defaultQuantity') ??
+                          getString(lUnknown, 'qty') ??
+                          undefined;
+
                         const duration = getString(lUnknown, 'duration');
                         const timing = getString(lUnknown, 'timing');
                         const sig = getString(lUnknown, 'sig');
@@ -381,7 +404,11 @@ export function RxPresetImportDialog({ open, onOpenChange, disabled, onImport }:
                                 qtyPerDose ? `Qty/Time: ${qtyPerDose}` : null,
                                 dose ? `Dose: ${dose}` : null,
                                 frequency ? `Freq: ${frequency}` : null,
-                                duration ? `Days: ${duration}` : null,
+                                quantity
+                                  ? `Quantity: ${quantity}`
+                                  : duration
+                                    ? `Days: ${duration}`
+                                    : null,
                                 timing ? `Timing: ${timing}` : null,
                               ]
                                 .filter(Boolean)

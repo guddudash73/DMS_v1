@@ -112,6 +112,11 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
   /**
    * ✅ Used by prescription medicine combobox/typeahead
    * Must include defaults so the frontend can auto-populate fields on selection.
+   *
+   * ✅ Includes:
+   * - amountPerDose
+   * - defaultTiming
+   * - defaultNotes
    */
   async search(params: { query?: string; limit: number }): Promise<MedicineTypeaheadItem[]> {
     const { query, limit } = params;
@@ -119,9 +124,7 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     const normalizedQuery = query && query.trim().length > 0 ? normalizeMedicineName(query) : '';
 
     let keyCondition = 'GSI1PK = :pk';
-    const exprValues: Record<string, unknown> = {
-      ':pk': 'MEDICINE_PRESET',
-    };
+    const exprValues: Record<string, unknown> = { ':pk': 'MEDICINE_PRESET' };
 
     if (normalizedQuery) {
       keyCondition += ' AND begins_with(GSI1SK, :skPrefix)';
@@ -148,8 +151,11 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
       id: p.id,
       displayName: p.displayName,
       defaultDose: p.defaultDose,
+      amountPerDose: p.amountPerDose,
       defaultFrequency: p.defaultFrequency,
-      defaultDuration: p.defaultDuration,
+      defaultQuantity: p.defaultQuantity,
+      defaultTiming: (p as any).defaultTiming,
+      defaultNotes: (p as any).defaultNotes,
       medicineType: p.medicineType,
     }));
   }
@@ -206,9 +212,7 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     const normalizedQuery = query && query.trim().length > 0 ? normalizeMedicineName(query) : '';
 
     let keyCondition = 'GSI1PK = :pk';
-    const exprValues: Record<string, unknown> = {
-      ':pk': 'MEDICINE_PRESET',
-    };
+    const exprValues: Record<string, unknown> = { ':pk': 'MEDICINE_PRESET' };
 
     if (normalizedQuery) {
       keyCondition += ' AND begins_with(GSI1SK, :skPrefix)';
@@ -261,7 +265,6 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
       .map((r) => r.data);
 
     const nextCursor = encodeCursor(LastEvaluatedKey as DynamoCursor | undefined);
-
     return { items, total, nextCursor };
   }
 
@@ -329,8 +332,11 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
         };
 
         applyOptional('defaultDose', patch.defaultDose);
+        applyOptional('amountPerDose', patch.amountPerDose);
         applyOptional('defaultFrequency', patch.defaultFrequency);
-        applyOptional('defaultDuration', patch.defaultDuration);
+        applyOptional('defaultQuantity', patch.defaultQuantity);
+        applyOptional('defaultTiming', patch.defaultTiming);
+        applyOptional('defaultNotes', patch.defaultNotes);
         applyOptional('medicineType', patch.medicineType);
         applyOptional('tags', patch.tags);
         applyOptional('verified', patch.verified);
@@ -391,8 +397,11 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
 
     applyOptional('displayName', patch.displayName);
     applyOptional('defaultDose', patch.defaultDose);
+    applyOptional('amountPerDose', patch.amountPerDose);
     applyOptional('defaultFrequency', patch.defaultFrequency);
-    applyOptional('defaultDuration', patch.defaultDuration);
+    applyOptional('defaultQuantity', patch.defaultQuantity);
+    applyOptional('defaultTiming', patch.defaultTiming);
+    applyOptional('defaultNotes', patch.defaultNotes);
     applyOptional('medicineType', patch.medicineType);
     applyOptional('tags', patch.tags);
     applyOptional('verified', patch.verified);
@@ -491,8 +500,11 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
         };
 
         applyOptional('defaultDose', patch.defaultDose);
+        applyOptional('amountPerDose', patch.amountPerDose);
         applyOptional('defaultFrequency', patch.defaultFrequency);
-        applyOptional('defaultDuration', patch.defaultDuration);
+        applyOptional('defaultQuantity', patch.defaultQuantity);
+        applyOptional('defaultTiming', patch.defaultTiming);
+        applyOptional('defaultNotes', patch.defaultNotes);
         applyOptional('medicineType', patch.medicineType);
 
         const newNameIndexItem = {
@@ -551,8 +563,11 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
 
     applyOptional('displayName', patch.displayName);
     applyOptional('defaultDose', patch.defaultDose);
+    applyOptional('amountPerDose', patch.amountPerDose);
     applyOptional('defaultFrequency', patch.defaultFrequency);
-    applyOptional('defaultDuration', patch.defaultDuration);
+    applyOptional('defaultQuantity', patch.defaultQuantity);
+    applyOptional('defaultTiming', patch.defaultTiming);
+    applyOptional('defaultNotes', patch.defaultNotes);
     applyOptional('medicineType', patch.medicineType);
 
     await docClient.send(
@@ -598,6 +613,12 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
     return true;
   }
 
+  /**
+   * ✅ Quick add persists defaults:
+   * - amountPerDose
+   * - defaultTiming
+   * - defaultNotes
+   */
   async quickAdd(params: {
     input: QuickAddMedicineInput;
     createdByUserId: string;
@@ -637,10 +658,17 @@ export class DynamoDBMedicinePresetRepository implements MedicinePresetRepositor
       id,
       displayName: input.displayName,
       normalizedName,
+
       defaultDose: input.defaultDose,
+      amountPerDose: input.amountPerDose,
       defaultFrequency: input.defaultFrequency,
-      defaultDuration: input.defaultDuration,
+      defaultQuantity: input.defaultQuantity,
+
+      defaultTiming: input.defaultTiming,
+      defaultNotes: input.defaultNotes,
+
       medicineType: input.medicineType,
+
       tags: undefined,
       createdAt: now,
       createdByUserId,

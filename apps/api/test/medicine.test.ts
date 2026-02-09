@@ -24,7 +24,7 @@ describe('Medicines API', () => {
         displayName,
         defaultDose: '1 tab',
         defaultFrequency: 'BID',
-        defaultDuration: 5,
+        defaultQuantity: '5 Tabs',
         form: 'TABLET',
       })
       .expect(201);
@@ -34,8 +34,7 @@ describe('Medicines API', () => {
     expect(preset.id).toBeDefined();
     expect(preset.displayName).toBe(displayName);
     expect(preset.defaultFrequency).toBe('BID');
-    expect(preset.defaultDuration).toBe(5);
-    expect(preset.form).toBe('TABLET');
+    expect(preset.defaultQuantity).toBe('5 Tabs');
     expect(preset.source).toBe('INLINE_DOCTOR');
     expect(preset.verified).toBe(false);
   });
@@ -52,7 +51,7 @@ describe('Medicines API', () => {
         displayName: variant1,
         defaultDose: '1 cap',
         defaultFrequency: 'BID',
-        defaultDuration: 7,
+        defaultQuantity: 7,
         form: 'CAPSULE',
       })
       .expect(201);
@@ -66,7 +65,7 @@ describe('Medicines API', () => {
         displayName: variant2,
         defaultDose: '1 cap',
         defaultFrequency: 'BID',
-        defaultDuration: 7,
+        defaultQuantity: 7,
         form: 'CAPSULE',
       })
       .expect(201);
@@ -87,7 +86,7 @@ describe('Medicines API', () => {
         displayName: uniqueName,
         defaultDose: '1 tab',
         defaultFrequency: 'TID',
-        defaultDuration: 5,
+        defaultQuantity: 5,
         form: 'TABLET',
       })
       .expect(201);
@@ -104,6 +103,6 @@ describe('Medicines API', () => {
 
     expect(found).toBeDefined();
     expect(found.defaultFrequency).toBe('TID');
-    expect(found.defaultDuration).toBe(5);
+    expect(found.defaultQuantity).toBe(5);
   });
 });

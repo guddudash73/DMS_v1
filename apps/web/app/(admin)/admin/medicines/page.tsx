@@ -55,10 +55,20 @@ import { cn } from '@/lib/utils';
 const FREQUENCIES = ['QD', 'BID', 'TID', 'QID', 'HS', 'PRN'] as const;
 type Frequency = (typeof FREQUENCIES)[number];
 
+// ✅ backend supports defaultTiming
+const TIMINGS = ['BEFORE_MEAL', 'AFTER_MEAL', 'ANY'] as const;
+type Timing = (typeof TIMINGS)[number];
+
+const timingLabel = (t?: Timing | '') => {
+  if (!t) return '—';
+  if (t === 'BEFORE_MEAL') return 'Before meal';
+  if (t === 'AFTER_MEAL') return 'After meal';
+  return 'Any time';
+};
+
 /**
  * ✅ medicineType is a free string in backend (z.string().min(1).max(64)),
  * but UI uses a common dropdown + allows "Use typed".
- * Keep consistent with MedicinesEditor.tsx.
  */
 const COMMON_MEDICINE_TYPES = [
   'Antibiotic',
@@ -81,38 +91,62 @@ const COMMON_MEDICINE_TYPES = [
   'Local Anesthetic',
 ] as const;
 
+/**
+ * ✅ Update requested (per your instruction):
+ * - defaultQuantity should be handled "normally" (no custom parsing / conversion)
+ * - store & submit as plain string
+ */
 type FormState = {
   displayName: string;
   defaultDose?: string;
+  amountPerDose?: string;
   defaultFrequency?: Frequency | '';
-  defaultDuration?: number;
+  defaultQuantity?: string;
+
+  defaultTiming?: Timing | '';
+  defaultNotes?: string;
+
   medicineType?: string;
 };
 
 const emptyForm = (): FormState => ({
   displayName: '',
   defaultDose: '',
+  amountPerDose: '',
   defaultFrequency: '',
-  defaultDuration: undefined,
+  defaultQuantity: '',
+  defaultTiming: '',
+  defaultNotes: '',
   medicineType: '',
 });
-
-const toNumberOrUndef = (v: string) => {
-  const t = v.trim();
-  if (!t) return undefined;
-  const n = Number(t);
-  return Number.isFinite(n) ? n : undefined;
-};
 
 const toFrequencyValue = (v: unknown): Frequency | '' =>
   typeof v === 'string' && (FREQUENCIES as readonly string[]).includes(v) ? (v as Frequency) : '';
 
+const toTimingValue = (v: unknown): Timing | '' =>
+  typeof v === 'string' && (TIMINGS as readonly string[]).includes(v) ? (v as Timing) : '';
+
 const formatDefaults = (m: MedicinePreset) => {
-  const dose = m.defaultDose?.trim() ? m.defaultDose : '—';
-  const freq = m.defaultFrequency?.trim() ? m.defaultFrequency : '—';
-  const dur = typeof m.defaultDuration === 'number' ? `${m.defaultDuration}d` : '—';
-  const type = m.medicineType?.trim() ? m.medicineType : '—';
-  return { dose, freq, dur, type };
+  const dose = (m as any).defaultDose?.trim() ? (m as any).defaultDose : '—';
+  const apd = (m as any).amountPerDose?.trim() ? (m as any).amountPerDose : '—';
+  const freq = (m as any).defaultFrequency?.trim() ? (m as any).defaultFrequency : '—';
+
+  // ✅ show string normally; fallback to legacy defaultDuration
+  const qRaw =
+    (m as any).defaultQuantity ??
+    (typeof (m as any).defaultDuration !== 'undefined' ? String((m as any).defaultDuration) : '');
+
+  const qty = typeof qRaw === 'string' && qRaw.trim() ? qRaw.trim() : '—';
+
+  const type = (m as any).medicineType?.trim() ? (m as any).medicineType : '—';
+
+  const tRaw = (m as any).defaultTiming ?? (m as any).timing; // legacy fallback
+  const timing = timingLabel(toTimingValue(tRaw));
+
+  const nRaw = (m as any).defaultNotes ?? (m as any).notes; // legacy fallback
+  const notes = typeof nRaw === 'string' && nRaw.trim() ? nRaw.trim() : '—';
+
+  return { dose, apd, freq, qty, type, timing, notes };
 };
 
 function SelectLike({
@@ -301,9 +335,9 @@ export default function AdminMedicinesPage() {
   }, [doctorsQ.data]);
 
   const createdByLabel = (m: MedicinePreset) => {
-    if (m.source === 'ADMIN_IMPORT') return 'Admin';
-    const nm = doctorNameByUserId.get(m.createdByUserId);
-    return nm ?? m.createdByUserId;
+    if ((m as any).source === 'ADMIN_IMPORT') return 'Admin';
+    const nm = doctorNameByUserId.get((m as any).createdByUserId);
+    return nm ?? (m as any).createdByUserId;
   };
 
   const [createMedicine, createState] = useAdminCreateMedicineMutation();
@@ -326,13 +360,27 @@ export default function AdminMedicinesPage() {
   const canNext = !!nextCursor;
 
   const openEdit = (m: MedicinePreset) => {
+    const qRaw =
+      (m as any).defaultQuantity ??
+      (typeof (m as any).defaultDuration !== 'undefined' ? String((m as any).defaultDuration) : '');
+
+    const timingRaw = (m as any).defaultTiming ?? (m as any).timing;
+    const notesRaw = (m as any).defaultNotes ?? (m as any).notes;
+
     setEditTarget(m);
     setEditForm({
-      displayName: m.displayName ?? '',
-      defaultDose: m.defaultDose ?? '',
-      defaultFrequency: toFrequencyValue(m.defaultFrequency),
-      defaultDuration: m.defaultDuration,
-      medicineType: m.medicineType ?? '',
+      displayName: (m as any).displayName ?? '',
+      defaultDose: (m as any).defaultDose ?? '',
+      amountPerDose: (m as any).amountPerDose ?? '',
+      defaultFrequency: toFrequencyValue((m as any).defaultFrequency),
+
+      // ✅ keep as plain string (no parsing)
+      defaultQuantity: typeof qRaw === 'string' ? qRaw : '',
+
+      defaultTiming: toTimingValue(timingRaw),
+      defaultNotes: typeof notesRaw === 'string' ? notesRaw : '',
+
+      medicineType: (m as any).medicineType ?? '',
     });
     setEditOpen(true);
   };
@@ -342,14 +390,32 @@ export default function AdminMedicinesPage() {
     if (!name) return;
 
     const mt = (addForm.medicineType ?? '').trim();
+    const apd = (addForm.amountPerDose ?? '').trim();
+
+    const timing =
+      typeof addForm.defaultTiming === 'string' && addForm.defaultTiming.trim()
+        ? (addForm.defaultTiming as Timing)
+        : undefined;
+
+    const notes = addForm.defaultNotes?.trim() || undefined;
+
+    const qty = (addForm.defaultQuantity ?? '').toString(); // keep raw
+    const qtyOut = qty.trim() ? qty : undefined;
 
     await createMedicine({
       displayName: name,
       defaultDose: addForm.defaultDose?.trim() || undefined,
+      amountPerDose: apd || undefined,
       defaultFrequency: addForm.defaultFrequency?.trim() || undefined,
-      defaultDuration: addForm.defaultDuration,
+
+      // ✅ send as string normally
+      defaultQuantity: qtyOut,
+
+      defaultTiming: timing as any,
+      defaultNotes: notes,
+
       medicineType: mt ? mt : undefined,
-    }).unwrap();
+    } as any).unwrap();
 
     setAddOpen(false);
     setAddForm(emptyForm());
@@ -361,30 +427,50 @@ export default function AdminMedicinesPage() {
     if (!name) return;
 
     const mt = (editForm.medicineType ?? '').trim();
+    const apd = (editForm.amountPerDose ?? '').trim();
+
+    const timing =
+      typeof editForm.defaultTiming === 'string' && editForm.defaultTiming.trim()
+        ? (editForm.defaultTiming as Timing)
+        : undefined;
+
+    const notes = editForm.defaultNotes?.trim() || undefined;
+
+    const qty = (editForm.defaultQuantity ?? '').toString(); // keep raw
+    const qtyOut = qty.trim() ? qty : undefined;
 
     await updateMedicine({
-      id: editTarget.id,
+      id: (editTarget as any).id,
       patch: {
         displayName: name,
         defaultDose: editForm.defaultDose?.trim() || undefined,
+        amountPerDose: apd || undefined,
         defaultFrequency: editForm.defaultFrequency?.trim() || undefined,
-        defaultDuration: editForm.defaultDuration,
+
+        // ✅ send as string normally
+        defaultQuantity: qtyOut,
+
+        defaultTiming: timing as any,
+        defaultNotes: notes,
+
         medicineType: mt ? mt : undefined,
       },
-    }).unwrap();
+    } as any).unwrap();
 
     setEditOpen(false);
     setEditTarget(null);
   };
 
   const onDelete = async (m: MedicinePreset) => {
-    const ok = window.confirm(`Delete medicine "${m.displayName}"? This cannot be undone.`);
+    const ok = window.confirm(
+      `Delete medicine "${(m as any).displayName}"? This cannot be undone.`,
+    );
     if (!ok) return;
-    await deleteMedicine({ id: m.id }).unwrap();
+    await deleteMedicine({ id: (m as any).id }).unwrap();
   };
 
   const onVerify = async (m: MedicinePreset) => {
-    await verifyMedicine({ id: m.id }).unwrap();
+    await verifyMedicine({ id: (m as any).id }).unwrap();
   };
 
   const onPrev = () => {
@@ -520,7 +606,7 @@ export default function AdminMedicinesPage() {
               </div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-4 gap-3">
               <div className="grid gap-2">
                 <Label className="text-xs">Default dose</Label>
                 <Input
@@ -528,6 +614,16 @@ export default function AdminMedicinesPage() {
                   placeholder="e.g., 500mg"
                   value={addForm.defaultDose ?? ''}
                   onChange={(e) => setAddForm((p) => ({ ...p, defaultDose: e.target.value }))}
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label className="text-xs">Amount per dose</Label>
+                <Input
+                  className="rounded-xl"
+                  placeholder="e.g., 1 tab"
+                  value={addForm.amountPerDose ?? ''}
+                  onChange={(e) => setAddForm((p) => ({ ...p, amountPerDose: e.target.value }))}
                 />
               </div>
 
@@ -546,20 +642,46 @@ export default function AdminMedicinesPage() {
                 </SelectLike>
               </div>
 
+              {/* ✅ defaultQuantity normal input (no parsing) */}
               <div className="grid gap-2">
-                <Label className="text-xs">Default duration (days)</Label>
+                <Label className="text-xs">Default quantity</Label>
                 <Input
                   className="rounded-xl"
-                  inputMode="numeric"
-                  placeholder="e.g., 5"
-                  value={
-                    typeof addForm.defaultDuration === 'number'
-                      ? String(addForm.defaultDuration)
-                      : ''
-                  }
+                  placeholder="e.g., 10 or 10 Tabs"
+                  value={addForm.defaultQuantity ?? ''}
                   onChange={(e) =>
-                    setAddForm((p) => ({ ...p, defaultDuration: toNumberOrUndef(e.target.value) }))
+                    setAddForm((p) => ({
+                      ...p,
+                      defaultQuantity: e.target.value,
+                    }))
                   }
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label className="text-xs">Default timing</Label>
+                <SelectLike
+                  value={addForm.defaultTiming ?? ''}
+                  onChange={(v) => setAddForm((p) => ({ ...p, defaultTiming: v as Timing }))}
+                  placeholder="Select…"
+                >
+                  {TIMINGS.map((t) => (
+                    <option key={t} value={t}>
+                      {timingLabel(t)}
+                    </option>
+                  ))}
+                </SelectLike>
+              </div>
+
+              <div className="grid gap-2">
+                <Label className="text-xs">Default notes</Label>
+                <Input
+                  className="rounded-xl"
+                  placeholder="e.g., After food"
+                  value={addForm.defaultNotes ?? ''}
+                  onChange={(e) => setAddForm((p) => ({ ...p, defaultNotes: e.target.value }))}
                 />
               </div>
             </div>
@@ -609,13 +731,23 @@ export default function AdminMedicinesPage() {
               <div className="text-[11px] text-gray-500">Optional.</div>
             </div>
 
-            <div className="grid grid-cols-3 gap-3">
+            <div className="grid grid-cols-4 gap-3">
               <div className="grid gap-2">
                 <Label className="text-xs">Default dose</Label>
                 <Input
                   className="rounded-xl"
                   value={editForm.defaultDose ?? ''}
                   onChange={(e) => setEditForm((p) => ({ ...p, defaultDose: e.target.value }))}
+                />
+              </div>
+
+              <div className="grid gap-2">
+                <Label className="text-xs">Amount per dose</Label>
+                <Input
+                  className="rounded-xl"
+                  placeholder="e.g., 1 tab"
+                  value={editForm.amountPerDose ?? ''}
+                  onChange={(e) => setEditForm((p) => ({ ...p, amountPerDose: e.target.value }))}
                 />
               </div>
 
@@ -634,19 +766,46 @@ export default function AdminMedicinesPage() {
                 </SelectLike>
               </div>
 
+              {/* ✅ defaultQuantity normal input (no parsing) */}
               <div className="grid gap-2">
-                <Label className="text-xs">Default duration (days)</Label>
+                <Label className="text-xs">Default quantity</Label>
                 <Input
                   className="rounded-xl"
-                  inputMode="numeric"
-                  value={
-                    typeof editForm.defaultDuration === 'number'
-                      ? String(editForm.defaultDuration)
-                      : ''
-                  }
+                  placeholder="e.g., 10 or 10 Tabs"
+                  value={editForm.defaultQuantity ?? ''}
                   onChange={(e) =>
-                    setEditForm((p) => ({ ...p, defaultDuration: toNumberOrUndef(e.target.value) }))
+                    setEditForm((p) => ({
+                      ...p,
+                      defaultQuantity: e.target.value,
+                    }))
                   }
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="grid gap-2">
+                <Label className="text-xs">Default timing</Label>
+                <SelectLike
+                  value={editForm.defaultTiming ?? ''}
+                  onChange={(v) => setEditForm((p) => ({ ...p, defaultTiming: v as Timing }))}
+                  placeholder="Select…"
+                >
+                  {TIMINGS.map((t) => (
+                    <option key={t} value={t}>
+                      {timingLabel(t)}
+                    </option>
+                  ))}
+                </SelectLike>
+              </div>
+
+              <div className="grid gap-2">
+                <Label className="text-xs">Default notes</Label>
+                <Input
+                  className="rounded-xl"
+                  placeholder="e.g., After food"
+                  value={editForm.defaultNotes ?? ''}
+                  onChange={(e) => setEditForm((p) => ({ ...p, defaultNotes: e.target.value }))}
                 />
               </div>
             </div>
@@ -744,14 +903,14 @@ function MedicinesTable({
             {items.map((m) => {
               const d = formatDefaults(m);
               return (
-                <tr key={m.id} className="align-top">
+                <tr key={(m as any).id} className="align-top">
                   <td className="px-5 py-4">
-                    <div className="font-semibold text-gray-900">{m.displayName}</div>
-                    <div className="mt-0.5 text-[11px] text-gray-500">ID: {m.id}</div>
-                    {m.medicineType?.trim() ? (
+                    <div className="font-semibold text-gray-900">{(m as any).displayName}</div>
+                    <div className="mt-0.5 text-[11px] text-gray-500">ID: {(m as any).id}</div>
+                    {(m as any).medicineType?.trim() ? (
                       <div className="mt-1">
                         <Badge variant="secondary" className="rounded-full text-[10px]">
-                          {m.medicineType}
+                          {(m as any).medicineType}
                         </Badge>
                       </div>
                     ) : null}
@@ -760,11 +919,14 @@ function MedicinesTable({
                   <td className="px-5 py-4 text-[11px] text-gray-700">
                     <div>Type: {d.type}</div>
                     <div>Dose: {d.dose}</div>
+                    <div>Amt/Dose: {d.apd}</div>
                     <div>Freq: {d.freq}</div>
-                    <div>Dur: {d.dur}</div>
+                    <div>Qty: {d.qty}</div>
+                    <div>Timing: {d.timing}</div>
+                    <div>Notes: {d.notes}</div>
                   </td>
 
-                  <td className="px-5 py-4 text-[11px] text-gray-700">{m.source}</td>
+                  <td className="px-5 py-4 text-[11px] text-gray-700">{(m as any).source}</td>
 
                   <td className="px-5 py-4 text-[11px] text-gray-700">
                     <div className="font-medium text-gray-900">{createdByLabel(m)}</div>
@@ -772,13 +934,13 @@ function MedicinesTable({
 
                   <td className="px-5 py-4">
                     <Badge className="rounded-full text-[10px]" variant="secondary">
-                      {m.verified ? 'Verified' : 'Unverified'}
+                      {(m as any).verified ? 'Verified' : 'Unverified'}
                     </Badge>
                   </td>
 
                   <td className="px-5 py-4">
                     <div className="flex justify-end gap-2">
-                      {!m.verified && (
+                      {!(m as any).verified && (
                         <Button
                           variant="secondary"
                           className="h-9 rounded-xl"

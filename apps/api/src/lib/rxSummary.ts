@@ -3,9 +3,8 @@ import type { RxLineType } from '@dcm/types';
 export interface PrescriptionSummaryItem {
   medicine: string;
   lineCount: number;
-  totalDurationDays: number;
-  minDurationDays: number;
-  maxDurationDays: number;
+  quantities: string[];
+  uniqueQuantities: string[];
 }
 
 export interface PrescriptionSummary {
@@ -20,42 +19,43 @@ export const buildPrescriptionSummary = (lines: RxLineType[]): PrescriptionSumma
     {
       displayName: string;
       lineCount: number;
-      totalDuration: number;
-      minDuration: number;
-      maxDuration: number;
+      quantities: string[];
     }
   >();
 
   for (const line of lines) {
     const key = line.medicine.trim().toLowerCase();
-
-    // ✅ duration now optional
-    const duration = line.duration ?? 0;
+    const qty = typeof line.quantity === 'string' ? line.quantity.trim() : '';
 
     if (!map.has(key)) {
       map.set(key, {
         displayName: line.medicine,
         lineCount: 1,
-        totalDuration: duration,
-        minDuration: duration,
-        maxDuration: duration,
+        quantities: qty ? [qty] : [],
       });
     } else {
       const entry = map.get(key)!;
       entry.lineCount += 1;
-      entry.totalDuration += duration;
-      entry.minDuration = Math.min(entry.minDuration, duration);
-      entry.maxDuration = Math.max(entry.maxDuration, duration);
+      if (qty) entry.quantities.push(qty);
     }
   }
 
-  const items: PrescriptionSummaryItem[] = Array.from(map.values()).map((entry) => ({
-    medicine: entry.displayName,
-    lineCount: entry.lineCount,
-    totalDurationDays: entry.totalDuration,
-    minDurationDays: entry.minDuration,
-    maxDurationDays: entry.maxDuration,
-  }));
+  const items: PrescriptionSummaryItem[] = Array.from(map.values()).map((entry) => {
+    const uniq = Array.from(new Set(entry.quantities.map((q) => q.toLowerCase())));
+
+    // keep original casing of first occurrence for each unique value
+    const uniqueQuantities = uniq.map((lower) => {
+      const found = entry.quantities.find((q) => q.toLowerCase() === lower);
+      return found ?? lower;
+    });
+
+    return {
+      medicine: entry.displayName,
+      lineCount: entry.lineCount,
+      quantities: entry.quantities,
+      uniqueQuantities,
+    };
+  });
 
   return {
     totalLines: lines.length,

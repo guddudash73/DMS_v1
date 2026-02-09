@@ -54,7 +54,7 @@ const FREQ_LABEL: Record<string, string> = {
 const TIMING_LABEL: Record<string, string> = {
   BEFORE_MEAL: 'before food',
   AFTER_MEAL: 'after food',
-  ANY: '',
+  ANY: 'any time',
 };
 
 function safeTrim(v: unknown): string {
@@ -84,57 +84,23 @@ function getMedicineType(l: RxLineType): string {
   return t || '—';
 }
 
+/**
+ * ✅ Title now includes:
+ * - medicine + dose (ONLY HERE)
+ * - quantity moved next to medicine name (same font size)
+ * - NO "Qty:" label
+ *
+ * Example: "Omini 400mg (10 Tabs)"
+ */
 function buildMedicineTitle(l: RxLineType): string {
   const med = safeTrim((l as any).medicine);
   const dose = safeTrim((l as any).dose);
-  return [med, dose].filter(Boolean).join(' ').trim() || '—';
-}
+  const quantity = safeTrim((l as any).quantity);
 
-function buildInstructionLine(l: RxLineType): string {
-  const qty = safeTrim((l as any).amountPerDose || (l as any).doseQuantity);
-  const freq = safeTrim((l as any).frequency);
-  const timing = safeTrim((l as any).timing);
-  const duration = (l as any).duration;
+  const base = [med, dose].filter(Boolean).join(' ').trim();
+  if (!base) return '—';
 
-  const parts: string[] = [];
-
-  if (qty) parts.push(qty);
-
-  if (freq) {
-    const freqText = FREQ_LABEL[freq] ?? freq.toLowerCase();
-    parts.push(freqText);
-  }
-
-  if (timing) {
-    const t = TIMING_LABEL[timing] ?? timing.toLowerCase();
-    if (t) parts.push(t);
-  }
-
-  if (typeof duration === 'number' && duration > 0) {
-    parts.push(`for ${duration} days`);
-  }
-
-  const notes = safeTrim((l as any).notes);
-  const base = parts.join(' ').trim();
-  if (!base && !notes) return '';
-
-  if (base && notes) return `${base}. ${notes}`;
-  return base ? `${base}.` : notes;
-}
-
-function formatAgeSex(age?: number | string, sex?: PatientSex) {
-  const ageStr =
-    typeof age === 'number'
-      ? Number.isFinite(age) && age > 0
-        ? String(age)
-        : ''
-      : (age ?? '').toString().trim();
-
-  const sexStr = (sex ?? '').toString().trim().toUpperCase();
-
-  if (!ageStr && !sexStr) return '—';
-  if (ageStr && sexStr) return `${ageStr}/${sexStr}`;
-  return ageStr || sexStr || '—';
+  return quantity ? `${base} (${quantity})` : base;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -172,6 +138,21 @@ function getVisitOpdNo(v?: Visit): string | undefined {
   return s || undefined;
 }
 
+function formatAgeSex(age?: number | string, sex?: PatientSex) {
+  const ageStr =
+    typeof age === 'number'
+      ? Number.isFinite(age) && age > 0
+        ? String(age)
+        : ''
+      : (age ?? '').toString().trim();
+
+  const sexStr = (sex ?? '').toString().trim().toUpperCase();
+
+  if (!ageStr && !sexStr) return '—';
+  if (ageStr && sexStr) return `${ageStr}/${sexStr}`;
+  return ageStr || sexStr || '—';
+}
+
 type VisitRxData = {
   visitId: string;
   visit?: Visit;
@@ -183,13 +164,7 @@ type VisitRxData = {
   opdInline?: string;
 };
 
-type RowType =
-  | 'VISIT_HEADER'
-  | 'TOOTH_BLOCK'
-  | 'MEDS_LABEL'
-  | 'MED_LINE'
-  | 'DOCTOR_NOTES'
-  | 'DIVIDER';
+type RowType = 'VISIT_HEADER' | 'TOOTH_BLOCK' | 'MED_LINE' | 'DOCTOR_NOTES' | 'DIVIDER';
 
 type RowModel = {
   key: string;
@@ -253,32 +228,74 @@ function PaginationBar(props: { page: number; total: number; onChange: (p: numbe
   );
 }
 
-function MedicinesLabel({ className }: { className: string }) {
-  return (
-    <div className={className}>
-      <div className="text-[18px] font-semibold text-black">Medicines:</div>
-    </div>
-  );
-}
+/**
+ * ✅ Instruction rendering (ReactNode):
+ * - dose removed (so it doesn't duplicate)
+ * - quantity removed (already in title)
+ * - if timing label is "before food" => underline ONLY that text
+ */
+function buildInstructionNode(l: RxLineType): React.ReactNode | null {
+  const amountPerDose = safeTrim((l as any).amountPerDose);
+  const freq = safeTrim((l as any).frequency);
+  const timingRaw = safeTrim((l as any).timing);
+  const notes = safeTrim((l as any).notes);
 
-function MedicinesLabelSmall({ className }: { className: string }) {
-  return (
-    <div className={className}>
-      <div className="mb-1 text-[18px] font-semibold text-black">Medicines:</div>
-    </div>
-  );
+  const parts: React.ReactNode[] = [];
+
+  if (amountPerDose) parts.push(amountPerDose);
+
+  if (freq) {
+    const freqText = FREQ_LABEL[freq] ?? freq.toLowerCase();
+    if (freqText) parts.push(freqText);
+  }
+
+  if (timingRaw) {
+    const timingText = TIMING_LABEL[timingRaw] ?? timingRaw.toLowerCase();
+    if (timingText) {
+      if (timingText === 'before food') {
+        parts.push(
+          <span key="timing-before-food" className="underline underline-offset-2">
+            before food
+          </span>,
+        );
+      } else {
+        parts.push(timingText);
+      }
+    }
+  }
+
+  const hasBase = parts.length > 0;
+  const hasNotes = !!notes;
+
+  if (!hasBase && !hasNotes) return null;
+
+  // join base parts with spaces without losing ReactNode formatting
+  const baseNode = hasBase ? (
+    <>
+      {parts.map((p, i) => (
+        <React.Fragment key={i}>
+          {i > 0 ? ' ' : null}
+          {p}
+        </React.Fragment>
+      ))}
+    </>
+  ) : null;
+
+  if (baseNode && hasNotes)
+    return (
+      <>
+        {baseNode}. {notes}
+      </>
+    );
+  if (baseNode) return <>{baseNode}.</>;
+  return <>{notes}</>;
 }
 
 /**
  * ✅ Medicines layout:
  * - TYPE in its own column
- * - NAME + INSTRUCTION in separate column so TYPE wrapping doesn't push them down
- *
- * ✅ No word-breaking: wrap only at spaces (default)
- *
- * ✅ Production cleanup:
- * - removed unused props
- * - medicine type styling is defined in ONE place (call site)
+ * - NAME + INSTRUCTION in separate column
+ * - RIGHT block (name + instruction) is italic (per your requirement)
  */
 function MedicineLineBlock(props: {
   line: RxLineType;
@@ -301,23 +318,25 @@ function MedicineLineBlock(props: {
 
   const typeText = getMedicineType(line);
   const title = buildMedicineTitle(line);
-  const instr = buildInstructionLine(line);
+  const instrNode = buildInstructionNode(line);
 
   return (
     <div className={wrapperClassName}>
       <div className="grid grid-cols-[auto_1fr] gap-4">
         <div className={typeColClassName}>{typeText}</div>
 
-        <div className="min-w-0">
-          <div className="flex min-w-0 items-start text-[13px] leading-5 text-black">
+        {/* ✅ entire RIGHT block italic */}
+        <div className="min-w-0 italic">
+          {/* medicine title */}
+          <div className="flex min-w-0 items-start text-[18px] leading-5 text-black">
             <div className={numberColClassName}>{number}.</div>
-            <div className="min-w-0 ml-1 whitespace-normal font-semibold">{title}</div>
+            <div className="min-w-0 ml-1 whitespace-normal font-bold">{title}</div>
           </div>
 
-          {instr ? (
+          {instrNode ? (
             <div className={[instrWrapperClassName, 'min-w-0'].join(' ')}>
               <div className={instrNumberSpacerClassName} />
-              <div className="min-w-0 ml-1 whitespace-normal">{instr}</div>
+              <div className="min-w-0 ml-1 whitespace-normal">{instrNode}</div>
             </div>
           ) : null}
         </div>
@@ -397,15 +416,6 @@ function VisitRowRenderer(props: {
     );
   }
 
-  if (row.rowType === 'MEDS_LABEL') {
-    if (!hasMedicines) return null;
-    return (
-      <div data-rx-row="1" data-row-key={row.key}>
-        <MedicinesLabel className="mb-1" />
-      </div>
-    );
-  }
-
   if (row.rowType === 'MED_LINE') {
     if (!hasMedicines) return null;
     const idx = row.medIndex ?? -1;
@@ -422,12 +432,13 @@ function VisitRowRenderer(props: {
         <MedicineLineBlock
           line={line}
           number={number}
-          wrapperClassName="mb-2 ml-4"
-          // ✅ medicine type: smaller + right aligned (only here)
-          typeColClassName="w-[58px] shrink-0 whitespace-normal text-[11px] font-medium text-right"
+          wrapperClassName="mb-6 ml-4"
+          // medicine type
+          typeColClassName="w-[58px] shrink-0 whitespace-normal text-[16px] font-medium text-right"
           numberColClassName="w-5 shrink-0 text-right font-medium"
-          instrWrapperClassName="mt-0.5 flex items-start text-[12px] leading-4 text-black"
-          instrNumberSpacerClassName="w-5 shrink-0"
+          //description
+          instrWrapperClassName="mt-1 flex items-start text-[16px] leading-4 text-black"
+          instrNumberSpacerClassName="w-8 shrink-0"
         />
       </div>
     );
@@ -436,8 +447,9 @@ function VisitRowRenderer(props: {
   if (row.rowType === 'DOCTOR_NOTES') {
     if (!hasDoctorNotes) return null;
     return (
-      <div data-rx-row="1" data-row-key={row.key} className="mt-1">
-        <div className="text-[11px] leading-4 text-black">
+      <div data-rx-row="1" data-row-key={row.key} className="mt-2">
+        {/* ✅ Printed doctor notes: bigger text */}
+        <div className="text-[16px] leading-5 text-black">
           <span className="font-semibold">Notes: </span>
           <span className="whitespace-pre-line">{v.doctorNotes.trim()}</span>
         </div>
@@ -513,7 +525,6 @@ export function PrescriptionPreview({
     });
   }, [chainVisitIdsProp, currentVisitId]);
 
-  // ✅ safer than join('|') for deps
   const chainKey = useMemo(() => JSON.stringify(chainVisitIds), [chainVisitIds]);
 
   const visitMetaMap = useMemo(
@@ -600,7 +611,6 @@ export function PrescriptionPreview({
       fontsReady.then(() => requestAnimationFrame(measure));
     }
 
-    // ✅ debounce ResizeObserver measure with RAF
     let rafId = 0;
     const schedule = () => {
       if (rafId) cancelAnimationFrame(rafId);
@@ -621,7 +631,6 @@ export function PrescriptionPreview({
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const [scale, setScale] = useState(1);
 
-  // ✅ stable scale updates (prevents flicker / width<->scale feedback jitter)
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
@@ -631,12 +640,9 @@ export function PrescriptionPreview({
     const update = (width: number) => {
       const raw = Math.min(1, width / BASE_W);
       const next = Number.isFinite(raw) && raw > 0 ? raw : 1;
-
-      // round to 3 decimals to prevent tiny oscillations
       const rounded = Math.round(next * 1000) / 1000;
 
       setScale((prev) => {
-        // ignore tiny changes
         if (Math.abs(prev - rounded) < 0.002) return prev;
         return rounded;
       });
@@ -768,7 +774,6 @@ export function PrescriptionPreview({
         out.push({ key: `${v.visitId}:N`, visitId: v.visitId, rowType: 'DOCTOR_NOTES' });
 
       if (hasMeds) {
-        out.push({ key: `${v.visitId}:ML`, visitId: v.visitId, rowType: 'MEDS_LABEL' });
         for (let i = 0; i < v.lines.length; i++) {
           out.push({
             key: `${v.visitId}:M:${i}`,
@@ -805,8 +810,7 @@ export function PrescriptionPreview({
 
   useEffect(() => {
     if (!historyEnabled) return;
-    // when chain changes, default to last page (after pages recompute, next effect will correct too)
-    setPage((p) => p); // no-op (or remove this effect entirely)
+    setPage((p) => p);
   }, [historyEnabled, chainKey]);
 
   const measureTemplate = shouldMeasure ? (
@@ -839,13 +843,15 @@ export function PrescriptionPreview({
                   const headerRows = rset.filter((r) => r.rowType === 'VISIT_HEADER');
                   const toothRows = rset.filter((r) => r.rowType === 'TOOTH_BLOCK');
                   const notesRows = rset.filter((r) => r.rowType === 'DOCTOR_NOTES');
-                  const medsLabelRows = rset.filter((r) => r.rowType === 'MEDS_LABEL');
                   const medRows = rset.filter((r) => r.rowType === 'MED_LINE');
                   const dividerRows = rset.filter((r) => r.rowType === 'DIVIDER');
 
                   const medIdxs = medRows
                     .map((r) => r.medIndex)
                     .filter((x): x is number => typeof x === 'number' && x >= 0);
+
+                  const leftHasAny = toothRows.length > 0 || notesRows.length > 0;
+                  const dateText = v.visitDate ? formatClinicDateDDMMYYYY(v.visitDate) : '—';
 
                   return (
                     <div key={`measure:${vid}`} className="w-full">
@@ -856,45 +862,50 @@ export function PrescriptionPreview({
                           row={r}
                           medIndexesOnPage={medIdxs}
                           medNumberOffset={0}
-                          hideVisitDate={false}
+                          hideVisitDate={true}
                         />
                       ))}
 
                       <div className="grid grid-cols-[1fr_360px] gap-6">
                         <div className="min-w-0 pl-4">
-                          {toothRows.map((r) => (
-                            <VisitRowRenderer
-                              key={r.key}
-                              v={v}
-                              row={r}
-                              medIndexesOnPage={medIdxs}
-                              medNumberOffset={0}
-                              hideVisitDate={false}
-                            />
-                          ))}
-                          {notesRows.map((r) => (
-                            <VisitRowRenderer
-                              key={r.key}
-                              v={v}
-                              row={r}
-                              medIndexesOnPage={medIdxs}
-                              medNumberOffset={0}
-                              hideVisitDate={false}
-                            />
-                          ))}
+                          {leftHasAny ? (
+                            <>
+                              {/* date + tooth block (notes are rendered full-width below) */}
+                              <div className="flex items-start gap-2">
+                                <div className="w-[60px] shrink-0 text-[13px] font-bold text-black tracking-wide">
+                                  {dateText}
+                                </div>
+
+                                <div className="min-w-0 flex-1">
+                                  {toothRows.map((r) => (
+                                    <VisitRowRenderer
+                                      key={r.key}
+                                      v={v}
+                                      row={r}
+                                      medIndexesOnPage={medIdxs}
+                                      medNumberOffset={0}
+                                      hideVisitDate={true}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* ✅ Doctor notes: start from same left edge as date */}
+                              {notesRows.map((r) => (
+                                <VisitRowRenderer
+                                  key={r.key}
+                                  v={v}
+                                  row={r}
+                                  medIndexesOnPage={medIdxs}
+                                  medNumberOffset={0}
+                                  hideVisitDate={true}
+                                />
+                              ))}
+                            </>
+                          ) : null}
                         </div>
 
                         <div className="min-w-0">
-                          {medsLabelRows.map((r) => (
-                            <VisitRowRenderer
-                              key={r.key}
-                              v={v}
-                              row={r}
-                              medIndexesOnPage={medIdxs}
-                              medNumberOffset={0}
-                              hideVisitDate={false}
-                            />
-                          ))}
                           {medRows.map((r) => (
                             <VisitRowRenderer
                               key={r.key}
@@ -902,7 +913,7 @@ export function PrescriptionPreview({
                               row={r}
                               medIndexesOnPage={medIdxs}
                               medNumberOffset={0}
-                              hideVisitDate={false}
+                              hideVisitDate={true}
                             />
                           ))}
                         </div>
@@ -915,7 +926,7 @@ export function PrescriptionPreview({
                           row={r}
                           medIndexesOnPage={medIdxs}
                           medNumberOffset={0}
-                          hideVisitDate={false}
+                          hideVisitDate={true}
                         />
                       ))}
                     </div>
@@ -956,7 +967,6 @@ export function PrescriptionPreview({
       setRowHeightsByKey(next);
     };
 
-    // ✅ RAF debounce so RO / font events don't thrash
     let rafId = 0;
     const schedule = () => {
       if (rafId) cancelAnimationFrame(rafId);
@@ -1036,7 +1046,7 @@ export function PrescriptionPreview({
 
             if (rr.rowType === 'VISIT_HEADER' || rr.rowType === 'DIVIDER') full += h;
             else if (rr.rowType === 'TOOTH_BLOCK' || rr.rowType === 'DOCTOR_NOTES') left += h;
-            else if (rr.rowType === 'MEDS_LABEL' || rr.rowType === 'MED_LINE') right += h;
+            else if (rr.rowType === 'MED_LINE') right += h;
           }
 
           return full + Math.max(left, right);
@@ -1047,7 +1057,6 @@ export function PrescriptionPreview({
       }
     }
 
-    // ✅ O(1) lookup instead of blocks.find(...)
     const blockById = new Map<string, VisitBlock>();
     for (const b of blocks) blockById.set(b.visitId, b);
 
@@ -1068,7 +1077,7 @@ export function PrescriptionPreview({
 
         if (rr.rowType === 'VISIT_HEADER' || rr.rowType === 'DIVIDER') full += h;
         else if (rr.rowType === 'TOOTH_BLOCK' || rr.rowType === 'DOCTOR_NOTES') left += h;
-        else if (rr.rowType === 'MEDS_LABEL' || rr.rowType === 'MED_LINE') right += h;
+        else if (rr.rowType === 'MED_LINE') right += h;
       }
 
       return full + Math.max(left, right);
@@ -1137,7 +1146,6 @@ export function PrescriptionPreview({
 
           let { count, height } = maxPrefixThatFits(b, off, remainingCap);
 
-          // ✅ safety: ensure we always make progress (prevents "stuck" when a single row > cap)
           if (count <= 0 && pageRows.length === 0 && off < b.rows.length) {
             count = 1;
             height = sliceHeight(b, off, off + 1);
@@ -1169,7 +1177,6 @@ export function PrescriptionPreview({
 
         let { count, height } = maxPrefixThatFits(b, off, remainingCap);
 
-        // ✅ safety: ensure we always make progress
         if (count <= 0 && pageRows.length === 0 && off < b.rows.length) {
           count = 1;
           height = sliceHeight(b, off, off + 1);
@@ -1331,7 +1338,7 @@ export function PrescriptionPreview({
 
   const PatientInfo = (
     <div className="px-2 text-black" style={patientInfoHiddenStyle}>
-      <div className="grid grid-cols-2 gap-46 px-6 text-black">
+      <div className="grid grid-cols-2 gap-40 px-6 text-black">
         <div className="space-y-2 text-[0.8rem]">
           <div className="flex gap-3">
             <div className="w-24 font-medium">Patient Name</div>
@@ -1354,19 +1361,19 @@ export function PrescriptionPreview({
 
         <div className="space-y-2 text-[0.8rem] text-black">
           <div className="flex gap-3">
-            <div className="w-18 font-medium">Regd. Date</div>
+            <div className="w-16 font-medium">Regd. Date</div>
             <div className="text-black">:</div>
             <div className="font-semibold">{headerRegdDate}</div>
           </div>
 
           <div className="flex gap-3">
-            <div className="w-18 font-medium">SD-ID</div>
+            <div className="w-16 font-medium">SD-ID</div>
             <div>:</div>
             <div className="font-semibold">{sdId ?? '—'}</div>
           </div>
 
           <div className="flex gap-3">
-            <div className="w-18 font-medium">OPD No.</div>
+            <div className="w-16 font-medium">OPD No.</div>
             <div>:</div>
             <div className="font-semibold">{headerOpdNo}</div>
           </div>
@@ -1443,8 +1450,6 @@ export function PrescriptionPreview({
             const toothRows = rset.filter((r) => r.rowType === 'TOOTH_BLOCK');
             const notesRows = rset.filter((r) => r.rowType === 'DOCTOR_NOTES');
             const dividerRows = rset.filter((r) => r.rowType === 'DIVIDER');
-
-            const medsLabelRows = rset.filter((r) => r.rowType === 'MEDS_LABEL');
             const medRows = rset.filter((r) => r.rowType === 'MED_LINE');
 
             const medIdxs = medRows
@@ -1469,8 +1474,10 @@ export function PrescriptionPreview({
                 ? ({ visibility: 'hidden' } as React.CSSProperties)
                 : undefined;
 
-            const hasRightMeds = medsLabelRows.length > 0 || medRows.length > 0;
+            const hasRightMeds = medRows.length > 0;
             const hasLeftAny = toothRows.length > 0 || notesRows.length > 0;
+
+            const dateText = v.visitDate ? formatClinicDateDDMMYYYY(v.visitDate) : '—';
 
             return (
               <div key={`vpage:${vid}:${page}`} style={hideBlock}>
@@ -1481,48 +1488,51 @@ export function PrescriptionPreview({
                     row={r}
                     medIndexesOnPage={medIdxs}
                     medNumberOffset={prevOffset}
-                    hideVisitDate={false}
+                    hideVisitDate={true}
                   />
                 ))}
 
                 {(hasLeftAny || hasRightMeds) && (
                   <div className="grid grid-cols-[1fr_360px] gap-6">
-                    <div className="min-w-0 pl-8">
-                      {toothRows.map((r) => (
-                        <VisitRowRenderer
-                          key={r.key}
-                          v={v}
-                          row={r}
-                          medIndexesOnPage={medIdxs}
-                          medNumberOffset={prevOffset}
-                          hideVisitDate={false}
-                        />
-                      ))}
+                    <div className="min-w-0">
+                      {hasLeftAny ? (
+                        <>
+                          {/* date + tooth block (notes are full-width below) */}
+                          <div className="flex items-start gap-2">
+                            <div className="w-[96px] shrink-0 text-[16px] font-bold text-black tracking-wide">
+                              {dateText}
+                            </div>
 
-                      {notesRows.map((r) => (
-                        <VisitRowRenderer
-                          key={r.key}
-                          v={v}
-                          row={r}
-                          medIndexesOnPage={medIdxs}
-                          medNumberOffset={prevOffset}
-                          hideVisitDate={false}
-                        />
-                      ))}
+                            <div className="min-w-0 flex-1">
+                              {toothRows.map((r) => (
+                                <VisitRowRenderer
+                                  key={r.key}
+                                  v={v}
+                                  row={r}
+                                  medIndexesOnPage={medIdxs}
+                                  medNumberOffset={prevOffset}
+                                  hideVisitDate={true}
+                                />
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* ✅ Doctor notes: start from same left edge as date */}
+                          {notesRows.map((r) => (
+                            <VisitRowRenderer
+                              key={r.key}
+                              v={v}
+                              row={r}
+                              medIndexesOnPage={medIdxs}
+                              medNumberOffset={prevOffset}
+                              hideVisitDate={true}
+                            />
+                          ))}
+                        </>
+                      ) : null}
                     </div>
 
                     <div className="min-w-0">
-                      {medsLabelRows.map((r) => (
-                        <VisitRowRenderer
-                          key={r.key}
-                          v={v}
-                          row={r}
-                          medIndexesOnPage={medIdxs}
-                          medNumberOffset={prevOffset}
-                          hideVisitDate={false}
-                        />
-                      ))}
-
                       {medRows.map((r) => (
                         <VisitRowRenderer
                           key={r.key}
@@ -1530,7 +1540,7 @@ export function PrescriptionPreview({
                           row={r}
                           medIndexesOnPage={medIdxs}
                           medNumberOffset={prevOffset}
-                          hideVisitDate={false}
+                          hideVisitDate={true}
                         />
                       ))}
                     </div>
@@ -1544,7 +1554,7 @@ export function PrescriptionPreview({
                     row={r}
                     medIndexesOnPage={medIdxs}
                     medNumberOffset={prevOffset}
-                    hideVisitDate={false}
+                    hideVisitDate={true}
                   />
                 ))}
               </div>
@@ -1575,7 +1585,7 @@ export function PrescriptionPreview({
             ) : null}
 
             {hasDocNotes ? (
-              <div className="mt-2 text-[11px] leading-4 text-black">
+              <div className="mt-2 text-[16px] leading-5 text-black">
                 <span className="font-semibold">Notes: </span>
                 <span className="whitespace-pre-line">{doctorNotes!.trim()}</span>
               </div>
@@ -1584,23 +1594,20 @@ export function PrescriptionPreview({
 
           <div className="min-w-0">
             {hasMeds ? (
-              <>
-                <MedicinesLabelSmall className="" />
-                <div className="text-black">
-                  {lines.map((l, idx) => (
-                    <MedicineLineBlock
-                      key={idx}
-                      line={l}
-                      number={idx + 1}
-                      wrapperClassName="mb-2 ml-4"
-                      typeColClassName="w-[58px] shrink-0 whitespace-normal text-[11px] font-medium text-right"
-                      numberColClassName="w-5 shrink-0 text-right font-medium"
-                      instrWrapperClassName="mt-0.5 flex items-start text-[12px] leading-4 text-black"
-                      instrNumberSpacerClassName="w-5 shrink-0"
-                    />
-                  ))}
-                </div>
-              </>
+              <div className="text-black">
+                {lines.map((l, idx) => (
+                  <MedicineLineBlock
+                    key={idx}
+                    line={l}
+                    number={idx + 1}
+                    wrapperClassName="mb-6 ml-4"
+                    typeColClassName="w-[58px] shrink-0 whitespace-normal text-[11px] font-medium text-right"
+                    numberColClassName="w-5 shrink-0 text-right font-medium"
+                    instrWrapperClassName="mt-0.5 flex items-start text-[12px] leading-4 text-black"
+                    instrNumberSpacerClassName="w-5 shrink-0"
+                  />
+                ))}
+              </div>
             ) : null}
           </div>
         </div>
@@ -1608,13 +1615,22 @@ export function PrescriptionPreview({
     );
   };
 
+  const headerFooterHiddenStyle2: React.CSSProperties | undefined = currentOnly
+    ? { visibility: 'hidden' }
+    : !showPrintHeader
+      ? { visibility: 'hidden' }
+      : undefined;
+
+  const patientInfoHiddenStyle2: React.CSSProperties | undefined = currentOnly
+    ? { visibility: 'hidden' }
+    : undefined;
+
   return (
     <div className="w-full rx-preview">
       {Fetchers}
       {measureTemplate}
 
       <div ref={wrapRef} className="w-full">
-        {/* ✅ Stable viewport box; scaling happens inside (prevents flicker) */}
         <div
           className="rx-preview-viewport relative mx-auto w-full"
           style={{
@@ -1637,7 +1653,9 @@ export function PrescriptionPreview({
                     className="absolute left-0 top-0 z-10 w-full"
                     style={{ display: activePage.kind === 'ODD' ? 'block' : 'none' }}
                   >
-                    {Header}
+                    <div className="px-2 pt-8 pb-3" style={headerFooterHiddenStyle2}>
+                      {Header}
+                    </div>
                   </div>
 
                   <div
@@ -1645,7 +1663,9 @@ export function PrescriptionPreview({
                     className="absolute bottom-0 left-0 z-10 w-full"
                     style={{ display: activePage.kind === 'ODD' ? 'block' : 'none' }}
                   >
-                    {Footer}
+                    <div className="px-2 pb-8" style={headerFooterHiddenStyle2}>
+                      {Footer}
+                    </div>
                   </div>
 
                   <div
@@ -1664,7 +1684,9 @@ export function PrescriptionPreview({
                         ref={patientInfoRef}
                         style={{ display: activePage.kind === 'ODD' ? 'block' : 'none' }}
                       >
-                        {PatientInfo}
+                        <div className="px-2 text-black" style={patientInfoHiddenStyle2}>
+                          {PatientInfo}
+                        </div>
                       </div>
 
                       {!historyEnabled ? renderNonHistory() : renderHistoryPage(activePage)}

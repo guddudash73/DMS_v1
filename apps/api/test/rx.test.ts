@@ -93,7 +93,9 @@ describe('Prescription API (Option 2: stable draft + single revision)', () => {
       .post(`/visits/${visit.visitId}/rx`)
       .set('Authorization', asDoctor())
       .send({
-        lines: [{ medicine: 'Amoxicillin 500mg', dose: '500mg', frequency: 'BID', duration: 5 }],
+        lines: [
+          { medicine: 'Amoxicillin 500mg', dose: '500mg', frequency: 'BID', quantity: '5 Tabs' },
+        ],
         toothDetails: [
           {
             blockId: 'td-1',
@@ -161,7 +163,9 @@ describe('Prescription API (Option 2: stable draft + single revision)', () => {
       .post(`/visits/${visit.visitId}/rx`)
       .set('Authorization', asDoctor())
       .send({
-        lines: [{ medicine: 'Ibuprofen 400mg', dose: '400mg', frequency: 'TID', duration: 3 }],
+        lines: [
+          { medicine: 'Ibuprofen 400mg', dose: '400mg', frequency: 'TID', quantity: '3 Tabs' },
+        ],
       })
       .expect(201);
 
@@ -173,8 +177,8 @@ describe('Prescription API (Option 2: stable draft + single revision)', () => {
       .set('Authorization', asDoctor())
       .send({
         lines: [
-          { medicine: 'Ibuprofen 400mg', dose: '400mg', frequency: 'TID', duration: 3 },
-          { medicine: 'Pantoprazole 40mg', dose: '40mg', frequency: 'QD', duration: 5 },
+          { medicine: 'Ibuprofen 400mg', dose: '400mg', frequency: 'TID', quantity: '3 Tabs' },
+          { medicine: 'Pantoprazole 40mg', dose: '40mg', frequency: 'QD', quantity: '5 Tabs' },
         ],
       })
       .expect(201);
@@ -189,9 +193,9 @@ describe('Prescription API (Option 2: stable draft + single revision)', () => {
       .set('Authorization', asDoctor())
       .send({
         lines: [
-          { medicine: 'Ibuprofen 400mg', dose: '400mg', frequency: 'TID', duration: 3 },
-          { medicine: 'Pantoprazole 40mg', dose: '40mg', frequency: 'QD', duration: 5 },
-          { medicine: 'Mouthwash', dose: '10ml', frequency: 'BID', duration: 7 },
+          { medicine: 'Ibuprofen 400mg', dose: '400mg', frequency: 'TID', quantity: '3 Tabs' },
+          { medicine: 'Pantoprazole 40mg', dose: '40mg', frequency: 'QD', quantity: '5 Tabs' },
+          { medicine: 'Mouthwash', dose: '10ml', frequency: 'BID', quantity: '7 Tabs' },
         ],
       })
       .expect(201);
@@ -204,7 +208,7 @@ describe('Prescription API (Option 2: stable draft + single revision)', () => {
       .post(`/visits/${visit.visitId}/rx`)
       .set('Authorization', asDoctor())
       .send({
-        lines: [{ medicine: 'Mouthwash', dose: '10ml', frequency: 'BID', duration: 7 }],
+        lines: [{ medicine: 'Mouthwash', dose: '10ml', frequency: 'BID', quantity: '7 Tabs' }],
       })
       .expect(201);
 
@@ -247,7 +251,7 @@ describe('Prescription API (Option 2: stable draft + single revision)', () => {
     const res3 = await request(app)
       .post(`/visits/${visit.visitId}/rx`)
       .set('Authorization', asDoctor())
-      .send({ lines: [{ medicine: '', dose: '', frequency: 'BID', duration: 5 }] })
+      .send({ lines: [{ medicine: '', dose: '', frequency: 'BID', quantity: '5 Tabs' }] })
       .expect(400);
     expect(res3.body.error).toBe('VALIDATION_ERROR');
   });

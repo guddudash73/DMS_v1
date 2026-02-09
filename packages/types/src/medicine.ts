@@ -1,3 +1,4 @@
+// packages/types/src/medicine.ts
 import { z } from 'zod';
 
 export const MedicinePresetId = z.string().min(1);
@@ -16,6 +17,13 @@ export type MedicineSource = z.infer<typeof MedicineSource>;
 export const MedicineType = z.string().min(1).max(64);
 export type MedicineType = z.infer<typeof MedicineType>;
 
+/**
+ * ✅ Default timing for Rx line
+ * Keep in medicine.ts to avoid circular imports with prescription.ts
+ */
+export const MedicineTiming = z.enum(['BEFORE_MEAL', 'AFTER_MEAL', 'ANY']);
+export type MedicineTiming = z.infer<typeof MedicineTiming>;
+
 export const MedicinePreset = z.object({
   id: MedicinePresetId,
   displayName: z.string().min(1),
@@ -23,10 +31,15 @@ export const MedicinePreset = z.object({
 
   // defaults used to populate Rx editor on selection
   defaultDose: z.string().min(1).optional(),
+  amountPerDose: z.string().min(1).max(64).optional(),
   defaultFrequency: z.string().min(1).optional(),
-  defaultDuration: z.number().int().min(1).max(365).optional(),
+  defaultQuantity: z.string().min(1).max(1000).optional(),
 
-  // ✅ new
+  // ✅ new defaults
+  defaultTiming: MedicineTiming.optional(),
+  defaultNotes: z.string().max(500).optional(),
+
+  // ✅ medicine type (dropdown + free string)
   medicineType: MedicineType.optional(),
 
   tags: z.array(z.string().min(1)).optional(),
@@ -46,8 +59,13 @@ export type MedicineSearchQuery = z.infer<typeof MedicineSearchQuery>;
 export const QuickAddMedicineInput = z.object({
   displayName: z.string().min(1),
   defaultDose: z.string().min(1).optional(),
+  amountPerDose: z.string().min(1).max(64).optional(),
   defaultFrequency: z.string().min(1).optional(),
-  defaultDuration: z.number().int().min(1).max(365).optional(),
+  defaultQuantity: z.string().min(1).max(1000).optional(),
+
+  // ✅ new defaults
+  defaultTiming: MedicineTiming.optional(),
+  defaultNotes: z.string().max(500).optional(),
 
   // ✅ new
   medicineType: MedicineType.optional(),
@@ -60,9 +78,15 @@ export type QuickAddMedicineInput = z.infer<typeof QuickAddMedicineInput>;
 export const MedicineTypeaheadItem = z.object({
   id: MedicinePresetId,
   displayName: z.string().min(1),
+
   defaultDose: z.string().min(1).optional(),
+  amountPerDose: z.string().min(1).max(64).optional(),
   defaultFrequency: z.string().min(1).optional(),
-  defaultDuration: z.number().int().min(1).max(365).optional(),
+  defaultQuantity: z.string().min(1).max(1000).optional(),
+
+  // ✅ new defaults
+  defaultTiming: MedicineTiming.optional(),
+  defaultNotes: z.string().max(500).optional(),
 
   // ✅ new
   medicineType: MedicineType.optional(),
@@ -85,8 +109,13 @@ export type MedicineCatalogListResponse = z.infer<typeof MedicineCatalogListResp
 export const DoctorUpdateMedicineRequest = z.object({
   displayName: z.string().min(1).optional(),
   defaultDose: z.string().min(1).optional(),
+  amountPerDose: z.string().min(1).max(64).optional(),
   defaultFrequency: z.string().min(1).optional(),
-  defaultDuration: z.number().int().min(1).max(365).optional(),
+  defaultQuantity: z.string().min(1).max(1000).optional(),
+
+  // ✅ new defaults
+  defaultTiming: MedicineTiming.optional(),
+  defaultNotes: z.string().max(500).optional(),
 
   // ✅ new
   medicineType: MedicineType.optional(),
@@ -114,8 +143,13 @@ export type AdminMedicineListResponse = z.infer<typeof AdminMedicineListResponse
 export const AdminUpdateMedicineRequest = z.object({
   displayName: z.string().min(1).optional(),
   defaultDose: z.string().min(1).optional(),
+  amountPerDose: z.string().min(1).max(64).optional(),
   defaultFrequency: z.string().min(1).optional(),
-  defaultDuration: z.number().int().min(1).max(365).optional(),
+  defaultQuantity: z.string().min(1).max(1000).optional(),
+
+  // ✅ new defaults
+  defaultTiming: MedicineTiming.optional(),
+  defaultNotes: z.string().max(500).optional(),
 
   // ✅ new
   medicineType: MedicineType.optional(),
