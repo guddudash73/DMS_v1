@@ -1413,7 +1413,7 @@ export function PrescriptionPreview({
 
   const PatientInfo = (
     <div className="px-2 text-black" style={patientInfoHiddenStyle}>
-      <div className="grid grid-cols-2 gap-48 px-6 text-black">
+      <div className="grid grid-cols-2 gap-42 px-6 text-black">
         <div className="space-y-2 text-[0.8rem]">
           <div className="flex gap-3">
             <div className="w-24 font-medium">Patient Name</div>
@@ -1574,7 +1574,7 @@ export function PrescriptionPreview({
                         <>
                           <div className="flex items-start">
                             {/* Rx Date */}
-                            <div className="w-[96px] shrink-0 text-[14px] font-bold text-black tracking-wide">
+                            <div className="w-24 shrink-0 text-[14px] font-bold text-black tracking-wide">
                               {dateText}
                             </div>
 
