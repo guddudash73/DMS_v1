@@ -95,8 +95,8 @@ async function nextCounter(key: { PK: string; SK: string }): Promise<number> {
 }
 
 function tagLabel(tag: VisitTag | undefined): string {
-  if (tag === 'F') return 'SDFU';
-  return 'SDNEW';
+  if (tag === 'F') return 'FU';
+  return 'NEW';
 }
 
 /**
@@ -116,8 +116,8 @@ function formatOpdNo(
   const mm = visitDate.slice(5, 7);
   const dd = visitDate.slice(8, 10);
 
-  const a = String(dailySeq).padStart(3, '0');
-  const b = String(tagSeq).padStart(3, '0');
+  const a = String(dailySeq).padStart(2, '0');
+  const b = String(tagSeq).padStart(2, '0');
 
   return `${dd}/${mm}/${yyyy}/${a}/${tagLabel(tag)}/${b}`;
 }

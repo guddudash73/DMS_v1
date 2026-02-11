@@ -100,7 +100,7 @@ function buildMedicineTitle(l: RxLineType): string {
   const base = [med, dose].filter(Boolean).join(' ').trim();
   if (!base) return '—';
 
-  return quantity ? `${base} (${quantity})` : base;
+  return quantity ? `${base} - ${quantity}` : base;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -448,7 +448,7 @@ function VisitRowRenderer(props: {
       <div data-rx-row="1" data-row-key={row.key} className="mt-2">
         <div className="text-[16px] leading-5 text-black">
           <span className="font-semibold">Notes: </span>
-          <span className="whitespace-pre-line">{v.doctorNotes.trim()}</span>
+          <span className="whitespace-pre-line text-[#c0061b]">{v.doctorNotes.trim()}</span>
         </div>
       </div>
     );
@@ -552,7 +552,6 @@ export function PrescriptionPreview({
 
   // ---- Paper constants ----
   const CONTACT_NUMBER = '9938942846';
-  const EMERGENCY_NUMBER = '9437189900';
 
   const ADDRESS_LEFT = ['A-33', 'STALWART COMPLEX', 'UNIT - IV', 'BHUBANESWAR'];
   const CLINIC_HOURS_TIMING = ['10 : 00 AM - 1 : 30 PM', '06 : 00 PM - 8 : 00 PM'];
@@ -1362,7 +1361,7 @@ export function PrescriptionPreview({
     : undefined;
 
   const Header = (
-    <div className="px-2 pt-8 pb-3" style={headerFooterHiddenStyle}>
+    <div className="px-2 pt-8" style={headerFooterHiddenStyle}>
       <div className="flex items-stretch justify-between gap-6 px-7">
         <div className="relative h-30 w-30 shrink-0">
           <Image
@@ -1377,17 +1376,10 @@ export function PrescriptionPreview({
 
         <div className="flex w-full items-center justify-center gap-16 text-center text-black">
           <div className="flex flex-col items-center">
-            <div className="text-[15px] font-bold tracking-[0.28em] uppercase text-emerald-700/70">
+            <div className="text-[20px] font-bold tracking-[0.35em] uppercase text-emerald-700/70">
               CONTACT
             </div>
-            <div className="mt-1 text-[15px] font-medium tracking-widest">{CONTACT_NUMBER}</div>
-          </div>
-
-          <div className="flex flex-col items-center">
-            <div className="text-[15px] font-bold tracking-wider uppercase text-emerald-700/70">
-              EMERGENCY
-            </div>
-            <div className="mt-1 text-[15px] font-medium tracking-widest">{EMERGENCY_NUMBER}</div>
+            <div className="mt-1 text-[20px] font-medium tracking-widest">{CONTACT_NUMBER}</div>
           </div>
         </div>
 
@@ -1407,13 +1399,13 @@ export function PrescriptionPreview({
 
       <div className="mt-5 flex items-start justify-between gap-6 px-5 text-black">
         <div className="min-w-0 flex flex-col">
-          <div className="text-[1rem] font-bold">Dr. Soumendra Sarangi</div>
-          <div className="mt-0.5 text-[0.82rem] font-medium">B.D.S. Regd. - 68</div>
+          <div className="text-[18px] font-bold">Dr. Soumendra Sarangi</div>
+          <div className="mt-0.5 text-[0.82rem] font-medium text-right">B.D.S. Regd. - 68</div>
         </div>
 
         <div className="min-w-0 flex flex-col">
-          <div className="text-[1rem] font-bold text-black">Dr. Vaishnovee Sarangi</div>
-          <div className="mt-0.5 text-[0.82rem] font-medium">B.D.S. Redg. - 3057</div>
+          <div className="text-[18px] font-bold text-black">Dr. Vaishnovee Sarangi</div>
+          <div className="mt-0.5 text-[0.82rem] font-medium text-right">B.D.S. Redg. - 3057</div>
         </div>
       </div>
     </div>
@@ -1421,7 +1413,7 @@ export function PrescriptionPreview({
 
   const PatientInfo = (
     <div className="px-2 text-black" style={patientInfoHiddenStyle}>
-      <div className="grid grid-cols-2 gap-40 px-6 text-black">
+      <div className="grid grid-cols-2 gap-58 px-6 text-black">
         <div className="space-y-2 text-[0.8rem]">
           <div className="flex gap-3">
             <div className="w-24 font-medium">Patient Name</div>
@@ -1490,7 +1482,7 @@ export function PrescriptionPreview({
               {l}
             </div>
           ))}
-          <div className="flex text-left text-[15px] font-bold text-red-500">
+          <div className="flex text-left text-[15px] font-bold text-[#c0061b]">
             <div className="tracking-[0.34em]">SUNDAY CLOSE</div>
             <div>D</div>
           </div>
@@ -1597,19 +1589,19 @@ export function PrescriptionPreview({
                                   hideVisitDate={true}
                                 />
                               ))}
+
+                              {notesRows.map((r) => (
+                                <VisitRowRenderer
+                                  key={r.key}
+                                  v={v}
+                                  row={r}
+                                  medIndexesOnPage={medIdxs}
+                                  medNumberOffset={prevOffset}
+                                  hideVisitDate={true}
+                                />
+                              ))}
                             </div>
                           </div>
-
-                          {notesRows.map((r) => (
-                            <VisitRowRenderer
-                              key={r.key}
-                              v={v}
-                              row={r}
-                              medIndexesOnPage={medIdxs}
-                              medNumberOffset={prevOffset}
-                              hideVisitDate={true}
-                            />
-                          ))}
                         </>
                       ) : null}
                     </div>
@@ -1667,15 +1659,17 @@ export function PrescriptionPreview({
                         </div>
                       </div>
                     ) : null}
+
+                    {hasDocNotes ? (
+                      <div className="mt-2 text-[16px] leading-5 text-black">
+                        <span className="font-semibold">Notes: </span>
+                        <span className="whitespace-pre-line text-[#c0061b]">
+                          {doctorNotes!.trim()}
+                        </span>
+                      </div>
+                    ) : null}
                   </div>
                 </div>
-
-                {hasDocNotes ? (
-                  <div className="mt-2 text-[16px] leading-5 text-black">
-                    <span className="font-semibold">Notes: </span>
-                    <span className="whitespace-pre-line">{doctorNotes!.trim()}</span>
-                  </div>
-                ) : null}
               </>
             ) : null}
           </div>
