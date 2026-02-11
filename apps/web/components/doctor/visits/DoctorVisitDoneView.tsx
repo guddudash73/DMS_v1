@@ -294,7 +294,7 @@ export function DoctorVisitDoneView(props: {
   return (
     <>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <Card className="lg:col-span-6 rounded-2xl border bg-white p-4">
+        <Card className="lg:col-span-7 rounded-2xl border bg-white p-4">
           <div className="mb-3 flex gap-2">
             <div>
               <div className="flex items-center gap-1">
@@ -343,7 +343,7 @@ export function DoctorVisitDoneView(props: {
           />
         </Card>
 
-        <Card className="lg:col-span-6 rounded-2xl border bg-white p-4">
+        <Card className="lg:col-span-5 rounded-2xl border bg-white p-4">
           <div className="mb-3 flex items-center gap-2">
             <ImageIcon className="h-4 w-4 text-gray-700" />
             <div className="text-sm font-semibold text-gray-900">X-rays</div>

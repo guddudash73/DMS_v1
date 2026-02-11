@@ -408,7 +408,7 @@ function VisitRowRenderer(props: {
     if (!hasToothDetails) return null;
     return (
       <div data-rx-row="1" data-row-key={row.key} className="mb-2">
-        <div className="min-w-0 overflow-visible whitespace-normal">
+        <div className="min-w-0 whitespace-normal">
           <ToothDetailsBlock toothDetails={v.toothDetails} />
         </div>
       </div>
@@ -881,7 +881,7 @@ export function PrescriptionPreview({
                           {leftHasAny ? (
                             <>
                               <div className="flex items-start gap-2">
-                                <div className="w-[60px] shrink-0 text-[13px] font-bold text-black tracking-wide">
+                                <div className="w-24 text-[14px] font-bold text-black tracking-wide">
                                   {dateText}
                                 </div>
 
@@ -1503,7 +1503,7 @@ export function PrescriptionPreview({
 
     return (
       <div className="px-6">
-        <div className="space-y-3">
+        <div className="space-y-2">
           {orderedVisitIdsOnPage.map((vid) => {
             const v = vById.get(vid);
             if (!v) return null;
@@ -1568,7 +1568,7 @@ export function PrescriptionPreview({
                 ))}
 
                 {(hasLeftAny || hasRightMeds) && (
-                  <div className="grid grid-cols-[1fr_360px] gap-6">
+                  <div className="grid grid-cols-[1fr_360px] gap-4">
                     <div className="min-w-0">
                       {hasLeftAny ? (
                         <>
@@ -1642,12 +1642,12 @@ export function PrescriptionPreview({
 
     return (
       <div className="px-6">
-        <div className="grid grid-cols-[1fr_360px] gap-6">
-          <div className="min-w-0 pl-4">
+        <div className="grid grid-cols-[1fr_360px] gap-4">
+          <div className="min-w-0">
             {hasTooth || hasDocNotes ? (
               <>
-                <div className="flex items-start gap-2">
-                  <div className="w-[96px] shrink-0 text-[14px] font-bold text-black tracking-wide">
+                <div className="flex items-start">
+                  <div className="w-24 shrink-0 text-[14px] font-bold text-black tracking-wide">
                     {dateText}
                   </div>
 
@@ -1683,12 +1683,11 @@ export function PrescriptionPreview({
                     line={l}
                     number={idx + 1}
                     wrapperClassName="mb-6 ml-4"
-                    //Medicine type
-                    typeColClassName="w-[58px] shrink-0 whitespace-normal text-[14px] font-medium text-right"
+                    typeColClassName="w-[78px] shrink-0 whitespace-nowrap overflow-hidden text-ellipsis text-[14px] font-medium text-right"
                     numberColClassName="w-5 shrink-0 text-right font-medium"
-                    //medicine Description
-                    instrWrapperClassName="mt-0.5 flex items-start text-[14px] leading-4 text-black"
-                    instrNumberSpacerClassName="w-5 shrink-0"
+                    //Medicine description
+                    instrWrapperClassName="mt-1 flex items-start text-[14px] leading-4 text-black"
+                    instrNumberSpacerClassName="w-8 shrink-0"
                   />
                 ))}
               </div>
