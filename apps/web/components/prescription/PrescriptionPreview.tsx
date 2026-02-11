@@ -1413,7 +1413,7 @@ export function PrescriptionPreview({
 
   const PatientInfo = (
     <div className="px-2 text-black" style={patientInfoHiddenStyle}>
-      <div className="grid grid-cols-2 gap-58 px-6 text-black">
+      <div className="grid grid-cols-2 gap-48 px-6 text-black">
         <div className="space-y-2 text-[0.8rem]">
           <div className="flex gap-3">
             <div className="w-24 font-medium">Patient Name</div>
