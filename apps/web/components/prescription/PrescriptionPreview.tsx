@@ -321,7 +321,7 @@ function MedicineLineBlock(props: {
 
   return (
     <div className={wrapperClassName}>
-      <div className="grid grid-cols-[auto_1fr] gap-2">
+      <div className="grid grid-cols-[auto_1fr] gap-4">
         <div className={typeColClassName}>{typeText}</div>
 
         {/* ✅ entire RIGHT block italic */}
@@ -432,7 +432,7 @@ function VisitRowRenderer(props: {
           line={line}
           number={number}
           wrapperClassName="mb-6 ml-4"
-          typeColClassName="w-[58px] shrink-0 whitespace-normal text-[14px] font-medium text-right"
+          typeColClassName="w-[78px] shrink-0 whitespace-nowrap overflow-hidden text-ellipsis text-[14px] font-medium text-right"
           numberColClassName="w-5 shrink-0 text-right font-medium"
           //Medicine description
           instrWrapperClassName="mt-1 flex items-start text-[14px] leading-4 text-black"
